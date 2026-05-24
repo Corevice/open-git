@@ -1,0 +1,225 @@
+
+
+
+<meta charset="UTF-8">
+<title>サインイン | オープンソースGitHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #f6f8fa;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  .signin-wrapper {
+    flex: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 48px 16px;
+  }
+  .signin-container {
+    width: 100%;
+    max-width: 340px;
+  }
+  .signin-logo {
+    text-align: center;
+    font-size: 48px;
+    margin-bottom: 24px;
+  }
+  .signin-title {
+    text-align: center;
+    font-size: 24px;
+    font-weight: 300;
+    margin: 0 0 16px;
+    color: #1f2328;
+  }
+  .signin-card {
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .signin-card .form-group {
+    margin-bottom: 16px;
+  }
+  .form-input {
+    width: 100%;
+    padding: 5px 12px;
+    font-size: 14px;
+    line-height: 20px;
+    color: #1f2328;
+    background-color: #ffffff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    box-sizing: border-box;
+    height: 32px;
+  }
+  .form-input:focus {
+    outline: none;
+    border-color: #0969da;
+    box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.3);
+  }
+  .label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .form-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2328;
+  }
+  .forgot-link {
+    font-size: 12px;
+    color: #0969da;
+    text-decoration: none;
+  }
+  .forgot-link:hover { text-decoration: underline; }
+  .signin-btn {
+    width: 100%;
+    padding: 5px 16px;
+    background: #1f883d;
+    color: #ffffff;
+    border: 1px solid rgba(31, 35, 40, 0.15);
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    box-sizing: border-box;
+  }
+  .signin-btn:hover { background: #1a7f37; }
+  .divider {
+    display: flex;
+    align-items: center;
+    text-align: center;
+    color: #656d76;
+    font-size: 12px;
+    margin: 16px 0;
+  }
+  .divider::before, .divider::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px solid #d0d7de;
+  }
+  .divider span { padding: 0 12px; }
+  .oauth-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 16px;
+    background: #ffffff;
+    color: #1f2328;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    margin-bottom: 8px;
+    box-sizing: border-box;
+  }
+  .oauth-btn:hover { background: #f6f8fa; }
+  .signup-card {
+    background: #ffffff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 16px;
+    text-align: center;
+    font-size: 14px;
+    color: #1f2328;
+  }
+  .signup-card a {
+    color: #0969da;
+    text-decoration: none;
+    font-weight: 500;
+  }
+  .signup-card a:hover { text-decoration: underline; }
+  .footer {
+    text-align: center;
+    padding: 24px 16px;
+    font-size: 12px;
+    color: #656d76;
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .footer a {
+    color: #0969da;
+    text-decoration: none;
+  }
+  .form-error {
+    color: #cf222e;
+    font-size: 12px;
+    margin-top: 4px;
+    display: none;
+  }
+</style>
+
+
+
+<div class="signin-wrapper">
+  <div class="signin-container">
+    <div class="signin-logo">🐙</div>
+    <h1 class="signin-title">OSS GitHubにサインイン</h1>
+
+    <div class="signin-card">
+      <form action="04-dashboard.html" method="get">
+        <div class="form-group">
+          <label class="form-label" for="username">ユーザー名またはメールアドレス</label>
+          <input type="text" id="username" name="username" class="form-input" autocomplete="username">
+          <div class="form-error">ユーザー名を入力してください</div>
+        </div>
+
+        <div class="form-group">
+          <div class="label-row">
+            <label class="form-label" for="password">パスワード</label>
+            <a href="02-signin.html" class="forgot-link">パスワードをお忘れですか?</a>
+          </div>
+          <input type="password" id="password" name="password" class="form-input" autocomplete="current-password">
+          <div class="form-error">パスワードを入力してください</div>
+        </div>
+
+        <button type="submit" class="signin-btn">サインイン</button>
+      </form>
+
+      <div class="divider"><span>または</span></div>
+
+      <a href="04-dashboard.html" class="oauth-btn">
+        <span style="font-size:16px;">🔐</span>
+        <span>パスキーでサインイン</span>
+      </a>
+      <a href="04-dashboard.html" class="oauth-btn">
+        <span style="font-size:16px;">🌐</span>
+        <span>Googleでサインイン</span>
+      </a>
+      <a href="04-dashboard.html" class="oauth-btn">
+        <span style="font-size:16px;">🦊</span>
+        <span>GitLabでサインイン</span>
+      </a>
+    </div>
+
+    <div class="signup-card">
+      アカウントをお持ちでない方は <a href="03-signup.html">新規登録</a>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  <a href="02-signin.html">利用規約</a>
+  <a href="02-signin.html">プライバシー</a>
+  <a href="02-signin.html">セキュリティ</a>
+  <a href="02-signin.html">お問い合わせ</a>
+  <span>© 2025 OSS GitHub</span>
+</div>
+
+

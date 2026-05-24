@@ -1,0 +1,333 @@
+
+
+
+<meta charset="UTF-8">
+<title>Issue一覧／詳細 - オープンソースGitHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { margin: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .app-bar { position: sticky; top: 0; z-index: 100; display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; background: #24292f; color: #fff; border-bottom: 1px solid #d0d7de; }
+  .header-brand { font-weight: 700; font-size: 18px; color: #fff; text-decoration: none; }
+  .header-nav { display: flex; gap: 16px; }
+  .header-nav a { color: #fff; text-decoration: none; opacity: 0.85; font-size: 14px; }
+  .header-nav a:hover { opacity: 1; }
+  .header-actions { display: flex; gap: 8px; }
+  .repo-bar { background: #fff; border-bottom: 1px solid #d0d7de; padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
+  .repo-bar .mono { color: #0969da; font-size: 16px; }
+  .container { max-width: 1280px; margin: 0 auto; padding: 24px; display: grid; grid-template-columns: 1fr 380px; gap: 20px; }
+  .issue-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 16px; }
+  .issue-header h1 { margin: 0; font-size: 26px; font-weight: 600; }
+  .issue-header h1 .num { color: #59636e; font-weight: 400; }
+  .filter-bar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #f6f8fa; border: 1px solid #d0d7de; border-bottom: none; border-radius: 6px 6px 0 0; flex-wrap: wrap; }
+  .filter-bar .tabs { display: flex; gap: 16px; font-size: 14px; }
+  .filter-bar .tabs a { text-decoration: none; color: #1f2328; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+  .filter-bar .tabs a.active { color: #1f2328; }
+  .filter-bar .tabs a.muted { color: #59636e; font-weight: 400; }
+  .filter-bar .filters { margin-left: auto; display: flex; gap: 8px; }
+  .filter-bar select { padding: 5px 10px; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; font-size: 13px; }
+  .issue-list { border: 1px solid #d0d7de; border-radius: 0 0 6px 6px; background: #fff; }
+  .issue-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; border-top: 1px solid #d0d7de; }
+  .issue-row:first-child { border-top: none; }
+  .issue-row:hover { background: #f6f8fa; }
+  .issue-row.selected { background: #ddf4ff; }
+  .issue-icon { color: #1a7f37; font-size: 18px; line-height: 1.2; }
+  .issue-icon.closed { color: #8250df; }
+  .issue-main { flex: 1; }
+  .issue-title-link { font-size: 15px; font-weight: 600; color: #1f2328; text-decoration: none; }
+  .issue-title-link:hover { color: #0969da; }
+  .issue-meta { font-size: 12px; color: #59636e; margin-top: 4px; }
+  .issue-labels { display: inline-flex; gap: 4px; margin-left: 8px; }
+  .label { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 500; }
+  .label-bug { background: #ffd5d3; color: #82071e; }
+  .label-feature { background: #c0e8ff; color: #033d8b; }
+  .label-docs { background: #d4f4dd; color: #0a3622; }
+  .label-good { background: #fff8c5; color: #633c01; }
+  .issue-comments { color: #59636e; font-size: 12px; padding-top: 6px; }
+  .detail-card { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: 20px; margin-top: 24px; }
+  .badge-open { background: #1f883d; color: #fff; padding: 5px 12px; border-radius: 999px; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 4px; }
+  .author-line { color: #59636e; font-size: 14px; margin-top: 8px; }
+  .author-line strong { color: #1f2328; }
+  .comment-thread { margin-top: 20px; }
+  .comment { display: flex; gap: 12px; margin-bottom: 16px; }
+  .comment-body { flex: 1; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; }
+  .comment-header { padding: 8px 12px; background: #f6f8fa; border-bottom: 1px solid #d0d7de; border-radius: 6px 6px 0 0; font-size: 13px; }
+  .comment-header strong { margin-right: 4px; }
+  .comment-content { padding: 12px; font-size: 14px; line-height: 1.6; }
+  .comment-content code { background: #eaeef2; padding: 2px 5px; border-radius: 3px; font-family: ui-monospace, monospace; font-size: 12px; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: #ddd; display: flex; align-items: center; justify-content: center; font-weight: 600; color: #fff; flex-shrink: 0; }
+  .avatar.a1 { background: #0969da; }
+  .avatar.a2 { background: #8250df; }
+  .avatar.a3 { background: #bf8700; }
+  .avatar.a4 { background: #cf222e; }
+  .comment-form textarea { width: 100%; min-height: 100px; padding: 10px; border: 1px solid #d0d7de; border-radius: 6px; font-family: inherit; font-size: 14px; resize: vertical; box-sizing: border-box; }
+  .comment-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; font-size: 14px; cursor: pointer; text-decoration: none; color: #1f2328; font-weight: 500; }
+  .btn-primary { background: #1f883d; color: #fff; border-color: rgba(31,35,40,0.15); }
+  .btn-danger { background: #fff; color: #cf222e; border-color: #d0d7de; }
+  .btn-outline { background: #fff; }
+  .sidebar-panel { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: 16px; }
+  .sidebar-panel-header { padding: 10px 14px; border-bottom: 1px solid #d0d7de; font-size: 13px; font-weight: 600; color: #59636e; display: flex; justify-content: space-between; align-items: center; }
+  .sidebar-panel-body { padding: 12px 14px; font-size: 13px; }
+  .sidebar-panel-body .empty { color: #59636e; }
+  .assignee-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  .assignee-row .avatar { width: 24px; height: 24px; font-size: 11px; }
+  .label-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .timeline-item { font-size: 12px; color: #59636e; padding: 6px 0; border-bottom: 1px solid #f1f3f5; }
+  .timeline-item:last-child { border-bottom: none; }
+  .new-issue-btn { background: #1f883d; color: #fff; padding: 6px 14px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 500; }
+</style>
+
+
+
+<header class="app-bar">
+  <div style="display:flex; align-items:center; gap:24px;">
+    <a href="01-home.html" class="header-brand">🐙 OpenHub</a>
+    <nav class="header-nav">
+      <a href="03-explore.html">Explore</a>
+      <a href="04-search.html">Search</a>
+      <a href="05-dashboard.html">Dashboard</a>
+    </nav>
+  </div>
+  <div class="header-actions">
+    <a href="22-notifications.html" class="btn">🔔</a>
+    <a href="20-profile.html" class="btn">👤 octocat</a>
+  </div>
+</header>
+
+<div class="repo-bar">
+  <span>📦</span>
+  <a href="20-profile.html" style="text-decoration:none; color:#0969da;">octocat</a>
+  <span style="color:#59636e;">/</span>
+  <a href="07-repo-detail.html" class="mono" style="text-decoration:none; font-weight:600;">awesome-project</a>
+  <span class="badge" style="background:#f6f8fa; border:1px solid #d0d7de; padding:2px 8px; border-radius:999px; font-size:12px;">Public</span>
+  <div style="margin-left:auto; display:flex; gap:8px;">
+    <a href="12-pr-list.html" class="btn">🔀 Pull Requests</a>
+    <a href="07-repo-detail.html" class="btn">← リポジトリへ戻る</a>
+  </div>
+</div>
+
+<div class="container">
+
+  <main>
+    <div class="issue-header">
+      <h1>Issues</h1>
+      <a href="11-issue-list.html" class="new-issue-btn">New issue</a>
+    </div>
+
+    
+    <div class="filter-bar">
+      <div class="tabs">
+        <a href="11-issue-list.html" class="active">🟢 24 Open</a>
+        <a href="11-issue-list.html" class="muted">✓ 142 Closed</a>
+      </div>
+      <div class="filters">
+        <select><option>Author ▾</option></select>
+        <select><option>Label ▾</option></select>
+        <select><option>Projects ▾</option></select>
+        <select><option>Milestones ▾</option></select>
+        <select><option>Assignee ▾</option></select>
+        <select><option>Sort: Newest ▾</option></select>
+      </div>
+    </div>
+
+    
+    <div class="issue-list">
+      <div class="issue-row selected">
+        <span class="issue-icon">🟢</span>
+        <div class="issue-main">
+          <a href="11-issue-list.html" class="issue-title-link">Cannot resolve path when using nested workspace configuration</a>
+          <span class="issue-labels">
+            <span class="label label-bug">bug</span>
+            <span class="label label-good">good first issue</span>
+          </span>
+          <div class="issue-meta">#1247 opened 2 days ago by <strong>alice-dev</strong> · 3 comments</div>
+        </div>
+        <div class="issue-comments">💬 3</div>
+      </div>
+
+      <div class="issue-row">
+        <span class="issue-icon">🟢</span>
+        <div class="issue-main">
+          <a href="11-issue-list.html" class="issue-title-link">Feature request: Support for TypeScript 5.3 decorators</a>
+          <span class="issue-labels">
+            <span class="label label-feature">enhancement</span>
+          </span>
+          <div class="issue-meta">#1245 opened 3 days ago by <strong>bob-coder</strong> · 8 comments</div>
+        </div>
+        <div class="issue-comments">💬 8</div>
+      </div>
+
+      <div class="issue-row">
+        <span class="issue-icon">🟢</span>
+        <div class="issue-main">
+          <a href="11-issue-list.html" class="issue-title-link">Documentation: Missing examples for plugin API</a>
+          <span class="issue-labels">
+            <span class="label label-docs">documentation</span>
+          </span>
+          <div class="issue-meta">#1240 opened 5 days ago by <strong>carol-w</strong> · 1 comment</div>
+        </div>
+        <div class="issue-comments">💬 1</div>
+      </div>
+
+      <div class="issue-row">
+        <span class="issue-icon">🟢</span>
+        <div class="issue-main">
+          <a href="11-issue-list.html" class="issue-title-link">Performance regression in v4.2.0 build process</a>
+          <span class="issue-labels">
+            <span class="label label-bug">bug</span>
+          </span>
+          <div class="issue-meta">#1238 opened 1 week ago by <strong>dave-x</strong> · 12 comments</div>
+        </div>
+        <div class="issue-comments">💬 12</div>
+      </div>
+
+      <div class="issue-row">
+        <span class="issue-icon">🟢</span>
+        <div class="issue-main">
+          <a href="11-issue-list.html" class="issue-title-link">Add dark mode support to documentation site</a>
+          <span class="issue-labels">
+            <span class="label label-feature">enhancement</span>
+            <span class="label label-good">good first issue</span>
+          </span>
+          <div class="issue-meta">#1235 opened 2 weeks ago by <strong>eve-design</strong> · 5 comments</div>
+        </div>
+        <div class="issue-comments">💬 5</div>
+      </div>
+    </div>
+
+    
+    <div class="detail-card">
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px;">
+        <h1 style="margin:0; font-size:26px; font-weight:500;">Cannot resolve path when using nested workspace configuration <span style="color:#59636e; font-weight:400;">#1247</span></h1>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px; margin-top:12px; padding-bottom:16px; border-bottom:1px solid #d0d7de;">
+        <span class="badge-open">🟢 Open</span>
+        <span style="font-size:14px; color:#59636e;"><strong style="color:#1f2328;">alice-dev</strong> opened this issue 2 days ago · 3 comments</span>
+        <div style="margin-left:auto; display:flex; gap:8px;">
+          <a href="11-issue-list.html" class="btn btn-outline">✏️ 編集</a>
+          <a href="11-issue-list.html" class="btn">🔗 共有</a>
+        </div>
+      </div>
+
+      
+      <div class="comment-thread">
+        <div class="comment">
+          <div class="avatar a1">A</div>
+          <div class="comment-body">
+            <div class="comment-header"><strong>alice-dev</strong> commented 2 days ago</div>
+            <div class="comment-content">
+              <p>When I configure nested workspaces in <code>package.json</code>, the bundler fails to resolve relative paths between sub-packages.</p>
+              <p><strong>Steps to reproduce:</strong></p>
+              <ol>
+                <li>Create a workspace with <code>packages/*</code> structure</li>
+                <li>Add a nested workspace inside one of the packages</li>
+                <li>Run <code>npm run build</code></li>
+              </ol>
+              <p>Expected: builds succeed. Actual: <code>Cannot find module '../shared/utils'</code></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="comment">
+          <div class="avatar a2">M</div>
+          <div class="comment-body">
+            <div class="comment-header"><strong>maintainer-bot</strong> commented 2 days ago</div>
+            <div class="comment-content">
+              <p>Thanks for the detailed report! I can reproduce this locally. Looks like the resolver is not traversing nested workspace boundaries correctly.</p>
+              <p>Labeling as <span class="label label-bug">bug</span> and <span class="label label-good">good first issue</span>.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="comment">
+          <div class="avatar a3">B</div>
+          <div class="comment-body">
+            <div class="comment-header"><strong>bob-coder</strong> commented 1 day ago</div>
+            <div class="comment-content">
+              <p>I'd like to take this on! Could someone point me to the resolver module?</p>
+            </div>
+          </div>
+        </div>
+
+        
+        <div class="comment">
+          <div class="avatar a4">O</div>
+          <div class="comment-body comment-form" style="padding:12px;">
+            <textarea placeholder="Leave a comment..."></textarea>
+            <div class="comment-form-actions">
+              <a href="11-issue-list.html" class="btn btn-danger">Close issue</a>
+              <a href="11-issue-list.html" class="btn btn-primary">Comment</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  
+  <aside>
+    <div class="sidebar-panel">
+      <div class="sidebar-panel-header">Assignees <a href="11-issue-list.html" style="text-decoration:none; color:#59636e;">⚙️</a></div>
+      <div class="sidebar-panel-body">
+        <div class="assignee-row"><div class="avatar a2">M</div><span>maintainer-bot</span></div>
+        <div class="assignee-row"><div class="avatar a3">B</div><span>bob-coder</span></div>
+      </div>
+    </div>
+
+    <div class="sidebar-panel">
+      <div class="sidebar-panel-header">Labels <a href="11-issue-list.html" style="text-decoration:none; color:#59636e;">⚙️</a></div>
+      <div class="sidebar-panel-body">
+        <div class="label-list">
+          <span class="label label-bug">bug</span>
+          <span class="label label-good">good first issue</span>
+          <span class="label label-docs">help wanted</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-panel">
+      <div class="sidebar-panel-header">Milestone <a href="11-issue-list.html" style="text-decoration:none; color:#59636e;">⚙️</a></div>
+      <div class="sidebar-panel-body">
+        <a href="11-issue-list.html" style="text-decoration:none; color:#0969da;">v4.3.0 Release</a>
+        <div style="margin-top:6px; background:#eaeef2; border-radius:4px; height:6px; overflow:hidden;">
+          <div style="background:#1f883d; width:62%; height:100%;"></div>
+        </div>
+        <div style="margin-top:4px; color:#59636e; font-size:12px;">62% complete · 23 open / 38 closed</div>
+      </div>
+    </div>
+
+    <div class="sidebar-panel">
+      <div class="sidebar-panel-header">Development</div>
+      <div class="sidebar-panel-body">
+        <a href="12-pr-list.html" style="text-decoration:none; color:#0969da;">🔀 関連PR #1251 を表示</a>
+        <div style="color:#59636e; font-size:12px; margin-top:4px;">Successfully linking branch will close this issue.</div>
+      </div>
+    </div>
+
+    <div class="sidebar-panel">
+      <div class="sidebar-panel-header">Participants</div>
+      <div class="sidebar-panel-body">
+        <div style="display:flex; gap:6px;">
+          <div class="avatar a1" style="width:28px; height:28px; font-size:12px;">A</div>
+          <div class="avatar a2" style="width:28px; height:28px; font-size:12px;">M</div>
+          <div class="avatar a3" style="width:28px; height:28px; font-size:12px;">B</div>
+        </div>
+        <div style="margin-top:8px; color:#59636e; font-size:12px;">3 participants</div>
+      </div>
+    </div>
+
+    <div class="sidebar-panel">
+      <div class="sidebar-panel-header">Timeline</div>
+      <div class="sidebar-panel-body">
+        <div class="timeline-item">🟢 Opened by alice-dev · 2 days ago</div>
+        <div class="timeline-item">🏷️ Labeled "bug" · 2 days ago</div>
+        <div class="timeline-item">👤 Assigned to maintainer-bot · 2 days ago</div>
+        <div class="timeline-item">💬 3 comments</div>
+        <div class="timeline-item">🔀 Linked PR #1251 · 1 day ago</div>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+

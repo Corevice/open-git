@@ -1,0 +1,395 @@
+
+
+
+<meta charset="UTF-8">
+<title>Actions実行: build-and-test #482 - オープンソースGitHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { margin: 0; background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .page-wrap { max-width: 1280px; margin: 0 auto; }
+  .app-bar { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
+  .breadcrumb { color: #8b949e; font-size: 14px; }
+  .breadcrumb a { color: #58a6ff; text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  .detail-header { padding: 20px 24px; border-bottom: 1px solid #30363d; background: #0d1117; }
+  .detail-header h1 { margin: 0 0 8px 0; font-size: 22px; font-weight: 600; color: #f0f6fc; display: flex; align-items: center; gap: 12px; }
+  .header-meta { color: #8b949e; font-size: 13px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .header-actions-row { display: flex; gap: 8px; margin-top: 12px; }
+  .main-grid { display: grid; grid-template-columns: 65% 35%; gap: 24px; padding: 24px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; margin-bottom: 16px; }
+  .card-header { padding: 12px 16px; border-bottom: 1px solid #30363d; display: flex; justify-content: space-between; align-items: center; }
+  .card-title { font-size: 14px; font-weight: 600; color: #f0f6fc; margin: 0; }
+  .card-body { padding: 16px; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+  .badge-success { background: #1f6f3f; color: #aff5b4; }
+  .badge-danger { background: #6e2333; color: #ffa198; }
+  .badge-warning { background: #6e5320; color: #f8e3a1; }
+  .badge-primary { background: #1f4775; color: #79c0ff; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; text-decoration: none; font-size: 13px; cursor: pointer; }
+  .btn-primary { background: #238636; border-color: #2ea043; color: #fff; }
+  .btn-danger { background: #21262d; border-color: #f85149; color: #f85149; }
+  .btn-outline { background: transparent; }
+  .btn-sm { padding: 4px 8px; font-size: 12px; }
+  .job-tree { font-size: 13px; }
+  .job-item { padding: 10px 12px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .job-item.active { background: #1c2128; border-left: 3px solid #2ea043; padding-left: 9px; }
+  .job-item:hover { background: #1c2128; }
+  .step-list { padding-left: 32px; background: #0d1117; }
+  .step-item { padding: 6px 12px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #c9d1d9; border-bottom: 1px solid #161b22; }
+  .step-duration { margin-left: auto; color: #8b949e; font-family: ui-monospace, monospace; font-size: 11px; }
+  .status-icon { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }
+  .status-success { color: #3fb950; }
+  .status-fail { color: #f85149; }
+  .status-running { color: #d29922; }
+  .status-skipped { color: #8b949e; }
+  .log-console { background: #010409; border: 1px solid #30363d; border-radius: 6px; padding: 12px 16px; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; line-height: 1.7; color: #c9d1d9; max-height: 480px; overflow-y: auto; }
+  .log-line { display: flex; gap: 12px; }
+  .log-num { color: #6e7681; min-width: 32px; text-align: right; user-select: none; }
+  .log-time { color: #6e7681; min-width: 64px; }
+  .log-msg { flex: 1; white-space: pre-wrap; word-break: break-all; }
+  .log-msg.err { color: #ffa198; }
+  .log-msg.warn { color: #f8e3a1; }
+  .log-msg.ok { color: #aff5b4; }
+  .log-msg.cmd { color: #79c0ff; }
+  .log-section { color: #d2a8ff; font-weight: 600; margin-top: 4px; }
+  .workflow-list .list-item { padding: 10px 12px; border-bottom: 1px solid #21262d; display: flex; flex-direction: column; gap: 4px; cursor: pointer; text-decoration: none; color: inherit; }
+  .workflow-list .list-item:hover { background: #1c2128; }
+  .workflow-list .list-item.active { background: #1c2128; border-left: 3px solid #58a6ff; padding-left: 9px; }
+  .run-history-item { padding: 10px 12px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 10px; font-size: 13px; text-decoration: none; color: inherit; }
+  .run-history-item:hover { background: #1c2128; }
+  .run-history-item.active { background: #1c2128; }
+  .meta-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #21262d; font-size: 13px; }
+  .meta-row:last-child { border-bottom: none; }
+  .meta-label { color: #8b949e; }
+  .meta-value { color: #c9d1d9; font-family: ui-monospace, monospace; }
+  .timeline { position: relative; padding-left: 20px; }
+  .timeline-item { position: relative; padding-bottom: 14px; font-size: 12px; color: #8b949e; }
+  .timeline-item::before { content: ''; position: absolute; left: -16px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: #2ea043; }
+  .timeline-item::after { content: ''; position: absolute; left: -13px; top: 12px; bottom: -4px; width: 2px; background: #30363d; }
+  .timeline-item:last-child::after { display: none; }
+  .timeline-item strong { color: #c9d1d9; display: block; font-size: 13px; }
+  .duration-pill { background: #21262d; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-family: ui-monospace, monospace; color: #8b949e; }
+  .sha-link { color: #58a6ff; font-family: ui-monospace, monospace; text-decoration: none; }
+  .sha-link:hover { text-decoration: underline; }
+  .ansi-green { color: #3fb950; }
+  .ansi-cyan { color: #79c0ff; }
+  .icon-cap { background: #21262d; padding: 2px 6px; border-radius: 3px; font-size: 11px; color: #8b949e; }
+</style>
+
+
+<div class="page-wrap">
+
+  <div class="app-bar">
+    <div style="font-weight: 600; color: #f0f6fc;">⎇ OctoForge</div>
+    <div class="breadcrumb">
+      <a href="07-repo-detail.html">acme-corp/payment-gateway</a>
+      <span> / </span>
+      <span style="color: #c9d1d9;">Actions</span>
+      <span> / </span>
+      <span style="color: #c9d1d9;">build-and-test</span>
+      <span> / </span>
+      <span style="color: #f0f6fc;">#482</span>
+    </div>
+    <div style="margin-left: auto; display: flex; gap: 8px;">
+      <a href="07-repo-detail.html" class="btn">← リポジトリへ戻る</a>
+    </div>
+  </div>
+
+  <div class="detail-header">
+    <h1>
+      <span>build-and-test #482</span>
+      <span class="badge badge-success">● success</span>
+    </h1>
+    <div class="header-meta">
+      <span>🔀 トリガー: push by <strong style="color:#c9d1d9;">tanaka-dev</strong></span>
+      <span>🌿 ブランチ: <span class="mono" style="color:#79c0ff;">feature/oauth-pkce</span></span>
+      <span>📝 コミット: <a href="08-file-viewer.html" class="sha-link">a7f3e21</a></span>
+      <span>⏱ 実行時間: <span class="duration-pill">3m 42s</span></span>
+      <span>📅 2024-03-18 14:32 JST</span>
+    </div>
+    <div class="header-actions-row">
+      <a href="13-actions-runs.html" class="btn btn-primary">🔄 ワークフローを再実行</a>
+      <a href="13-actions-runs.html" class="btn">⟲ 失敗したジョブのみ再実行</a>
+      <a href="13-actions-runs.html" class="btn btn-danger">⊘ 実行をキャンセル</a>
+      <a href="08-file-viewer.html" class="btn btn-outline">📄 ワークフローファイル</a>
+      <a href="13-actions-runs.html" class="btn btn-outline">⬇ ログをダウンロード</a>
+    </div>
+  </div>
+
+  <div class="main-grid">
+
+    <div class="main-content">
+
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">ジョブ &amp; ステップ</h2>
+          <span style="font-size: 12px; color: #8b949e;">4 jobs · 全て成功</span>
+        </div>
+        <div class="job-tree">
+
+          <div class="job-item">
+            <span class="status-icon status-success">✓</span>
+            <span style="font-weight: 600;">setup</span>
+            <span class="duration-pill" style="margin-left:auto;">12s</span>
+          </div>
+
+          <div class="job-item active">
+            <span class="status-icon status-success">✓</span>
+            <span style="font-weight: 600;">test (ubuntu-latest, node-20)</span>
+            <span class="duration-pill" style="margin-left:auto;">2m 04s</span>
+          </div>
+          <div class="step-list">
+            <div class="step-item"><span class="status-icon status-success">✓</span> Set up job <span class="step-duration">1s</span></div>
+            <div class="step-item"><span class="status-icon status-success">✓</span> Checkout repository <span class="step-duration">3s</span></div>
+            <div class="step-item"><span class="status-icon status-success">✓</span> Setup Node.js 20 <span class="step-duration">4s</span></div>
+            <div class="step-item"><span class="status-icon status-success">✓</span> Install dependencies (pnpm install) <span class="step-duration">28s</span></div>
+            <div class="step-item" style="background:#1c2128;"><span class="status-icon status-success">✓</span> <strong style="color:#f0f6fc;">Run unit tests</strong> <span class="step-duration">1m 18s</span></div>
+            <div class="step-item"><span class="status-icon status-success">✓</span> Upload coverage report <span class="step-duration">7s</span></div>
+            <div class="step-item"><span class="status-icon status-success">✓</span> Post Setup Node.js <span class="step-duration">1s</span></div>
+            <div class="step-item"><span class="status-icon status-skipped">○</span> Complete job <span class="step-duration">0s</span></div>
+          </div>
+
+          <div class="job-item">
+            <span class="status-icon status-success">✓</span>
+            <span style="font-weight: 600;">lint</span>
+            <span class="duration-pill" style="margin-left:auto;">48s</span>
+          </div>
+
+          <div class="job-item">
+            <span class="status-icon status-success">✓</span>
+            <span style="font-weight: 600;">build-artifact</span>
+            <span class="duration-pill" style="margin-left:auto;">38s</span>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">📜 ログコンソール — test › Run unit tests</h2>
+          <div style="display:flex; gap:6px;">
+            <a href="13-actions-runs.html" class="btn btn-sm">🔍 検索</a>
+            <a href="13-actions-runs.html" class="btn btn-sm">⤢ 全画面</a>
+            <a href="13-actions-runs.html" class="btn btn-sm">⬇ raw</a>
+          </div>
+        </div>
+        <div class="card-body" style="padding: 0;">
+          <div class="log-console">
+            <div class="log-line"><span class="log-num">1</span><span class="log-time">14:32:18</span><span class="log-msg log-section">▸ Run pnpm test --coverage</span></div>
+            <div class="log-line"><span class="log-num">2</span><span class="log-time">14:32:18</span><span class="log-msg cmd">$ pnpm test --coverage</span></div>
+            <div class="log-line"><span class="log-num">3</span><span class="log-time">14:32:19</span><span class="log-msg"></span></div>
+            <div class="log-line"><span class="log-num">4</span><span class="log-time">14:32:19</span><span class="log-msg">&gt; payment-gateway@2.4.1 test /home/runner/work/payment-gateway</span></div>
+            <div class="log-line"><span class="log-num">5</span><span class="log-time">14:32:19</span><span class="log-msg">&gt; vitest run --coverage</span></div>
+            <div class="log-line"><span class="log-num">6</span><span class="log-time">14:32:20</span><span class="log-msg"></span></div>
+            <div class="log-line"><span class="log-num">7</span><span class="log-time">14:32:21</span><span class="log-msg ansi-cyan"> RUN  v1.4.0  /home/runner/work/payment-gateway</span></div>
+            <div class="log-line"><span class="log-num">8</span><span class="log-time">14:32:21</span><span class="log-msg">      Coverage enabled with v8</span></div>
+            <div class="log-line"><span class="log-num">9</span><span class="log-time">14:32:22</span><span class="log-msg"></span></div>
+            <div class="log-line"><span class="log-num">10</span><span class="log-time">14:32:24</span><span class="log-msg ok"> ✓ src/auth/oauth.test.ts (14 tests) 312ms</span></div>
+            <div class="log-line"><span class="log-num">11</span><span class="log-time">14:32:27</span><span class="log-msg ok"> ✓ src/auth/pkce.test.ts (8 tests) 198ms</span></div>
+            <div class="log-line"><span class="log-num">12</span><span class="log-time">14:32:31</span><span class="log-msg ok"> ✓ src/payment/stripe.test.ts (22 tests) 487ms</span></div>
+            <div class="log-line"><span class="log-num">13</span><span class="log-time">14:32:38</span><span class="log-msg ok"> ✓ src/payment/refund.test.ts (11 tests) 421ms</span></div>
+            <div class="log-line"><span class="log-num">14</span><span class="log-time">14:32:45</span><span class="log-msg warn"> ⚠ src/webhook/signature.test.ts: deprecation warning — `crypto.createCipher` is deprecated</span></div>
+            <div class="log-line"><span class="log-num">15</span><span class="log-time">14:32:51</span><span class="log-msg ok"> ✓ src/webhook/signature.test.ts (9 tests) 268ms</span></div>
+            <div class="log-line"><span class="log-num">16</span><span class="log-time">14:32:58</span><span class="log-msg ok"> ✓ src/db/transaction.test.ts (18 tests) 612ms</span></div>
+            <div class="log-line"><span class="log-num">17</span><span class="log-time">14:33:09</span><span class="log-msg ok"> ✓ src/api/handlers.test.ts (27 tests) 891ms</span></div>
+            <div class="log-line"><span class="log-num">18</span><span class="log-time">14:33:21</span><span class="log-msg ok"> ✓ src/utils/validator.test.ts (15 tests) 142ms</span></div>
+            <div class="log-line"><span class="log-num">19</span><span class="log-time">14:33:28</span><span class="log-msg"></span></div>
+            <div class="log-line"><span class="log-num">20</span><span class="log-time">14:33:29</span><span class="log-msg log-section">▸ Test Files  8 passed (8)</span></div>
+            <div class="log-line"><span class="log-num">21</span><span class="log-time">14:33:29</span><span class="log-msg log-section">▸      Tests  124 passed (124)</span></div>
+            <div class="log-line"><span class="log-num">22</span><span class="log-time">14:33:29</span><span class="log-msg">   Start at  14:32:21</span></div>
+            <div class="log-line"><span class="log-num">23</span><span class="log-time">14:33:29</span><span class="log-msg">   Duration  1m 08s</span></div>
+            <div class="log-line"><span class="log-num">24</span><span class="log-time">14:33:30</span><span class="log-msg"></span></div>
+            <div class="log-line"><span class="log-num">25</span><span class="log-time">14:33:30</span><span class="log-msg ansi-green">  % Coverage report from v8</span></div>
+            <div class="log-line"><span class="log-num">26</span><span class="log-time">14:33:30</span><span class="log-msg">─────────────────────────────────────────────────────────</span></div>
+            <div class="log-line"><span class="log-num">27</span><span class="log-time">14:33:30</span><span class="log-msg">File             | % Stmts | % Branch | % Funcs | % Lines</span></div>
+            <div class="log-line"><span class="log-num">28</span><span class="log-time">14:33:30</span><span class="log-msg">─────────────────────────────────────────────────────────</span></div>
+            <div class="log-line"><span class="log-num">29</span><span class="log-time">14:33:30</span><span class="log-msg ok">All files        |   94.21 |    88.74 |   96.12 |   94.21</span></div>
+            <div class="log-line"><span class="log-num">30</span><span class="log-time">14:33:30</span><span class="log-msg">─────────────────────────────────────────────────────────</span></div>
+            <div class="log-line"><span class="log-num">31</span><span class="log-time">14:33:31</span><span class="log-msg ok">✓ Step completed successfully in 1m 18s</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">📦 アーティファクト</h2>
+          <span style="font-size: 12px; color: #8b949e;">90日間保持</span>
+        </div>
+        <div class="card-body" style="padding: 0;">
+          <div style="padding: 12px 16px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 12px;">
+            <span style="font-size:18px;">📊</span>
+            <div style="flex:1;">
+              <div style="font-size:13px; color:#58a6ff; font-weight:500;">coverage-report</div>
+              <div style="font-size:12px; color:#8b949e;">2.4 MB · expires in 89 days</div>
+            </div>
+            <a href="13-actions-runs.html" class="btn btn-sm">⬇ ダウンロード</a>
+          </div>
+          <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px;">
+            <span style="font-size:18px;">📦</span>
+            <div style="flex:1;">
+              <div style="font-size:13px; color:#58a6ff; font-weight:500;">payment-gateway-dist</div>
+              <div style="font-size:12px; color:#8b949e;">8.7 MB · expires in 89 days</div>
+            </div>
+            <a href="13-actions-runs.html" class="btn btn-sm">⬇ ダウンロード</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <aside class="sidebar-content">
+
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">⚙ ワークフロー一覧</h2>
+        </div>
+        <div class="workflow-list">
+          <a href="13-actions-runs.html" class="list-item active">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="status-icon status-success">✓</span>
+              <strong style="color:#f0f6fc; font-size:13px;">build-and-test</strong>
+            </div>
+            <div style="font-size:11px; color:#8b949e; padding-left:24px;">.github/workflows/ci.yml</div>
+          </a>
+          <a href="13-actions-runs.html" class="list-item">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="status-icon status-success">✓</span>
+              <strong style="color:#c9d1d9; font-size:13px;">deploy-staging</strong>
+            </div>
+            <div style="font-size:11px; color:#8b949e; padding-left:24px;">.github/workflows/staging.yml</div>
+          </a>
+          <a href="13-actions-runs.html" class="list-item">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="status-icon status-fail">✕</span>
+              <strong style="color:#c9d1d9; font-size:13px;">e2e-nightly</strong>
+            </div>
+            <div style="font-size:11px; color:#8b949e; padding-left:24px;">.github/workflows/e2e.yml</div>
+          </a>
+          <a href="13-actions-runs.html" class="list-item">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="status-icon status-running">●</span>
+              <strong style="color:#c9d1d9; font-size:13px;">codeql-analysis</strong>
+            </div>
+            <div style="font-size:11px; color:#8b949e; padding-left:24px;">.github/workflows/codeql.yml</div>
+          </a>
+          <a href="13-actions-runs.html" class="list-item">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="status-icon status-skipped">○</span>
+              <strong style="color:#c9d1d9; font-size:13px;">release</strong>
+            </div>
+            <div style="font-size:11px; color:#8b949e; padding-left:24px;">.github/workflows/release.yml</div>
+          </a>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">📋 実行履歴 (build-and-test)</h2>
+        </div>
+        <div>
+          <a href="13-actions-runs.html" class="run-history-item active">
+            <span class="status-icon status-success">✓</span>
+            <div style="flex:1;">
+              <div style="color:#f0f6fc;">#482 feature/oauth-pkce</div>
+              <div style="font-size:11px; color:#8b949e;">tanaka-dev · 2分前</div>
+            </div>
+            <span class="duration-pill">3m 42s</span>
+          </a>
+          <a href="13-actions-runs.html" class="run-history-item">
+            <span class="status-icon status-success">✓</span>
+            <div style="flex:1;">
+              <div>#481 main</div>
+              <div style="font-size:11px; color:#8b949e;">sato-eng · 18分前</div>
+            </div>
+            <span class="duration-pill">3m 28s</span>
+          </a>
+          <a href="13-actions-runs.html" class="run-history-item">
+            <span class="status-icon status-fail">✕</span>
+            <div style="flex:1;">
+              <div>#480 fix/webhook-retry</div>
+              <div style="font-size:11px; color:#8b949e;">yamada-dev · 1時間前</div>
+            </div>
+            <span class="duration-pill">2m 11s</span>
+          </a>
+          <a href="13-actions-runs.html" class="run-history-item">
+            <span class="status-icon status-success">✓</span>
+            <div style="flex:1;">
+              <div>#479 main</div>
+              <div style="font-size:11px; color:#8b949e;">sato-eng · 3時間前</div>
+            </div>
+            <span class="duration-pill">3m 51s</span>
+          </a>
+          <a href="13-actions-runs.html" class="run-history-item">
+            <span class="status-icon status-warning" style="color:#d29922;">⊘</span>
+            <div style="flex:1;">
+              <div>#478 chore/deps-update</div>
+              <div style="font-size:11px; color:#8b949e;">dependabot · 5時間前</div>
+            </div>
+            <span class="duration-pill">cancelled</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">ℹ メタ情報</h2>
+        </div>
+        <div class="card-body">
+          <div class="meta-row"><span class="meta-label">Run ID</span><span class="meta-value">7891234567</span></div>
+          <div class="meta-row"><span class="meta-label">Attempt</span><span class="meta-value">1 / 1</span></div>
+          <div class="meta-row"><span class="meta-label">Runner</span><span class="meta-value">ubuntu-22.04</span></div>
+          <div class="meta-row"><span class="meta-label">Event</span><span class="meta-value">push</span></div>
+          <div class="meta-row"><span class="meta-label">Actor</span><span class="meta-value">tanaka-dev</span></div>
+          <div class="meta-row"><span class="meta-label">Workflow</span><a href="08-file-viewer.html" class="sha-link">ci.yml</a></div>
+          <div class="meta-row"><span class="meta-label">課金時間</span><span class="meta-value">4m 12s</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">⏱ タイムライン</h2>
+        </div>
+        <div class="card-body">
+          <div class="timeline">
+            <div class="timeline-item">
+              <strong>キューに登録</strong>
+              14:32:15 JST · waited 3s
+            </div>
+            <div class="timeline-item">
+              <strong>setup ジョブ開始</strong>
+              14:32:18 JST · ubuntu-latest 確保
+            </div>
+            <div class="timeline-item">
+              <strong>test / lint 並列実行</strong>
+              14:32:30 JST · 3 ジョブが並列起動
+            </div>
+            <div class="timeline-item">
+              <strong>build-artifact 開始</strong>
+              14:34:34 JST · test 完了後にトリガー
+            </div>
+            <div class="timeline-item">
+              <strong>すべて成功 ✓</strong>
+              14:35:57 JST · 合計 3m 42s
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">🔗 関連リンク</h2>
+        </div>
+        <div class="card-body" style="display:flex; flex-direction:column; gap:8px;">
+          <a href="08-file-viewer.html" class="sha-link">📄 .github/workflows/ci.yml を表示</a>
+          <a href="07-repo-detail.html" class="sha-link">📁 acme-corp/payment-gateway</a>
+          <a href="13-actions-runs.html" class="sha-link">📊 全ワークフローの統計</a>
+          <a href="13-actions-runs.html" class="sha-link">🔔 通知設定</a>
+        </div>
+      </div>
+
+    </aside>
+
+  </div>
+
+</div>
+

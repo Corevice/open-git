@@ -1,0 +1,269 @@
+
+
+
+<meta charset="UTF-8">
+<title>コミット履歴 - octocat/Hello-World</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { background: #f6f8fa; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .container { max-width: 1280px; margin: 0 auto; padding: 24px; }
+  .app-bar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; background: #24292f; color: #fff; }
+  .app-bar a { color: #fff; text-decoration: none; }
+  .header-nav { display: flex; gap: 16px; }
+  .breadcrumb { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 14px; }
+  .breadcrumb a { color: #0969da; text-decoration: none; font-weight: 600; }
+  .breadcrumb .sep { color: #6e7781; }
+  .filter-bar { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+  .branch-select { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: #fff; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  .search-input { flex: 1; min-width: 240px; padding: 6px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; background: #fff; }
+  .filter-select { padding: 6px 12px; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  .commit-group { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden; margin-bottom: 16px; }
+  .commit-group-header { padding: 8px 16px; background: #f6f8fa; border-bottom: 1px solid #d0d7de; font-size: 14px; color: #1f2328; display: flex; align-items: center; gap: 8px; }
+  .commit-row { display: flex; align-items: center; padding: 16px; border-bottom: 1px solid #d0d7de; gap: 16px; }
+  .commit-row:last-child { border-bottom: none; }
+  .commit-row:nth-child(even) { background: #fafbfc; }
+  .commit-info { flex: 1; min-width: 0; }
+  .commit-title { font-size: 15px; font-weight: 600; color: #1f2328; margin: 0 0 4px 0; }
+  .commit-title a { color: inherit; text-decoration: none; }
+  .commit-title a:hover { color: #0969da; }
+  .commit-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6e7781; }
+  .commit-meta .avatar { width: 20px; height: 20px; border-radius: 50%; background: #d0d7de; display: inline-block; text-align: center; line-height: 20px; font-size: 11px; color: #fff; }
+  .commit-actions { display: flex; align-items: center; gap: 8px; }
+  .sha-box { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; font-family: ui-monospace, monospace; font-size: 12px; color: #1f2328; text-decoration: none; }
+  .sha-box:hover { background: #eaeef2; }
+  .copy-btn { padding: 4px 8px; background: transparent; border: 1px solid #d0d7de; border-radius: 6px; font-size: 12px; cursor: pointer; color: #6e7781; text-decoration: none; }
+  .copy-btn:hover { background: #f6f8fa; }
+  .view-btn { padding: 4px 10px; background: #fff; border: 1px solid #d0d7de; border-radius: 6px; font-size: 12px; text-decoration: none; color: #1f2328; font-weight: 500; }
+  .view-btn:hover { background: #f6f8fa; }
+  .verified { background: #dafbe1; color: #1a7f37; border: 1px solid #1a7f37; padding: 2px 6px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pagination { display: flex; justify-content: center; gap: 8px; margin-top: 24px; }
+  .pagination a { padding: 8px 14px; border: 1px solid #d0d7de; border-radius: 6px; text-decoration: none; color: #0969da; font-size: 14px; background: #fff; }
+  .pagination a.active { background: #0969da; color: #fff; border-color: #0969da; }
+  .pagination a.disabled { color: #8c959f; pointer-events: none; background: #f6f8fa; }
+</style>
+
+
+
+<header class="app-bar">
+  <div style="display:flex; align-items:center; gap:24px;">
+    <a href="01-home.html" class="header-brand"><strong>🐙 GitHub</strong></a>
+    <nav class="header-nav">
+      <a href="02-explore.html">Explore</a>
+      <a href="04-search-results.html">Search</a>
+      <a href="03-dashboard.html">Dashboard</a>
+    </nav>
+  </div>
+  <div class="header-actions">
+    <a href="05-profile.html" class="avatar avatar-sm" style="background:#0969da; color:#fff; padding:6px 10px; border-radius:50%; text-decoration:none;">O</a>
+  </div>
+</header>
+
+<div class="container">
+
+  <div class="breadcrumb">
+    <a href="07-repo-detail.html">octocat</a>
+    <span class="sep">/</span>
+    <a href="07-repo-detail.html">Hello-World</a>
+    <span class="sep">/</span>
+    <span>commits</span>
+  </div>
+
+  <h1 style="font-size:20px; margin:0 0 16px 0;">コミット履歴</h1>
+
+  <div class="filter-bar">
+    <a href="09-commit-history.html" class="branch-select">
+      <span>🌿</span>
+      <strong>main</strong>
+      <span style="color:#6e7781;">▾</span>
+    </a>
+    <input type="text" class="search-input" placeholder="🔍 コミットメッセージで検索...">
+    <select class="filter-select">
+      <option>すべての作者</option>
+      <option>octocat</option>
+      <option>monalisa</option>
+      <option>defunkt</option>
+    </select>
+    <select class="filter-select">
+      <option>過去30日</option>
+      <option>過去7日</option>
+      <option>過去90日</option>
+      <option>すべて</option>
+    </select>
+    <a href="07-repo-detail.html" class="btn btn-outline btn-sm" style="padding:6px 12px; border:1px solid #d0d7de; border-radius:6px; text-decoration:none; color:#1f2328; background:#f6f8fa; font-size:14px;">← リポジトリへ戻る</a>
+  </div>
+
+  
+  <div class="commit-group">
+    <div class="commit-group-header">
+      <span>📅</span>
+      <strong>Commits on Oct 28, 2024</strong>
+    </div>
+
+    <div class="commit-row">
+      <div class="commit-info">
+        <p class="commit-title"><a href="08-file-viewer.html">Add new authentication middleware for API routes</a></p>
+        <div class="commit-meta">
+          <span class="avatar" style="background:#0969da;">O</span>
+          <strong style="color:#1f2328;">octocat</strong>
+          <span>committed 2 hours ago</span>
+          <span class="verified">✓ Verified</span>
+        </div>
+      </div>
+      <div class="commit-actions">
+        <a href="08-file-viewer.html" class="sha-box mono">a1b2c3d</a>
+        <a href="09-commit-history.html" class="copy-btn" title="SHAをコピー">📋</a>
+        <a href="08-file-viewer.html" class="view-btn">&lt;&gt; Browse</a>
+      </div>
+    </div>
+
+    <div class="commit-row">
+      <div class="commit-info">
+        <p class="commit-title"><a href="08-file-viewer.html">Fix typo in README.md and update installation guide</a></p>
+        <div class="commit-meta">
+          <span class="avatar" style="background:#bf8700;">M</span>
+          <strong style="color:#1f2328;">monalisa</strong>
+          <span>committed 5 hours ago</span>
+          <span class="verified">✓ Verified</span>
+        </div>
+      </div>
+      <div class="commit-actions">
+        <a href="08-file-viewer.html" class="sha-box mono">e4f5g6h</a>
+        <a href="09-commit-history.html" class="copy-btn">📋</a>
+        <a href="08-file-viewer.html" class="view-btn">&lt;&gt; Browse</a>
+      </div>
+    </div>
+
+    <div class="commit-row">
+      <div class="commit-info">
+        <p class="commit-title"><a href="08-file-viewer.html">Merge pull request #142 from feature/dark-mode</a></p>
+        <div class="commit-meta">
+          <span class="avatar" style="background:#0969da;">O</span>
+          <strong style="color:#1f2328;">octocat</strong>
+          <span>committed 8 hours ago</span>
+        </div>
+      </div>
+      <div class="commit-actions">
+        <a href="08-file-viewer.html" class="sha-box mono">i7j8k9l</a>
+        <a href="09-commit-history.html" class="copy-btn">📋</a>
+        <a href="08-file-viewer.html" class="view-btn">&lt;&gt; Browse</a>
+      </div>
+    </div>
+  </div>
+
+  
+  <div class="commit-group">
+    <div class="commit-group-header">
+      <span>📅</span>
+      <strong>Commits on Oct 27, 2024</strong>
+    </div>
+
+    <div class="commit-row">
+      <div class="commit-info">
+        <p class="commit-title"><a href="08-file-viewer.html">Refactor user service to use dependency injection</a></p>
+        <div class="commit-meta">
+          <span class="avatar" style="background:#cf222e;">D</span>
+          <strong style="color:#1f2328;">defunkt</strong>
+          <span>committed yesterday</span>
+          <span class="verified">✓ Verified</span>
+        </div>
+      </div>
+      <div class="commit-actions">
+        <a href="08-file-viewer.html" class="sha-box mono">m1n2o3p</a>
+        <a href="09-commit-history.html" class="copy-btn">📋</a>
+        <a href="08-file-viewer.html" class="view-btn">&lt;&gt; Browse</a>
+      </div>
+    </div>
+
+    <div class="commit-row">
+      <div class="commit-info">
+        <p class="commit-title"><a href="08-file-viewer.html">Update dependencies to latest versions</a></p>
+        <div class="commit-meta">
+          <span class="avatar" style="background:#8250df;">B</span>
+          <strong style="color:#1f2328;">dependabot[bot]</strong>
+          <span>committed yesterday</span>
+          <span class="verified">✓ Verified</span>
+        </div>
+      </div>
+      <div class="commit-actions">
+        <a href="08-file-viewer.html" class="sha-box mono">q4r5s6t</a>
+        <a href="09-commit-history.html" class="copy-btn">📋</a>
+        <a href="08-file-viewer.html" class="view-btn">&lt;&gt; Browse</a>
+      </div>
+    </div>
+
+    <div class="commit-row">
+      <div class="commit-info">
+        <p class="commit-title"><a href="08-file-viewer.html">Add unit tests for authentication module</a></p>
+        <div class="commit-meta">
+          <span class="avatar" style="background:#bf8700;">M</span>
+          <strong style="color:#1f2328;">monalisa</strong>
+          <span>committed yesterday</span>
+          <span class="verified">✓ Verified</span>
+        </div>
+      </div>
+      <div class="commit-actions">
+        <a href="08-file-viewer.html" class="sha-box mono">u7v8w9x</a>
+        <a href="09-commit-history.html" class="copy-btn">📋</a>
+        <a href="08-file-viewer.html" class="view-btn">&lt;&gt; Browse</a>
+      </div>
+    </div>
+  </div>
+
+  
+  <div class="commit-group">
+    <div class="commit-group-header">
+      <span>📅</span>
+      <strong>Commits on Oct 26, 2024</strong>
+    </div>
+
+    <div class="commit-row">
+      <div class="commit-info">
+        <p class="commit-title"><a href="08-file-viewer.html">Initial implementation of dark mode toggle</a></p>
+        <div class="commit-meta">
+          <span class="avatar" style="background:#0969da;">O</span>
+          <strong style="color:#1f2328;">octocat</strong>
+          <span>committed 2 days ago</span>
+          <span class="verified">✓ Verified</span>
+        </div>
+      </div>
+      <div class="commit-actions">
+        <a href="08-file-viewer.html" class="sha-box mono">y1z2a3b</a>
+        <a href="09-commit-history.html" class="copy-btn">📋</a>
+        <a href="08-file-viewer.html" class="view-btn">&lt;&gt; Browse</a>
+      </div>
+    </div>
+
+    <div class="commit-row">
+      <div class="commit-info">
+        <p class="commit-title"><a href="08-file-viewer.html">Improve error handling in API client</a></p>
+        <div class="commit-meta">
+          <span class="avatar" style="background:#cf222e;">D</span>
+          <strong style="color:#1f2328;">defunkt</strong>
+          <span>committed 2 days ago</span>
+        </div>
+      </div>
+      <div class="commit-actions">
+        <a href="08-file-viewer.html" class="sha-box mono">c4d5e6f</a>
+        <a href="09-commit-history.html" class="copy-btn">📋</a>
+        <a href="08-file-viewer.html" class="view-btn">&lt;&gt; Browse</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="pagination">
+    <a href="#" class="disabled">← Newer</a>
+    <a href="#" class="active">1</a>
+    <a href="09-commit-history.html">2</a>
+    <a href="09-commit-history.html">3</a>
+    <a href="09-commit-history.html">…</a>
+    <a href="09-commit-history.html">42</a>
+    <a href="09-commit-history.html">Older →</a>
+  </div>
+
+  <p style="text-align:center; color:#6e7781; font-size:13px; margin-top:24px;">
+    全 247 件のコミット中 1-8 件を表示
+  </p>
+
+</div>
+
+

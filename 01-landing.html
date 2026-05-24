@@ -1,0 +1,300 @@
+
+
+
+<meta charset="UTF-8">
+<title>OpenForge - セルフホスト型Git開発プラットフォーム</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1f2328; background: #fff; }
+  .landing-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 48px; border-bottom: 1px solid #e5e7eb; background: #fff; position: sticky; top: 0; z-index: 10; }
+  .landing-header .brand { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .landing-header nav { display: flex; gap: 28px; }
+  .landing-header nav a { color: #4b5563; text-decoration: none; font-size: 14px; font-weight: 500; }
+  .landing-header nav a:hover { color: #111; }
+  .header-cta { display: flex; gap: 12px; align-items: center; }
+
+  .hero { background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #312e81 100%); color: #fff; padding: 96px 48px 120px; text-align: center; position: relative; overflow: hidden; }
+  .hero::before { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 20% 30%, rgba(99,102,241,0.3), transparent 50%), radial-gradient(circle at 80% 70%, rgba(168,85,247,0.2), transparent 50%); }
+  .hero-inner { position: relative; max-width: 920px; margin: 0 auto; }
+  .hero-badge { display: inline-block; padding: 6px 14px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 999px; font-size: 13px; margin-bottom: 24px; backdrop-filter: blur(8px); }
+  .hero h1 { font-size: 56px; line-height: 1.1; margin: 0 0 24px; font-weight: 800; letter-spacing: -0.02em; }
+  .hero h1 .accent { background: linear-gradient(90deg, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .hero p.sub { font-size: 19px; line-height: 1.6; color: #cbd5e1; margin: 0 0 40px; }
+  .hero-actions { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .hero-actions .btn { padding: 14px 28px; font-size: 16px; }
+  .hero-meta { margin-top: 56px; display: flex; gap: 48px; justify-content: center; color: #94a3b8; font-size: 14px; flex-wrap: wrap; }
+  .hero-meta strong { color: #fff; font-size: 22px; display: block; margin-bottom: 4px; }
+
+  .section { padding: 96px 48px; max-width: 1200px; margin: 0 auto; }
+  .section-title { text-align: center; font-size: 36px; font-weight: 700; margin: 0 0 16px; letter-spacing: -0.01em; }
+  .section-sub { text-align: center; font-size: 17px; color: #6b7280; max-width: 640px; margin: 0 auto 64px; line-height: 1.6; }
+
+  .features { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
+  .feature-card { padding: 28px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; transition: all 0.2s; }
+  .feature-card:hover { border-color: #6366f1; box-shadow: 0 8px 24px rgba(99,102,241,0.1); }
+  .feature-icon { width: 48px; height: 48px; border-radius: 10px; background: linear-gradient(135deg, #eef2ff, #f3e8ff); display: flex; align-items: center; justify-content: center; font-size: 24px; margin-bottom: 16px; }
+  .feature-card h3 { font-size: 17px; margin: 0 0 8px; font-weight: 600; }
+  .feature-card p { font-size: 14px; color: #6b7280; line-height: 1.6; margin: 0; }
+
+  .deploy-section { background: #f9fafb; padding: 96px 48px; }
+  .deploy-grid { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+  .deploy-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 32px; }
+  .deploy-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  .deploy-card-header .ico { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: #0f172a; color: #fff; border-radius: 8px; font-size: 20px; }
+  .deploy-card-header h3 { margin: 0; font-size: 20px; font-weight: 700; }
+  .deploy-card p { color: #6b7280; font-size: 14px; line-height: 1.6; margin: 0 0 16px; }
+  .code-block { background: #0f172a; color: #e2e8f0; padding: 18px 20px; border-radius: 8px; font-family: "SF Mono", Monaco, Consolas, monospace; font-size: 13px; line-height: 1.7; overflow-x: auto; }
+  .code-block .comment { color: #64748b; }
+  .code-block .prompt { color: #818cf8; }
+
+  .testimonial-section { padding: 96px 48px; max-width: 1200px; margin: 0 auto; }
+  .logo-strip { display: flex; justify-content: center; align-items: center; gap: 56px; padding: 32px 0; flex-wrap: wrap; opacity: 0.7; margin-bottom: 64px; }
+  .logo-strip span { font-size: 18px; font-weight: 700; color: #6b7280; letter-spacing: 0.05em; }
+  .testimonials { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .testimonial { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 28px; }
+  .testimonial p.quote { font-size: 15px; line-height: 1.7; color: #374151; margin: 0 0 20px; }
+  .testimonial-author { display: flex; align-items: center; gap: 12px; }
+  .testimonial-avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #a855f7); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; }
+  .testimonial-author .name { font-size: 14px; font-weight: 600; }
+  .testimonial-author .role { font-size: 13px; color: #6b7280; }
+
+  .final-cta { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: #fff; padding: 80px 48px; text-align: center; }
+  .final-cta h2 { font-size: 38px; margin: 0 0 16px; font-weight: 700; }
+  .final-cta p { font-size: 17px; color: #e0e7ff; margin: 0 0 32px; }
+  .final-cta .btn-primary { background: #fff; color: #4f46e5; border-color: #fff; }
+  .final-cta .btn-outline { color: #fff; border-color: rgba(255,255,255,0.5); }
+
+  footer { background: #0f172a; color: #94a3b8; padding: 64px 48px 32px; }
+  .footer-inner { max-width: 1200px; margin: 0 auto; }
+  .footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; gap: 48px; margin-bottom: 48px; }
+  .footer-brand h4 { color: #fff; margin: 0 0 12px; font-size: 18px; }
+  .footer-brand p { font-size: 14px; line-height: 1.6; margin: 0; }
+  .footer-col h5 { color: #fff; font-size: 14px; margin: 0 0 16px; font-weight: 600; }
+  .footer-col a { display: block; color: #94a3b8; text-decoration: none; font-size: 14px; margin-bottom: 10px; }
+  .footer-col a:hover { color: #fff; }
+  .footer-bottom { border-top: 1px solid #1e293b; padding-top: 24px; display: flex; justify-content: space-between; font-size: 13px; }
+</style>
+
+
+
+<header class="landing-header">
+  <div class="brand">
+    <span style="font-size:24px;">🔱</span>
+    <span>OpenForge</span>
+  </div>
+  <nav>
+    <a href="01-landing.html">機能</a>
+    <a href="01-landing.html">デプロイ</a>
+    <a href="01-landing.html">料金</a>
+    <a href="01-landing.html">ドキュメント</a>
+    <a href="01-landing.html">ブログ</a>
+  </nav>
+  <div class="header-cta">
+    <a href="02-signin.html" class="btn btn-ghost">サインイン</a>
+    <a href="03-signup.html" class="btn btn-primary">無料で始める</a>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-badge">✨ v2.4.0 リリース — Actions対応強化</div>
+    <h1>あなたのコードを、<br><span class="accent">あなたのインフラで</span>。</h1>
+    <p class="sub">
+      OpenForgeは完全オープンソースのセルフホスト型Git開発プラットフォーム。<br>
+      GitHub互換APIで既存ツールチェーンをそのまま活かしながら、データ主権とコストコントロールを実現します。
+    </p>
+    <div class="hero-actions">
+      <a href="03-signup.html" class="btn btn-primary btn-lg">🚀 無料で始める</a>
+      <a href="01-landing.html" class="btn btn-outline btn-lg" style="color:#fff; border-color:rgba(255,255,255,0.4);">📖 ドキュメントを見る</a>
+    </div>
+    <div class="hero-meta">
+      <div><strong>38.4k</strong>GitHub Stars</div>
+      <div><strong>1,200+</strong>導入組織</div>
+      <div><strong>MIT</strong>ライセンス</div>
+      <div><strong>99.9%</strong>SLA達成</div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <h2 class="section-title">必要な機能を、すべて標準装備</h2>
+  <p class="section-sub">エンタープライズに耐えうるGit体験を、シンプルな設定で。追加プラグイン無しで開発フローが完結します。</p>
+  <div class="features">
+    <div class="feature-card">
+      <div class="feature-icon">📦</div>
+      <h3>Git リポジトリ管理</h3>
+      <p>無制限のプライベート/パブリックリポジトリ、LFS対応、リポジトリミラーリング機能を搭載。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔀</div>
+      <h3>プルリクエスト</h3>
+      <p>レビューワークフロー、コードオーナー、ブランチ保護ルール、マージキューを完全サポート。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">⚡</div>
+      <h3>CI/CD Actions</h3>
+      <p>GitHub Actions互換のワークフローエンジン。既存のyamlがそのまま動作します。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🐛</div>
+      <h3>Issues &amp; Projects</h3>
+      <p>カンバンボード、マイルストーン、カスタムフィールド、自動化ルールでプロジェクト管理。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📚</div>
+      <h3>Wiki &amp; Pages</h3>
+      <p>Markdownベースのドキュメント、静的サイトホスティング、カスタムドメイン対応。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔐</div>
+      <h3>SSO &amp; SCIM</h3>
+      <p>SAML、OIDC、LDAP連携。ユーザープロビジョニング自動化でエンタープライズ対応。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🌐</div>
+      <h3>API互換性</h3>
+      <p>GitHub REST/GraphQL API互換。既存のCLI、IDE拡張、自動化ツールがそのまま使えます。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📊</div>
+      <h3>監査ログ</h3>
+      <p>全操作の詳細監査ログ、Webhook配信、SIEM連携でコンプライアンス要件を満たします。</p>
+    </div>
+  </div>
+</section>
+
+<section class="deploy-section">
+  <div style="max-width:1200px; margin:0 auto;">
+    <h2 class="section-title">5分でデプロイ完了</h2>
+    <p class="section-sub">DockerでもKubernetesでも、お好みの方法で本番運用を開始できます。</p>
+  </div>
+  <div class="deploy-grid">
+    <div class="deploy-card">
+      <div class="deploy-card-header">
+        <div class="ico">🐳</div>
+        <h3>Docker Compose</h3>
+      </div>
+      <p>シングルノードでの検証・小規模運用に最適。公式イメージを使って数分で起動できます。</p>
+      <div class="code-block">
+<span class="comment"># compose.yamlをダウンロード</span><br>
+<span class="prompt">$</span> curl -L openforge.io/install &gt; compose.yaml<br>
+<span class="comment"># 起動</span><br>
+<span class="prompt">$</span> docker compose up -d<br>
+<span class="prompt">$</span> open http://localhost:3000
+      </div>
+    </div>
+    <div class="deploy-card">
+      <div class="deploy-card-header">
+        <div class="ico">☸️</div>
+        <h3>Kubernetes (Helm)</h3>
+      </div>
+      <p>本番グレードのHA構成、自動スケーリング、ロールバック対応。公式Helm Chartで簡単導入。</p>
+      <div class="code-block">
+<span class="comment"># Helmリポジトリを追加</span><br>
+<span class="prompt">$</span> helm repo add openforge \<br>
+&nbsp;&nbsp;&nbsp;&nbsp;https://charts.openforge.io<br>
+<span class="comment"># インストール</span><br>
+<span class="prompt">$</span> helm install forge openforge/openforge
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="testimonial-section">
+  <div class="logo-strip">
+    <span>ACME CORP</span>
+    <span>TECHFLOW</span>
+    <span>NORDSTAR</span>
+    <span>QUANTUM LAB</span>
+    <span>BLUEPRINT</span>
+    <span>HELIOS</span>
+  </div>
+  <h2 class="section-title">エンジニアに選ばれる理由</h2>
+  <p class="section-sub">スタートアップから大手企業まで、1,200以上の組織が本番環境で活用しています。</p>
+  <div class="testimonials">
+    <div class="testimonial">
+      <p class="quote">「オンプレ要件をクリアしつつGitHub体験を維持できた点が決め手。移行作業も既存ワークフローを変えずに完了しました。」</p>
+      <div class="testimonial-author">
+        <div class="testimonial-avatar">TK</div>
+        <div>
+          <div class="name">田中 健太</div>
+          <div class="role">プラットフォームエンジニア / Acme Corp</div>
+        </div>
+      </div>
+    </div>
+    <div class="testimonial">
+      <p class="quote">「Actions互換性が想像以上に高く、既存のCI設定をそのまま流用できました。年間ライセンス費用を70%削減。」</p>
+      <div class="testimonial-author">
+        <div class="testimonial-avatar">SM</div>
+        <div>
+          <div class="name">佐藤 美咲</div>
+          <div class="role">DevOpsリード / TechFlow</div>
+        </div>
+      </div>
+    </div>
+    <div class="testimonial">
+      <p class="quote">「ソースが公開されているため監査・セキュリティ要件のクリアが容易。コミュニティの活発さも頼もしいです。」</p>
+      <div class="testimonial-author">
+        <div class="testimonial-avatar">RY</div>
+        <div>
+          <div class="name">山田 涼介</div>
+          <div class="role">CTO / NordStar</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="final-cta">
+  <h2>今すぐ、自分たちのGitを取り戻そう。</h2>
+  <p>クレジットカード不要。Community Editionは永久無料です。</p>
+  <div style="display:flex; gap:16px; justify-content:center; flex-wrap:wrap;">
+    <a href="03-signup.html" class="btn btn-primary btn-lg">無料アカウントを作成</a>
+    <a href="02-signin.html" class="btn btn-outline btn-lg">サインイン</a>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-inner">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <h4>🔱 OpenForge</h4>
+        <p>セルフホスト型のオープンソースGit開発プラットフォーム。あなたのコードは、あなたのもの。</p>
+      </div>
+      <div class="footer-col">
+        <h5>プロダクト</h5>
+        <a href="01-landing.html">機能一覧</a>
+        <a href="01-landing.html">料金プラン</a>
+        <a href="01-landing.html">エンタープライズ</a>
+        <a href="01-landing.html">ロードマップ</a>
+      </div>
+      <div class="footer-col">
+        <h5>開発者</h5>
+        <a href="01-landing.html">ドキュメント</a>
+        <a href="01-landing.html">APIリファレンス</a>
+        <a href="01-landing.html">CLI</a>
+        <a href="01-landing.html">統合</a>
+      </div>
+      <div class="footer-col">
+        <h5>コミュニティ</h5>
+        <a href="01-landing.html">フォーラム</a>
+        <a href="01-landing.html">コントリビューター</a>
+        <a href="01-landing.html">イベント</a>
+        <a href="01-landing.html">ブログ</a>
+      </div>
+      <div class="footer-col">
+        <h5>会社情報</h5>
+        <a href="01-landing.html">プロジェクトについて</a>
+        <a href="01-landing.html">セキュリティ</a>
+        <a href="01-landing.html">プライバシー</a>
+        <a href="01-landing.html">お問い合わせ</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <div>© 2025 OpenForge Foundation. MIT License.</div>
+      <div>Made with ❤️ by the open source community</div>
+    </div>
+  </div>
+</footer>
+
+

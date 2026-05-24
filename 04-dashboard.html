@@ -1,0 +1,319 @@
+
+
+
+<meta charset="UTF-8">
+<title>ダッシュボード - OpenHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { margin: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .layout { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+  .main { padding: 24px 32px; }
+  .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .search-box { flex: 1; max-width: 480px; margin: 0 24px; position: relative; }
+  .search-box input { width: 100%; padding: 8px 12px 8px 36px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; font-size: 14px; }
+  .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); }
+  .header-actions-row { display: flex; gap: 8px; align-items: center; }
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .metric-card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  .metric-card .label { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #656d76; margin-bottom: 8px; }
+  .metric-card .value { font-size: 28px; font-weight: 600; color: #1f2328; }
+  .metric-card .delta { font-size: 12px; margin-top: 4px; }
+  .delta.up { color: #1a7f37; }
+  .delta.down { color: #cf222e; }
+  .content-grid { display: grid; grid-template-columns: 60% 40%; gap: 16px; }
+  .panel { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); overflow: hidden; }
+  .panel-header { padding: 14px 20px; border-bottom: 1px solid #d8dee4; display: flex; justify-content: space-between; align-items: center; }
+  .panel-header h3 { margin: 0; font-size: 15px; font-weight: 600; }
+  .panel-body { padding: 8px 0; }
+  .repo-item { padding: 14px 20px; border-bottom: 1px solid #eaeef2; }
+  .repo-item:last-child { border-bottom: none; }
+  .repo-item a.repo-name { color: #0969da; font-weight: 600; text-decoration: none; font-size: 14px; }
+  .repo-item .repo-desc { font-size: 13px; color: #656d76; margin: 4px 0; }
+  .repo-item .repo-meta { display: flex; gap: 16px; font-size: 12px; color: #656d76; align-items: center; }
+  .lang-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  .activity-item { padding: 12px 20px; border-bottom: 1px solid #eaeef2; display: flex; gap: 12px; font-size: 13px; }
+  .activity-item:last-child { border-bottom: none; }
+  .activity-item .av { width: 32px; height: 32px; border-radius: 50%; background: #ddf4ff; display:flex; align-items:center; justify-content:center; flex-shrink: 0; }
+  .activity-item .at-text { line-height: 1.45; }
+  .activity-item .at-text strong { color: #0969da; }
+  .activity-item .at-time { color: #656d76; font-size: 11px; margin-top: 2px; }
+  .issue-pr-section { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  .ip-item { padding: 12px 20px; border-bottom: 1px solid #eaeef2; display:flex; gap: 10px; }
+  .ip-item:last-child { border-bottom: none; }
+  .ip-item .ip-title { font-size: 13px; color: #1f2328; text-decoration: none; }
+  .ip-item .ip-title:hover { color: #0969da; }
+  .ip-item .ip-meta { font-size: 11px; color: #656d76; margin-top: 2px; }
+  .nav-link { display: block; padding: 8px 12px; color: #1f2328; text-decoration: none; border-radius: 6px; font-size: 14px; margin: 2px 0; }
+  .nav-link:hover { background: #eaeef2; }
+  .nav-link.active { background: #ddf4ff; color: #0969da; font-weight: 600; }
+  .sidebar-custom { background: #fff; border-right: 1px solid #d0d7de; padding: 20px 12px; }
+  .sb-section-title { font-size: 11px; text-transform: uppercase; color: #656d76; font-weight: 600; margin: 16px 8px 4px; letter-spacing: 0.5px; }
+  .brand { display: flex; align-items: center; gap: 8px; padding: 0 8px 16px; font-weight: 700; font-size: 18px; border-bottom: 1px solid #eaeef2; margin-bottom: 12px; }
+  .user-card { display: flex; align-items: center; gap: 8px; padding: 12px 8px; margin-top: auto; border-top: 1px solid #eaeef2; }
+  .user-card .av { width: 28px; height: 28px; border-radius: 50%; background: #ddf4ff; display:flex; align-items:center; justify-content:center; }
+  .quick-create { background: #2da44e; color: #fff !important; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: 500; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
+  .quick-create:hover { background: #2c974b; }
+  .btn-link { padding: 4px 10px; border: 1px solid #d0d7de; border-radius: 6px; text-decoration: none; color: #1f2328; font-size: 12px; background: #f6f8fa; }
+  .btn-link:hover { background: #f3f4f6; }
+</style>
+
+
+<div class="layout">
+  <aside class="sidebar-custom">
+    <div class="brand">
+      <span>🐙</span> OpenHub
+    </div>
+    <div class="sb-section-title">メイン</div>
+    <a href="04-dashboard.html" class="nav-link active">🏠 ダッシュボード</a>
+    <a href="05-repo-list.html" class="nav-link">📁 リポジトリ</a>
+    <a href="11-issue-list.html" class="nav-link">🐛 Issues</a>
+    <a href="12-pr-list.html" class="nav-link">🔀 Pull Requests</a>
+
+    <div class="sb-section-title">ツール</div>
+    <a href="15-importer.html" class="nav-link">📥 インポート</a>
+    <a href="14-settings.html" class="nav-link">⚙️ 設定</a>
+
+    <div class="sb-section-title">最近のリポジトリ</div>
+    <a href="07-repo-detail.html" class="nav-link">📦 web-app</a>
+    <a href="07-repo-detail.html" class="nav-link">📦 api-server</a>
+    <a href="07-repo-detail.html" class="nav-link">📦 design-system</a>
+
+    <div class="user-card">
+      <div class="av">👤</div>
+      <div style="font-size: 13px;">
+        <div style="font-weight: 600;">tanaka_dev</div>
+        <a href="14-settings.html" style="color: #656d76; font-size: 11px; text-decoration: none;">プロフィール設定</a>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="top-bar">
+      <h1 style="margin:0; font-size: 20px;">ダッシュボード</h1>
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" placeholder="リポジトリ、Issue、PRを検索...">
+      </div>
+      <div class="header-actions-row">
+        <a href="15-importer.html" class="btn-link">📥 インポート</a>
+        <a href="06-repo-create.html" class="quick-create">＋ 新規リポジトリ</a>
+      </div>
+    </div>
+
+    <section class="metrics">
+      <div class="metric-card">
+        <div class="label">マイ リポジトリ <span>📦</span></div>
+        <div class="value">24</div>
+        <div class="delta up">▲ +2 今月</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">担当 Issue <span>🐛</span></div>
+        <div class="value">12</div>
+        <div class="delta down">▼ -3 先週比</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">レビュー待ち PR <span>🔀</span></div>
+        <div class="value">7</div>
+        <div class="delta up">▲ +1 今日</div>
+      </div>
+      <div class="metric-card">
+        <div class="label">スター獲得 <span>⭐</span></div>
+        <div class="value">348</div>
+        <div class="delta up">▲ +28 今月</div>
+      </div>
+    </section>
+
+    <div class="content-grid">
+      <section class="panel">
+        <div class="panel-header">
+          <h3>📁 マイ リポジトリ</h3>
+          <a href="05-repo-list.html" class="btn-link">すべて表示 →</a>
+        </div>
+        <div class="panel-body">
+          <div class="repo-item">
+            <a href="07-repo-detail.html" class="repo-name">tanaka_dev / web-app</a>
+            <span style="font-size: 11px; padding: 2px 8px; border: 1px solid #d0d7de; border-radius: 12px; margin-left: 8px; color: #656d76;">Public</span>
+            <div class="repo-desc">フロントエンドアプリケーション。React + TypeScript で構築。</div>
+            <div class="repo-meta">
+              <span><span class="lang-dot" style="background:#3178c6;"></span>TypeScript</span>
+              <span>⭐ 142</span>
+              <span>🍴 23</span>
+              <span>3時間前に更新</span>
+            </div>
+          </div>
+          <div class="repo-item">
+            <a href="07-repo-detail.html" class="repo-name">tanaka_dev / api-server</a>
+            <span style="font-size: 11px; padding: 2px 8px; border: 1px solid #d0d7de; border-radius: 12px; margin-left: 8px; color: #656d76;">Private</span>
+            <div class="repo-desc">REST API サーバー実装。Go + PostgreSQL。</div>
+            <div class="repo-meta">
+              <span><span class="lang-dot" style="background:#00ADD8;"></span>Go</span>
+              <span>⭐ 89</span>
+              <span>🍴 12</span>
+              <span>昨日更新</span>
+            </div>
+          </div>
+          <div class="repo-item">
+            <a href="07-repo-detail.html" class="repo-name">tanaka_dev / design-system</a>
+            <span style="font-size: 11px; padding: 2px 8px; border: 1px solid #d0d7de; border-radius: 12px; margin-left: 8px; color: #656d76;">Public</span>
+            <div class="repo-desc">共通UIコンポーネントライブラリ。</div>
+            <div class="repo-meta">
+              <span><span class="lang-dot" style="background:#f1e05a;"></span>JavaScript</span>
+              <span>⭐ 67</span>
+              <span>🍴 8</span>
+              <span>2日前に更新</span>
+            </div>
+          </div>
+          <div class="repo-item">
+            <a href="07-repo-detail.html" class="repo-name">tanaka_dev / cli-tool</a>
+            <span style="font-size: 11px; padding: 2px 8px; border: 1px solid #d0d7de; border-radius: 12px; margin-left: 8px; color: #656d76;">Public</span>
+            <div class="repo-desc">開発者向けCLIツール。Rustで実装。</div>
+            <div class="repo-meta">
+              <span><span class="lang-dot" style="background:#dea584;"></span>Rust</span>
+              <span>⭐ 50</span>
+              <span>🍴 4</span>
+              <span>1週間前に更新</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h3>🔔 アクティビティ</h3>
+          <a href="04-dashboard.html" class="btn-link">更新</a>
+        </div>
+        <div class="panel-body">
+          <div class="activity-item">
+            <div class="av">🔀</div>
+            <div class="at-text">
+              <strong>sato_eng</strong> が <strong>web-app</strong> に PR をオープン<br>
+              <span style="color:#1f2328;">"Add dark mode toggle"</span>
+              <div class="at-time">12分前</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="av">⭐</div>
+            <div class="at-text">
+              <strong>yamada_oss</strong> が <strong>design-system</strong> をスター<br>
+              <div class="at-time">1時間前</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="av">🐛</div>
+            <div class="at-text">
+              <strong>suzuki_qa</strong> が <strong>api-server</strong> に Issue を作成<br>
+              <span style="color:#1f2328;">"Memory leak on /users endpoint"</span>
+              <div class="at-time">3時間前</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="av">✅</div>
+            <div class="at-text">
+              <strong>tanaka_dev</strong> が PR #142 をマージ<br>
+              <span style="color:#1f2328;">"Refactor auth middleware"</span>
+              <div class="at-time">5時間前</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="av">💬</div>
+            <div class="at-text">
+              <strong>ito_dev</strong> が Issue #88 にコメント<br>
+              <div class="at-time">昨日</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="av">🚀</div>
+            <div class="at-text">
+              <strong>tanaka_dev</strong> が <strong>cli-tool</strong> v1.2.0 をリリース<br>
+              <div class="at-time">2日前</div>
+            </div>
+          </div>
+          <div class="activity-item">
+            <div class="av">🍴</div>
+            <div class="at-text">
+              <strong>kobayashi</strong> が <strong>web-app</strong> をフォーク<br>
+              <div class="at-time">3日前</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="issue-pr-section">
+      <section class="panel">
+        <div class="panel-header">
+          <h3>🐛 担当 Issue</h3>
+          <a href="11-issue-list.html" class="btn-link">すべて表示 →</a>
+        </div>
+        <div class="panel-body">
+          <div class="ip-item">
+            <span style="color:#1a7f37;">🟢</span>
+            <div>
+              <a href="11-issue-list.html" class="ip-title"><strong>Login form validation breaks on Safari</strong></a>
+              <div class="ip-meta">web-app #234 ・ 開いたのは2日前</div>
+            </div>
+          </div>
+          <div class="ip-item">
+            <span style="color:#1a7f37;">🟢</span>
+            <div>
+              <a href="11-issue-list.html" class="ip-title"><strong>Add pagination to user list API</strong></a>
+              <div class="ip-meta">api-server #88 ・ 開いたのは4日前</div>
+            </div>
+          </div>
+          <div class="ip-item">
+            <span style="color:#1a7f37;">🟢</span>
+            <div>
+              <a href="11-issue-list.html" class="ip-title"><strong>Update README with new examples</strong></a>
+              <div class="ip-meta">design-system #45 ・ 開いたのは1週間前</div>
+            </div>
+          </div>
+          <div class="ip-item">
+            <span style="color:#cf222e;">🔴</span>
+            <div>
+              <a href="11-issue-list.html" class="ip-title"><strong>Critical: Memory leak in worker process</strong></a>
+              <div class="ip-meta">api-server #91 ・ 開いたのは昨日</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h3>🔀 担当 Pull Request</h3>
+          <a href="12-pr-list.html" class="btn-link">すべて表示 →</a>
+        </div>
+        <div class="panel-body">
+          <div class="ip-item">
+            <span style="color:#8250df;">🟣</span>
+            <div>
+              <a href="12-pr-list.html" class="ip-title"><strong>Add dark mode toggle</strong></a>
+              <div class="ip-meta">web-app #142 ・ レビュー待ち ・ 12分前</div>
+            </div>
+          </div>
+          <div class="ip-item">
+            <span style="color:#8250df;">🟣</span>
+            <div>
+              <a href="12-pr-list.html" class="ip-title"><strong>Implement rate limiting middleware</strong></a>
+              <div class="ip-meta">api-server #76 ・ 変更要求 ・ 1日前</div>
+            </div>
+          </div>
+          <div class="ip-item">
+            <span style="color:#8250df;">🟣</span>
+            <div>
+              <a href="12-pr-list.html" class="ip-title"><strong>Migrate Button component to v2 API</strong></a>
+              <div class="ip-meta">design-system #28 ・ 承認済み ・ 2日前</div>
+            </div>
+          </div>
+          <div class="ip-item">
+            <span style="color:#8250df;">🟣</span>
+            <div>
+              <a href="12-pr-list.html" class="ip-title"><strong>Fix typo in CLI help text</strong></a>
+              <div class="ip-meta">cli-tool #15 ・ レビュー待ち ・ 3日前</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>オープンソースGitHub - Prototype Index</title>
+  <link rel="stylesheet" href="base.css">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; margin: 0; padding: 2rem; }
+    .index-header { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 2rem; }
+    .index-header h1 { margin: 0 0 0.5rem; color: #1a1a2e; }
+    .index-header p { margin: 0; color: #666; }
+    .screen-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
+    .screen-item { background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .screen-link { display: flex; align-items: center; padding: 1rem 1.5rem; text-decoration: none; color: inherit; gap: 1rem; }
+    .screen-link:hover { background: #f0f4ff; border-radius: 8px; }
+    .screen-id { font-family: monospace; font-size: 0.8rem; color: #888; min-width: 80px; }
+    .screen-name { font-weight: 600; color: #1a1a2e; min-width: 200px; }
+    .screen-desc { color: #666; font-size: 0.9rem; }
+    .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 99px; font-size: 0.8rem; font-weight: 600; }
+    .badge-mobile { background: #e0f2fe; color: #0369a1; }
+    .badge-desktop { background: #f0fdf4; color: #15803d; }
+  </style>
+</head>
+<body>
+  <div class="index-header">
+    <h1>🎨 オープンソースGitHub</h1>
+    <p>インタラクティブプロトタイプ &nbsp;
+      <span class="badge badge-desktop">desktop</span>
+      &nbsp; 15 画面
+    </p>
+  </div>
+  <ul class="screen-list">
+          <li class="screen-item">
+            <a href="01-landing.html" class="screen-link">
+              <span class="screen-id">01-landing</span>
+              <span class="screen-name">ランディングページ</span>
+              <span class="screen-desc">セルフホスト型GitHub互換プラットフォームの紹介ページ。主要機能、デプロイ方法、導入事例を訴求する。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="02-signin.html" class="screen-link">
+              <span class="screen-id">02-signin</span>
+              <span class="screen-name">サインイン画面</span>
+              <span class="screen-desc">ユーザー名/メールアドレスとパスワードでサインインする画面。OAuth経由のサインインにも対応。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="03-signup.html" class="screen-link">
+              <span class="screen-id">03-signup</span>
+              <span class="screen-name">新規登録画面</span>
+              <span class="screen-desc">新規ユーザーアカウントを作成する画面。ユーザー名・メール・パスワードを登録する。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="04-dashboard.html" class="screen-link">
+              <span class="screen-id">04-dashboard</span>
+              <span class="screen-name">ダッシュボード</span>
+              <span class="screen-desc">サインイン後のホーム画面。最近のアクティビティ、自分のリポジトリ、担当Issue/PRの概要を表示。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="05-repo-list.html" class="screen-link">
+              <span class="screen-id">05-repo-list</span>
+              <span class="screen-name">リポジトリ一覧</span>
+              <span class="screen-desc">ユーザー・組織が所有するリポジトリ一覧を表示。検索・フィルタ・ソートが可能。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="06-repo-create.html" class="screen-link">
+              <span class="screen-id">06-repo-create</span>
+              <span class="screen-name">リポジトリ作成画面</span>
+              <span class="screen-desc">新規Gitリポジトリを作成する画面。名前空間・公開範囲・初期化オプションを選択。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="07-repo-detail.html" class="screen-link">
+              <span class="screen-id">07-repo-detail</span>
+              <span class="screen-name">リポジトリ詳細（コードブラウザ）</span>
+              <span class="screen-desc">リポジトリのファイルツリー、READMEプレビュー、ブランチ切替、クローンURL表示を行うメイン画面。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="08-file-viewer.html" class="screen-link">
+              <span class="screen-id">08-file-viewer</span>
+              <span class="screen-name">ファイルビューア／diff表示</span>
+              <span class="screen-desc">個別ファイルのソース閲覧、シンタックスハイライト、行番号、diff表示に対応した画面。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="09-commit-history.html" class="screen-link">
+              <span class="screen-id">09-commit-history</span>
+              <span class="screen-name">コミット履歴</span>
+              <span class="screen-desc">リポジトリのコミット履歴を時系列で表示。各コミットからdiffへ遷移可能。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="10-repo-settings.html" class="screen-link">
+              <span class="screen-id">10-repo-settings</span>
+              <span class="screen-name">リポジトリ設定</span>
+              <span class="screen-desc">リポジトリのコラボレーター、Webhook、ブランチ保護、可視性、削除などを管理する設定画面。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="11-issue-list.html" class="screen-link">
+              <span class="screen-id">11-issue-list</span>
+              <span class="screen-name">Issue一覧／詳細</span>
+              <span class="screen-desc">リポジトリのIssue一覧表示と個別Issue詳細（コメント、ラベル、担当者）を統合表示。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="12-pr-list.html" class="screen-link">
+              <span class="screen-id">12-pr-list</span>
+              <span class="screen-name">Pull Request一覧／詳細</span>
+              <span class="screen-desc">PRの一覧と詳細（会話、コミット、ファイル変更、レビュー、マージ操作）を表示する画面。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="13-actions-runs.html" class="screen-link">
+              <span class="screen-id">13-actions-runs</span>
+              <span class="screen-name">Actionsワークフロー実行画面</span>
+              <span class="screen-desc">GitHub Actions互換のCI/CD実行履歴とジョブログを表示。ワークフロー再実行も可能。...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="14-settings.html" class="screen-link">
+              <span class="screen-id">14-settings</span>
+              <span class="screen-name">ユーザー設定（PAT/OAuth含む）</span>
+              <span class="screen-desc">プロフィール、SSH鍵、Personal Access Token、OAuth Apps、通知などを管理するユーザー設定...</span>
+            </a>
+          </li>
+          <li class="screen-item">
+            <a href="15-importer.html" class="screen-link">
+              <span class="screen-id">15-importer</span>
+              <span class="screen-name">GitHubインポーター</span>
+              <span class="screen-desc">既存GitHubリポジトリ（コード/Issue/PR/Wiki）をインポートするウィザード画面。...</span>
+            </a>
+          </li>
+  </ul>
+</body>
+</html>

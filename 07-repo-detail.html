@@ -1,0 +1,311 @@
+
+
+
+<meta charset="UTF-8">
+<title>octocat/hello-world - OpenHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { background: #f6f8fa; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .app-bar { position: sticky; top: 0; z-index: 100; background: #24292f; color: #fff; padding: 0 24px; height: 56px; display: flex; align-items: center; gap: 16px; }
+  .app-bar a { color: #fff; text-decoration: none; }
+  .header-brand { font-weight: 700; font-size: 18px; display: flex; align-items: center; gap: 8px; }
+  .header-nav { display: flex; gap: 16px; margin-left: 24px; flex: 1; font-size: 14px; }
+  .header-nav a:hover { opacity: 0.8; }
+  .header-actions { display: flex; gap: 8px; align-items: center; }
+  .search-input { background: #30363d; border: 1px solid #444c56; color: #fff; padding: 6px 12px; border-radius: 6px; width: 280px; font-size: 13px; }
+
+  .repo-header { background: #fff; border-bottom: 1px solid #d0d7de; padding: 16px 32px 0; position: sticky; top: 56px; z-index: 90; }
+  .repo-title { display: flex; align-items: center; gap: 8px; font-size: 20px; margin: 0 0 12px; }
+  .repo-title .icon { color: #57606a; }
+  .repo-title a { color: #0969da; text-decoration: none; font-weight: 600; }
+  .repo-title .slash { color: #57606a; font-weight: 400; }
+  .repo-actions { float: right; display: flex; gap: 8px; }
+  .repo-meta { display: flex; gap: 16px; align-items: center; margin-bottom: 12px; font-size: 13px; color: #57606a; }
+
+  .tabs { display: flex; gap: 4px; margin-top: 16px; }
+  .tab { padding: 10px 16px; border-radius: 6px 6px 0 0; font-size: 14px; color: #1f2328; text-decoration: none; display: flex; align-items: center; gap: 6px; border-bottom: 2px solid transparent; }
+  .tab:hover { background: #f6f8fa; }
+  .tab.active { border-bottom-color: #fd8c73; font-weight: 600; }
+  .tab .count { background: #eaeef2; padding: 1px 8px; border-radius: 20px; font-size: 12px; }
+
+  .container { max-width: 1280px; margin: 0 auto; padding: 24px 32px; display: grid; grid-template-columns: 1fr 320px; gap: 24px; }
+
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .branch-btn { background: #f6f8fa; border: 1px solid #d0d7de; padding: 6px 12px; border-radius: 6px; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; text-decoration: none; color: #1f2328; }
+  .branch-info { color: #57606a; font-size: 13px; }
+  .clone-box { margin-left: auto; display: flex; gap: 8px; }
+
+  .file-list { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden; }
+  .file-list-header { background: #f6f8fa; padding: 12px 16px; border-bottom: 1px solid #d0d7de; display: flex; align-items: center; gap: 12px; font-size: 13px; }
+  .file-row { display: grid; grid-template-columns: 24px 1fr 2fr auto; gap: 12px; padding: 8px 16px; border-bottom: 1px solid #eaeef2; align-items: center; font-size: 14px; text-decoration: none; color: #1f2328; }
+  .file-row:last-child { border-bottom: none; }
+  .file-row:hover { background: #f6f8fa; }
+  .file-row .name { color: #1f2328; font-weight: 500; }
+  .file-row.dir .name { color: #0969da; }
+  .file-row .msg { color: #57606a; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-row .age { color: #57606a; font-size: 12px; text-align: right; }
+
+  .readme { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; margin-top: 16px; }
+  .readme-header { padding: 12px 16px; border-bottom: 1px solid #d0d7de; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+  .readme-body { padding: 32px 48px; font-size: 15px; line-height: 1.6; }
+  .readme-body h1 { border-bottom: 1px solid #d0d7de; padding-bottom: 8px; margin-top: 0; }
+  .readme-body h2 { border-bottom: 1px solid #d0d7de; padding-bottom: 6px; margin-top: 24px; }
+  .readme-body code { background: #eff1f3; padding: 2px 6px; border-radius: 4px; font-size: 13px; font-family: ui-monospace, monospace; }
+  .readme-body pre { background: #f6f8fa; padding: 16px; border-radius: 6px; overflow-x: auto; }
+  .readme-body pre code { background: transparent; padding: 0; }
+
+  .sidebar-card { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+  .sidebar-card h3 { font-size: 14px; margin: 0 0 12px; color: #1f2328; }
+  .about-desc { font-size: 14px; color: #1f2328; margin-bottom: 12px; }
+  .about-meta { font-size: 13px; color: #57606a; display: flex; flex-direction: column; gap: 6px; }
+  .about-meta .icon { width: 16px; display: inline-block; }
+  .lang-bar { height: 8px; border-radius: 6px; overflow: hidden; display: flex; margin-bottom: 8px; }
+  .lang-list { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }
+  .lang-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+
+  .stats { display: flex; gap: 16px; font-size: 13px; color: #57606a; }
+  .stats a { color: #57606a; text-decoration: none; display: flex; align-items: center; gap: 4px; }
+  .stats a:hover { color: #0969da; }
+
+  .clone-popup { font-family: ui-monospace, monospace; font-size: 12px; background: #f6f8fa; border: 1px solid #d0d7de; padding: 6px 8px; border-radius: 6px; }
+</style>
+
+
+
+<header class="app-bar">
+  <a href="03-home-feed.html" class="header-brand">🐙 OpenHub</a>
+  <nav class="header-nav">
+    <a href="03-home-feed.html">Dashboard</a>
+    <a href="11-issue-list.html">Issues</a>
+    <a href="12-pr-list.html">Pull requests</a>
+  </nav>
+  <input type="text" class="search-input" placeholder="🔍 Type / to search">
+  <div class="header-actions">
+    <a href="04-notifications.html" class="btn btn-ghost" style="color:#fff;">🔔</a>
+    <a href="05-profile.html"><div class="avatar avatar-sm" style="background:#0969da;color:#fff;display:flex;align-items:center;justify-content:center;border-radius:50%;width:32px;height:32px;">O</div></a>
+  </div>
+</header>
+
+<section class="repo-header">
+  <div class="repo-actions">
+    <a href="#" class="btn btn-outline btn-sm">👁 Watch <span class="badge">42</span></a>
+    <a href="#" class="btn btn-outline btn-sm">🍴 Fork <span class="badge">128</span></a>
+    <a href="#" class="btn btn-outline btn-sm">⭐ Star <span class="badge">2.4k</span></a>
+  </div>
+  <h1 class="repo-title">
+    <span class="icon">📖</span>
+    <a href="05-profile.html">octocat</a>
+    <span class="slash">/</span>
+    <a href="07-repo-detail.html">hello-world</a>
+    <span class="badge badge-primary" style="margin-left:8px;">Public</span>
+  </h1>
+
+  <nav class="tabs">
+    <a href="07-repo-detail.html" class="tab active">&lt;&gt; Code</a>
+    <a href="11-issue-list.html" class="tab">⊙ Issues <span class="count">23</span></a>
+    <a href="12-pr-list.html" class="tab">⇄ Pull requests <span class="count">7</span></a>
+    <a href="13-actions-runs.html" class="tab">▶ Actions</a>
+    <a href="09-commit-history.html" class="tab">⏱ Commits</a>
+    <a href="10-repo-settings.html" class="tab">⚙ Settings</a>
+  </nav>
+</section>
+
+<div class="container">
+  <main>
+    <div class="toolbar">
+      <a href="#" class="branch-btn">🌿 <strong>main</strong> ▾</a>
+      <span class="branch-info">12 branches · 28 tags</span>
+      <a href="09-commit-history.html" class="branch-btn">⏱ 1,284 commits</a>
+
+      <div class="clone-box">
+        <a href="08-file-viewer.html" class="btn btn-secondary btn-sm">Go to file</a>
+        <a href="#" class="btn btn-primary btn-sm">&lt;&gt; Code ▾</a>
+      </div>
+    </div>
+
+    <div class="clone-popup" style="margin-bottom:16px;">
+      📋 <strong>HTTPS:</strong> https://openhub.dev/octocat/hello-world.git
+      &nbsp;|&nbsp; <strong>SSH:</strong> git@openhub.dev:octocat/hello-world.git
+    </div>
+
+    <div class="file-list">
+      <div class="file-list-header">
+        <div class="avatar avatar-sm" style="background:#fd8c73;color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;">O</div>
+        <strong>octocat</strong>
+        <span style="color:#57606a;">Merge pull request #142 from feat/new-api</span>
+        <span style="margin-left:auto; color:#57606a; font-size:12px;" class="mono">a3f5b2c</span>
+        <span style="color:#57606a; font-size:12px;">2 hours ago</span>
+        <a href="09-commit-history.html" style="color:#57606a; font-size:13px; text-decoration:none;">⏱ 1,284 commits</a>
+      </div>
+
+      <a href="08-file-viewer.html" class="file-row dir">
+        <span>📁</span>
+        <span class="name">.github</span>
+        <span class="msg">Update workflow permissions</span>
+        <span class="age">3 days ago</span>
+      </a>
+      <a href="08-file-viewer.html" class="file-row dir">
+        <span>📁</span>
+        <span class="name">docs</span>
+        <span class="msg">Add contributing guide section</span>
+        <span class="age">last week</span>
+      </a>
+      <a href="08-file-viewer.html" class="file-row dir">
+        <span>📁</span>
+        <span class="name">src</span>
+        <span class="msg">Refactor authentication middleware</span>
+        <span class="age">2 hours ago</span>
+      </a>
+      <a href="08-file-viewer.html" class="file-row dir">
+        <span>📁</span>
+        <span class="name">tests</span>
+        <span class="msg">Add unit tests for user service</span>
+        <span class="age">1 day ago</span>
+      </a>
+      <a href="08-file-viewer.html" class="file-row">
+        <span>📄</span>
+        <span class="name">.gitignore</span>
+        <span class="msg">Ignore .env.local</span>
+        <span class="age">3 months ago</span>
+      </a>
+      <a href="08-file-viewer.html" class="file-row">
+        <span>📄</span>
+        <span class="name">LICENSE</span>
+        <span class="msg">Initial commit</span>
+        <span class="age">2 years ago</span>
+      </a>
+      <a href="08-file-viewer.html" class="file-row">
+        <span>📄</span>
+        <span class="name">README.md</span>
+        <span class="msg">Update installation instructions</span>
+        <span class="age">5 days ago</span>
+      </a>
+      <a href="08-file-viewer.html" class="file-row">
+        <span>📄</span>
+        <span class="name">package.json</span>
+        <span class="msg">Bump version to 2.1.0</span>
+        <span class="age">2 hours ago</span>
+      </a>
+      <a href="08-file-viewer.html" class="file-row">
+        <span>📄</span>
+        <span class="name">tsconfig.json</span>
+        <span class="msg">Enable strict mode</span>
+        <span class="age">1 month ago</span>
+      </a>
+    </div>
+
+    <div class="readme">
+      <div class="readme-header">
+        📖 README.md
+      </div>
+      <div class="readme-body">
+        <h1>Hello World 🌍</h1>
+        <p>A modern, lightweight starter template for building scalable web applications with TypeScript and Node.js.</p>
+        <p>
+          <span class="badge badge-success">build passing</span>
+          <span class="badge badge-primary">coverage 94%</span>
+          <span class="badge badge-warning">v2.1.0</span>
+        </p>
+
+        <h2>✨ Features</h2>
+        <ul>
+          <li>⚡ Lightning-fast development server with HMR</li>
+          <li>🔒 Built-in authentication &amp; authorization</li>
+          <li>📦 Modular plugin architecture</li>
+          <li>🧪 Comprehensive test suite with Jest</li>
+          <li>🚀 Production-ready Docker setup</li>
+        </ul>
+
+        <h2>📦 Installation</h2>
+        <pre><code>npm install hello-world
+# or
+yarn add hello-world</code></pre>
+
+        <h2>🚀 Quick Start</h2>
+        <pre><code>import { createApp } from 'hello-world';
+
+const app = createApp({
+  port: 3000,
+  auth: true,
+});
+
+app.start();</code></pre>
+
+        <h2>📚 Documentation</h2>
+        <p>See the <a href="08-file-viewer.html">full documentation</a> for advanced usage and API reference.</p>
+
+        <h2>🤝 Contributing</h2>
+        <p>Contributions are welcome! Please read our <a href="08-file-viewer.html">contributing guide</a> before submitting a PR.</p>
+
+        <h2>📄 License</h2>
+        <p>MIT © octocat</p>
+      </div>
+    </div>
+  </main>
+
+  <aside>
+    <div class="sidebar-card">
+      <h3>About <a href="10-repo-settings.html" style="float:right;font-size:12px;">⚙</a></h3>
+      <p class="about-desc">A modern, lightweight starter template for building scalable web applications with TypeScript and Node.js.</p>
+      <div class="about-meta">
+        <div><span class="icon">🔗</span> <a href="#" style="color:#0969da;">hello-world.dev</a></div>
+        <div><span class="icon">📖</span> Readme</div>
+        <div><span class="icon">⚖</span> MIT license</div>
+        <div><span class="icon">📊</span> Activity</div>
+      </div>
+      <div class="stats" style="margin-top:12px; padding-top:12px; border-top:1px solid #eaeef2;">
+        <a href="#">⭐ <strong>2,438</strong> stars</a>
+        <a href="#">👁 <strong>42</strong> watching</a>
+        <a href="#">🍴 <strong>128</strong> forks</a>
+      </div>
+    </div>
+
+    <div class="sidebar-card">
+      <h3>Releases <span style="color:#57606a;font-weight:400;">29</span></h3>
+      <div style="font-size:14px;">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+          <span class="badge badge-success">Latest</span>
+          <strong>v2.1.0</strong>
+        </div>
+        <div style="color:#57606a;font-size:13px;">5 days ago</div>
+      </div>
+      <div style="margin-top:8px;font-size:13px;"><a href="#" style="color:#0969da;text-decoration:none;">+ 28 releases</a></div>
+    </div>
+
+    <div class="sidebar-card">
+      <h3>Packages</h3>
+      <p style="color:#57606a;font-size:13px;margin:0;">No packages published</p>
+    </div>
+
+    <div class="sidebar-card">
+      <h3>Contributors <span style="color:#57606a;font-weight:400;">24</span></h3>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;">
+        <div class="avatar avatar-sm" style="background:#fd8c73;color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:13px;">O</div>
+        <div class="avatar avatar-sm" style="background:#0969da;color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:13px;">M</div>
+        <div class="avatar avatar-sm" style="background:#1a7f37;color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:13px;">A</div>
+        <div class="avatar avatar-sm" style="background:#9a6700;color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:13px;">K</div>
+        <div class="avatar avatar-sm" style="background:#cf222e;color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:13px;">S</div>
+        <div class="avatar avatar-sm" style="background:#8250df;color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:13px;">T</div>
+        <div class="avatar avatar-sm" style="background:#bf3989;color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:13px;">+</div>
+      </div>
+    </div>
+
+    <div class="sidebar-card">
+      <h3>Languages</h3>
+      <div class="lang-bar">
+        <div style="background:#3178c6;width:68%;"></div>
+        <div style="background:#f1e05a;width:22%;"></div>
+        <div style="background:#e34c26;width:6%;"></div>
+        <div style="background:#563d7c;width:4%;"></div>
+      </div>
+      <div class="lang-list">
+        <span><span class="lang-dot" style="background:#3178c6;"></span>TypeScript 68.2%</span>
+        <span><span class="lang-dot" style="background:#f1e05a;"></span>JavaScript 21.8%</span>
+        <span><span class="lang-dot" style="background:#e34c26;"></span>HTML 6.1%</span>
+        <span><span class="lang-dot" style="background:#563d7c;"></span>CSS 3.9%</span>
+      </div>
+    </div>
+  </aside>
+</div>
+
+

@@ -1,0 +1,202 @@
+
+
+
+<meta charset="UTF-8">
+<title>ファイルビューア - oss-awesome-toolkit</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { margin: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .page { max-width: 1280px; margin: 0 auto; }
+  .top-bar { background: #24292f; color: #fff; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .top-bar .header-brand { color: #fff; font-weight: 600; font-size: 16px; text-decoration: none; }
+  .top-bar nav a { color: #d1d9e0; text-decoration: none; margin-left: 16px; font-size: 14px; }
+  .top-bar nav a:hover { color: #fff; }
+  .breadcrumb { padding: 16px 24px; background: #fff; border-bottom: 1px solid #d0d7de; font-size: 14px; }
+  .breadcrumb a { color: #0969da; text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  .breadcrumb .sep { color: #6e7781; margin: 0 6px; }
+  .breadcrumb .current { color: #1f2328; font-weight: 600; }
+
+  .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; background: #fff; border-bottom: 1px solid #d0d7de; position: sticky; top: 0; z-index: 10; }
+  .toolbar-left { display: flex; align-items: center; gap: 12px; }
+  .toolbar-left .file-icon { font-size: 18px; }
+  .toolbar-left .filename { font-weight: 600; font-size: 14px; }
+  .toolbar-left .file-meta { color: #6e7781; font-size: 12px; }
+  .toolbar-right { display: flex; gap: 8px; }
+  .view-tabs { display: flex; border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden; }
+  .view-tabs a { padding: 6px 12px; font-size: 13px; text-decoration: none; color: #1f2328; background: #fff; border-right: 1px solid #d0d7de; }
+  .view-tabs a:last-child { border-right: none; }
+  .view-tabs a.active { background: #ddf4ff; color: #0969da; font-weight: 600; }
+
+  .content-area { display: flex; gap: 0; padding: 16px 24px; }
+  .editor-panel { flex: 0 0 60%; background: #fff; border: 1px solid #d0d7de; border-radius: 6px 0 0 6px; overflow: hidden; }
+  .preview-panel { flex: 0 0 40%; background: #fff; border: 1px solid #d0d7de; border-left: none; border-radius: 0 6px 6px 0; }
+  .panel-header { padding: 8px 16px; background: #f6f8fa; border-bottom: 1px solid #d0d7de; font-size: 12px; font-weight: 600; color: #1f2328; display: flex; justify-content: space-between; align-items: center; }
+  .panel-header .badge-add { color: #1a7f37; }
+  .panel-header .badge-del { color: #cf222e; }
+
+  .code-block { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 20px; overflow-x: auto; }
+  .code-line { display: flex; }
+  .line-num { width: 50px; padding: 0 10px; text-align: right; color: #6e7781; user-select: none; background: #f6f8fa; border-right: 1px solid #d0d7de; flex-shrink: 0; }
+  .line-content { padding: 0 12px; white-space: pre; flex: 1; }
+  .line-add { background: #dafbe1; }
+  .line-add .line-num { background: #ccffd8; color: #1a7f37; }
+  .line-del { background: #ffebe9; }
+  .line-del .line-num { background: #ffd7d5; color: #cf222e; }
+  .line-hunk { background: #ddf4ff; color: #0969da; }
+  .line-hunk .line-num { background: #ddf4ff; color: #0969da; }
+
+  /* syntax */
+  .tk-keyword { color: #cf222e; }
+  .tk-string { color: #0a3069; }
+  .tk-comment { color: #6e7781; font-style: italic; }
+  .tk-func { color: #8250df; }
+  .tk-type { color: #953800; }
+  .tk-num { color: #0550ae; }
+
+  .status-bar { display: flex; justify-content: space-between; padding: 8px 24px; background: #f6f8fa; border-top: 1px solid #d0d7de; font-size: 12px; color: #6e7781; }
+  .status-bar .left span { margin-right: 16px; }
+  .status-bar .right span { margin-left: 16px; }
+
+  .blame-info { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: #fffbe6; border-bottom: 1px solid #d0d7de; font-size: 12px; }
+</style>
+
+
+<div class="page">
+
+  <header class="top-bar">
+    <a href="01-home.html" class="header-brand">⚡ OSS Hub</a>
+    <nav>
+      <a href="03-search-results.html">探索</a>
+      <a href="09-commit-history.html">履歴</a>
+      <a href="07-repo-detail.html">リポジトリ</a>
+    </nav>
+  </header>
+
+  <div class="breadcrumb">
+    <a href="07-repo-detail.html">octocat</a>
+    <span class="sep">/</span>
+    <a href="07-repo-detail.html">awesome-toolkit</a>
+    <span class="sep">/</span>
+    <a href="07-repo-detail.html">src</a>
+    <span class="sep">/</span>
+    <a href="07-repo-detail.html">core</a>
+    <span class="sep">/</span>
+    <span class="current">parser.ts</span>
+    <span style="margin-left:12px;" class="badge badge-primary">main</span>
+  </div>
+
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <span class="file-icon">📄</span>
+      <span class="filename">parser.ts</span>
+      <span class="file-meta">· 218 行 · 6.4 KB · TypeScript</span>
+    </div>
+    <div class="toolbar-right">
+      <div class="view-tabs">
+        <a href="08-file-viewer.html" class="active">📝 Code</a>
+        <a href="08-file-viewer.html">🔀 Diff</a>
+        <a href="08-file-viewer.html">👤 Blame</a>
+        <a href="08-file-viewer.html">📜 Raw</a>
+      </div>
+      <a href="09-commit-history.html" class="btn btn-outline btn-sm">🕐 履歴</a>
+      <a href="08-file-viewer.html" class="btn btn-outline btn-sm">✏️ 編集</a>
+      <a href="07-repo-detail.html" class="btn btn-ghost btn-sm">← 戻る</a>
+    </div>
+  </div>
+
+  <div class="blame-info">
+    <span class="avatar avatar-sm" style="display:inline-flex;align-items:center;justify-content:center;background:#0969da;color:#fff;border-radius:50%;width:20px;height:20px;font-size:11px;">O</span>
+    <strong>octocat</strong>
+    <a href="09-commit-history.html" style="color:#0969da;text-decoration:none;">feat: improve token parsing edge cases</a>
+    <span style="color:#6e7781;">· #a4f12c8 · 2 日前</span>
+  </div>
+
+  <div class="content-area">
+
+    
+    <div class="editor-panel">
+      <div class="panel-header">
+        <span>ソースコード（シンタックスハイライト）</span>
+        <span style="font-weight:400; color:#6e7781;">TypeScript · UTF-8 · LF</span>
+      </div>
+      <div class="code-block mono">
+        <div class="code-line"><span class="line-num">1</span><span class="line-content"><span class="tk-comment">// parser.ts — Lightweight token parser</span></span></div>
+        <div class="code-line"><span class="line-num">2</span><span class="line-content"><span class="tk-keyword">import</span> { Token, TokenType } <span class="tk-keyword">from</span> <span class="tk-string">"./types"</span>;</span></div>
+        <div class="code-line"><span class="line-num">3</span><span class="line-content"><span class="tk-keyword">import</span> { Lexer } <span class="tk-keyword">from</span> <span class="tk-string">"./lexer"</span>;</span></div>
+        <div class="code-line"><span class="line-num">4</span><span class="line-content"></span></div>
+        <div class="code-line"><span class="line-num">5</span><span class="line-content"><span class="tk-keyword">export</span> <span class="tk-keyword">interface</span> <span class="tk-type">ParseOptions</span> {</span></div>
+        <div class="code-line"><span class="line-num">6</span><span class="line-content">  strict?: <span class="tk-type">boolean</span>;</span></div>
+        <div class="code-line"><span class="line-num">7</span><span class="line-content">  maxDepth?: <span class="tk-type">number</span>;</span></div>
+        <div class="code-line"><span class="line-num">8</span><span class="line-content">}</span></div>
+        <div class="code-line"><span class="line-num">9</span><span class="line-content"></span></div>
+        <div class="code-line"><span class="line-num">10</span><span class="line-content"><span class="tk-keyword">export</span> <span class="tk-keyword">class</span> <span class="tk-type">Parser</span> {</span></div>
+        <div class="code-line"><span class="line-num">11</span><span class="line-content">  <span class="tk-keyword">private</span> tokens: <span class="tk-type">Token</span>[] = [];</span></div>
+        <div class="code-line"><span class="line-num">12</span><span class="line-content">  <span class="tk-keyword">private</span> pos: <span class="tk-type">number</span> = <span class="tk-num">0</span>;</span></div>
+        <div class="code-line"><span class="line-num">13</span><span class="line-content"></span></div>
+        <div class="code-line"><span class="line-num">14</span><span class="line-content">  <span class="tk-keyword">constructor</span>(<span class="tk-keyword">private</span> opts: <span class="tk-type">ParseOptions</span> = {}) {}</span></div>
+        <div class="code-line"><span class="line-num">15</span><span class="line-content"></span></div>
+        <div class="code-line"><span class="line-num">16</span><span class="line-content">  <span class="tk-keyword">public</span> <span class="tk-func">parse</span>(input: <span class="tk-type">string</span>): <span class="tk-type">AST</span> {</span></div>
+        <div class="code-line"><span class="line-num">17</span><span class="line-content">    <span class="tk-keyword">const</span> lexer = <span class="tk-keyword">new</span> <span class="tk-func">Lexer</span>(input);</span></div>
+        <div class="code-line"><span class="line-num">18</span><span class="line-content">    <span class="tk-keyword">this</span>.tokens = lexer.<span class="tk-func">tokenize</span>();</span></div>
+        <div class="code-line"><span class="line-num">19</span><span class="line-content">    <span class="tk-keyword">this</span>.pos = <span class="tk-num">0</span>;</span></div>
+        <div class="code-line"><span class="line-num">20</span><span class="line-content">    <span class="tk-keyword">return</span> <span class="tk-keyword">this</span>.<span class="tk-func">parseProgram</span>();</span></div>
+        <div class="code-line"><span class="line-num">21</span><span class="line-content">  }</span></div>
+        <div class="code-line"><span class="line-num">22</span><span class="line-content"></span></div>
+        <div class="code-line"><span class="line-num">23</span><span class="line-content">  <span class="tk-keyword">private</span> <span class="tk-func">peek</span>(): <span class="tk-type">Token</span> | <span class="tk-keyword">null</span> {</span></div>
+        <div class="code-line"><span class="line-num">24</span><span class="line-content">    <span class="tk-keyword">return</span> <span class="tk-keyword">this</span>.tokens[<span class="tk-keyword">this</span>.pos] ?? <span class="tk-keyword">null</span>;</span></div>
+        <div class="code-line"><span class="line-num">25</span><span class="line-content">  }</span></div>
+        <div class="code-line"><span class="line-num">26</span><span class="line-content">}</span></div>
+      </div>
+    </div>
+
+    
+    <div class="preview-panel">
+      <div class="panel-header">
+        <span>Diff プレビュー</span>
+        <span>
+          <span class="badge-add">+12</span>
+          <span class="badge-del">−4</span>
+        </span>
+      </div>
+      <div class="code-block mono">
+        <div class="code-line line-hunk"><span class="line-num">@@</span><span class="line-content">@@ -14,7 +14,12 @@ parser.ts</span></div>
+        <div class="code-line"><span class="line-num">14</span><span class="line-content">  constructor(opts = {}) {}</span></div>
+        <div class="code-line"><span class="line-num">15</span><span class="line-content"></span></div>
+        <div class="code-line line-del"><span class="line-num">-</span><span class="line-content">  parse(input) {</span></div>
+        <div class="code-line line-add"><span class="line-num">+</span><span class="line-content">  parse(input: string): AST {</span></div>
+        <div class="code-line line-add"><span class="line-num">+</span><span class="line-content">    if (!input) throw new Error("empty");</span></div>
+        <div class="code-line"><span class="line-num">17</span><span class="line-content">    const lexer = new Lexer(input);</span></div>
+        <div class="code-line"><span class="line-num">18</span><span class="line-content">    this.tokens = lexer.tokenize();</span></div>
+        <div class="code-line line-del"><span class="line-num">-</span><span class="line-content">    this.pos = 0</span></div>
+        <div class="code-line line-add"><span class="line-num">+</span><span class="line-content">    this.pos = 0;</span></div>
+        <div class="code-line"><span class="line-num">20</span><span class="line-content">    return this.parseProgram();</span></div>
+        <div class="code-line"><span class="line-num">21</span><span class="line-content">  }</span></div>
+        <div class="code-line line-hunk"><span class="line-num">@@</span><span class="line-content">@@ -23,4 +28,8 @@</span></div>
+        <div class="code-line line-del"><span class="line-num">-</span><span class="line-content">  peek() { return this.tokens[this.pos]; }</span></div>
+        <div class="code-line line-add"><span class="line-num">+</span><span class="line-content">  private peek(): Token | null {</span></div>
+        <div class="code-line line-add"><span class="line-num">+</span><span class="line-content">    return this.tokens[this.pos] ?? null;</span></div>
+        <div class="code-line line-add"><span class="line-num">+</span><span class="line-content">  }</span></div>
+        <div class="code-line"><span class="line-num">26</span><span class="line-content">}</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="status-bar">
+    <div class="left">
+      <span>📄 218 行</span>
+      <span>🔤 6,412 文字</span>
+      <span>💾 保存済み</span>
+      <span>🕐 最終更新: 2024-05-12 14:23</span>
+    </div>
+    <div class="right">
+      <span>TypeScript</span>
+      <span>UTF-8</span>
+      <span>LF</span>
+      <span>Spaces: 2</span>
+    </div>
+  </div>
+
+</div>
+

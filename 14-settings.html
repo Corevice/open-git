@@ -1,0 +1,288 @@
+
+
+
+<meta charset="UTF-8">
+<title>ユーザー設定 - OctoHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { margin: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .layout { display: grid; grid-template-columns: 260px 1fr; max-width: 1280px; margin: 0 auto; gap: 24px; padding: 24px; }
+  .settings-nav { background: #fff; border: 1px solid #d1d9e0; border-radius: 8px; padding: 8px 0; height: fit-content; }
+  .settings-nav-group { padding: 8px 0; }
+  .settings-nav-title { font-size: 12px; font-weight: 600; color: #59636e; text-transform: uppercase; padding: 8px 16px; }
+  .settings-nav a { display: block; padding: 8px 16px; color: #1f2328; text-decoration: none; border-left: 3px solid transparent; font-size: 14px; }
+  .settings-nav a:hover { background: #f6f8fa; }
+  .settings-nav a.active { border-left-color: #0969da; background: #ddf4ff20; font-weight: 600; color: #0969da; }
+  .main { display: flex; flex-direction: column; gap: 24px; }
+  .section-title { font-size: 24px; font-weight: 600; margin: 0 0 4px; padding-bottom: 12px; border-bottom: 1px solid #d1d9e0; }
+  .section-desc { color: #59636e; font-size: 14px; margin: 0 0 16px; }
+  .setting-row { display: grid; grid-template-columns: 200px 1fr; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid #eaeef2; }
+  .setting-row:last-child { border-bottom: none; }
+  .setting-label { font-weight: 600; font-size: 14px; }
+  .setting-label small { display: block; font-weight: 400; color: #59636e; font-size: 12px; margin-top: 2px; }
+  .form-input { width: 100%; padding: 6px 12px; border: 1px solid #d1d9e0; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+  .scope-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; padding: 12px; background: #f6f8fa; border-radius: 6px; border: 1px solid #d1d9e0; }
+  .scope-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; padding: 4px 0; }
+  .scope-item input { margin-top: 3px; }
+  .scope-item .scope-desc { color: #59636e; font-size: 12px; }
+  .token-list { border: 1px solid #d1d9e0; border-radius: 8px; overflow: hidden; }
+  .token-item { padding: 16px; border-bottom: 1px solid #d1d9e0; display: flex; justify-content: space-between; align-items: flex-start; }
+  .token-item:last-child { border-bottom: none; }
+  .token-name { font-weight: 600; font-size: 14px; }
+  .token-meta { font-size: 12px; color: #59636e; margin-top: 4px; }
+  .token-scopes { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
+  .danger-zone { border: 1px solid #cf222e; border-radius: 8px; padding: 16px; background: #fff8f8; }
+  .danger-zone h3 { color: #cf222e; margin: 0 0 4px; font-size: 16px; }
+  .danger-zone p { color: #59636e; font-size: 13px; margin: 0 0 12px; }
+  .actions-row { display: flex; gap: 8px; justify-content: flex-end; padding-top: 16px; border-top: 1px solid #eaeef2; margin-top: 8px; }
+  .toggle { position: relative; width: 40px; height: 22px; background: #d1d9e0; border-radius: 11px; cursor: pointer; }
+  .toggle.on { background: #2da44e; }
+  .toggle::after { content: ''; position: absolute; width: 18px; height: 18px; background: #fff; border-radius: 50%; top: 2px; left: 2px; transition: 0.2s; }
+  .toggle.on::after { left: 20px; }
+  .header { background: #24292f; color: #fff; padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+  .header a { color: #fff; text-decoration: none; font-size: 14px; }
+  .header .brand { font-weight: 700; font-size: 18px; }
+  .breadcrumb { font-size: 14px; color: #59636e; margin-bottom: 8px; }
+  .breadcrumb a { color: #0969da; text-decoration: none; }
+</style>
+
+
+
+<div class="header">
+  <span class="brand">⚙ OctoHub</span>
+  <a href="04-dashboard.html">ダッシュボード</a>
+  <a href="#">エクスプローラー</a>
+  <div style="margin-left:auto; display:flex; gap:12px; align-items:center;">
+    <span style="font-size:13px;">@yamada-taro</span>
+    <div class="avatar avatar-sm" style="width:28px;height:28px;background:#0969da;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;">YT</div>
+  </div>
+</div>
+
+<div class="layout">
+
+  <aside class="settings-nav">
+    <div class="settings-nav-group">
+      <div class="settings-nav-title">アカウント</div>
+      <a href="14-settings.html">プロフィール</a>
+      <a href="14-settings.html">アカウント設定</a>
+      <a href="14-settings.html">表示設定</a>
+    </div>
+    <div class="settings-nav-group">
+      <div class="settings-nav-title">セキュリティ</div>
+      <a href="14-settings.html">パスワード</a>
+      <a href="14-settings.html">SSH および GPG キー</a>
+      <a href="14-settings.html" class="active">Personal Access Tokens</a>
+      <a href="14-settings.html">OAuth Apps</a>
+      <a href="14-settings.html">セッション</a>
+    </div>
+    <div class="settings-nav-group">
+      <div class="settings-nav-title">通知</div>
+      <a href="14-settings.html">メール通知</a>
+      <a href="14-settings.html">Webhook</a>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <div>
+      <div class="breadcrumb"><a href="04-dashboard.html">← ダッシュボードへ戻る</a></div>
+      <h1 class="section-title">Personal Access Tokens</h1>
+      <p class="section-desc">トークンは API リクエストの認証に使用されます。パスワードと同様に機密情報として扱い、安全に保管してください。</p>
+    </div>
+
+    
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🔑 新しいトークンを発行</div>
+      </div>
+      <div class="card-body">
+        <div class="setting-row">
+          <div class="setting-label">トークン名 <small>用途を識別する名前</small></div>
+          <input class="form-input" type="text" placeholder="例: CI/CD Pipeline" value="my-ci-pipeline">
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">有効期限</div>
+          <select class="form-select">
+            <option>7日間</option>
+            <option>30日間</option>
+            <option>90日間</option>
+            <option>1年間</option>
+            <option>無期限 (非推奨)</option>
+          </select>
+        </div>
+        <div class="setting-row" style="align-items: flex-start;">
+          <div class="setting-label">スコープ <small>権限を選択</small></div>
+          <div class="scope-grid">
+            <label class="scope-item">
+              <input type="checkbox">
+              <div>
+                <div><strong>repo</strong></div>
+                <div class="scope-desc">プライベートリポジトリへのフルアクセス</div>
+              </div>
+            </label>
+            <label class="scope-item">
+              <input type="checkbox">
+              <div>
+                <div><strong>workflow</strong></div>
+                <div class="scope-desc">GitHub Actions ワークフローの更新</div>
+              </div>
+            </label>
+            <label class="scope-item">
+              <input type="checkbox">
+              <div>
+                <div><strong>write:packages</strong></div>
+                <div class="scope-desc">パッケージのアップロード</div>
+              </div>
+            </label>
+            <label class="scope-item">
+              <input type="checkbox">
+              <div>
+                <div><strong>delete:packages</strong></div>
+                <div class="scope-desc">パッケージの削除</div>
+              </div>
+            </label>
+            <label class="scope-item">
+              <input type="checkbox">
+              <div>
+                <div><strong>read:org</strong></div>
+                <div class="scope-desc">組織情報の読み取り</div>
+              </div>
+            </label>
+            <label class="scope-item">
+              <input type="checkbox">
+              <div>
+                <div><strong>admin:repo_hook</strong></div>
+                <div class="scope-desc">リポジトリフックの管理</div>
+              </div>
+            </label>
+            <label class="scope-item">
+              <input type="checkbox">
+              <div>
+                <div><strong>gist</strong></div>
+                <div class="scope-desc">Gist の作成</div>
+              </div>
+            </label>
+            <label class="scope-item">
+              <input type="checkbox">
+              <div>
+                <div><strong>user:email</strong></div>
+                <div class="scope-desc">メールアドレスへのアクセス</div>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="card-footer">
+        <div class="actions-row" style="border:none; padding:0; margin:0;">
+          <a href="14-settings.html" class="btn btn-secondary">キャンセル</a>
+          <a href="14-settings.html" class="btn btn-primary">トークンを生成</a>
+        </div>
+      </div>
+    </div>
+
+    
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">発行済みトークン (3)</div>
+      </div>
+      <div class="card-body" style="padding: 0;">
+        <div class="token-list" style="border:none; border-radius:0;">
+
+          <div class="token-item">
+            <div>
+              <div class="token-name">production-deploy-token</div>
+              <div class="token-meta">
+                作成日: 2024-08-15 ・ 最終使用: 2時間前 ・ 有効期限: 2024-11-13
+              </div>
+              <div class="token-scopes">
+                <span class="badge badge-primary">repo</span>
+                <span class="badge badge-primary">workflow</span>
+                <span class="badge badge-primary">write:packages</span>
+              </div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <a href="14-settings.html" class="btn btn-sm btn-outline">再生成</a>
+              <a href="14-settings.html" class="btn btn-sm btn-danger">失効</a>
+            </div>
+          </div>
+
+          <div class="token-item">
+            <div>
+              <div class="token-name">local-dev-token</div>
+              <div class="token-meta">
+                作成日: 2024-06-02 ・ 最終使用: 5日前 ・ <span style="color:#bf8700;">有効期限: 残り3日</span>
+              </div>
+              <div class="token-scopes">
+                <span class="badge badge-primary">repo</span>
+                <span class="badge badge-primary">read:org</span>
+              </div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <a href="14-settings.html" class="btn btn-sm btn-outline">再生成</a>
+              <a href="14-settings.html" class="btn btn-sm btn-danger">失効</a>
+            </div>
+          </div>
+
+          <div class="token-item">
+            <div>
+              <div class="token-name">old-script-token <span class="badge badge-danger">期限切れ</span></div>
+              <div class="token-meta">
+                作成日: 2024-01-10 ・ 最終使用: 45日前 ・ 有効期限: 2024-04-10
+              </div>
+              <div class="token-scopes">
+                <span class="badge badge-primary">repo</span>
+              </div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <a href="14-settings.html" class="btn btn-sm btn-secondary">削除</a>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🔔 トークン関連の通知</div>
+      </div>
+      <div class="card-body">
+        <div class="setting-row">
+          <div class="setting-label">期限切れ警告 <small>有効期限の7日前にメール通知</small></div>
+          <div class="toggle on"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">不審なアクセス検出 <small>異常なIPからのアクセスを通知</small></div>
+          <div class="toggle on"></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">新規トークン発行通知 <small>新しいトークンが発行された時に通知</small></div>
+          <div class="toggle"></div>
+        </div>
+      </div>
+      <div class="card-footer">
+        <div class="actions-row" style="border:none; padding:0; margin:0;">
+          <a href="14-settings.html" class="btn btn-primary">変更を保存</a>
+        </div>
+      </div>
+    </div>
+
+    
+    <div class="danger-zone">
+      <h3>⚠ 危険な操作</h3>
+      <p>以下の操作は取り消すことができません。慎重に行ってください。</p>
+      <div style="display:flex; justify-content: space-between; align-items: center; padding: 12px 0; border-top: 1px solid #ffcecb;">
+        <div>
+          <div style="font-weight:600; font-size:14px;">すべてのトークンを失効</div>
+          <div style="font-size:12px; color:#59636e;">発行されているすべてのPATを即座に無効化します</div>
+        </div>
+        <a href="14-settings.html" class="btn btn-danger">すべて失効する</a>
+      </div>
+    </div>
+
+  </main>
+
+</div>
+
+

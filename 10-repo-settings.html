@@ -1,0 +1,275 @@
+
+
+
+<meta charset="UTF-8">
+<title>リポジトリ設定 - awesome-project</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { margin: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .app-bar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; background: #24292f; color: #fff; }
+  .header-brand { font-weight: 700; font-size: 18px; }
+  .header-nav { display: flex; gap: 16px; }
+  .header-nav a { color: #fff; text-decoration: none; opacity: 0.85; font-size: 14px; }
+  .header-actions { display: flex; gap: 12px; align-items: center; }
+  .repo-header { background: #fff; border-bottom: 1px solid #d1d9e0; padding: 16px 32px; }
+  .repo-title { font-size: 20px; margin: 0; }
+  .repo-title a { color: #0969da; text-decoration: none; }
+  .breadcrumb { color: #656d76; font-size: 13px; margin-bottom: 8px; }
+  .layout { display: grid; grid-template-columns: 256px 1fr; gap: 32px; max-width: 1200px; margin: 24px auto; padding: 0 24px; }
+  .side-menu { background: transparent; }
+  .side-menu h3 { font-size: 12px; text-transform: uppercase; color: #656d76; margin: 16px 8px 8px; letter-spacing: 0.5px; }
+  .side-menu a { display: block; padding: 8px 12px; color: #1f2328; text-decoration: none; border-radius: 6px; font-size: 14px; border-left: 3px solid transparent; margin-bottom: 2px; }
+  .side-menu a:hover { background: #eaeef2; }
+  .side-menu a.active { background: #ddf4ff; border-left-color: #0969da; font-weight: 600; color: #0969da; }
+  .main { display: flex; flex-direction: column; gap: 32px; }
+  .section { background: #fff; border: 1px solid #d1d9e0; border-radius: 8px; padding: 24px; }
+  .section h2 { margin: 0 0 4px; font-size: 18px; padding-bottom: 12px; border-bottom: 1px solid #d1d9e0; }
+  .section-desc { color: #656d76; font-size: 13px; margin: 12px 0 20px; }
+  .setting-row { display: grid; grid-template-columns: 240px 1fr; gap: 24px; padding: 16px 0; border-bottom: 1px solid #eaeef2; align-items: center; }
+  .setting-row:last-of-type { border-bottom: none; }
+  .setting-label { font-weight: 600; font-size: 14px; }
+  .setting-label .hint { display: block; font-weight: 400; color: #656d76; font-size: 12px; margin-top: 4px; }
+  .setting-control input[type="text"], .setting-control textarea, .form-select { width: 100%; padding: 6px 12px; border: 1px solid #d1d9e0; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+  .toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
+  .toggle input { display: none; }
+  .toggle-slider { position: absolute; cursor: pointer; inset: 0; background: #2da44e; border-radius: 22px; transition: 0.2s; }
+  .toggle-slider:before { content: ""; position: absolute; height: 16px; width: 16px; left: 21px; top: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
+  .toggle.off .toggle-slider { background: #d1d9e0; }
+  .toggle.off .toggle-slider:before { left: 3px; }
+  .save-bar { margin-top: 20px; }
+  .danger-zone { border-color: #cf222e; }
+  .danger-zone h2 { color: #cf222e; }
+  .danger-item { display: flex; justify-content: space-between; align-items: center; padding: 16px; border: 1px solid #ffcecb; border-radius: 6px; margin-bottom: 12px; }
+  .danger-item-text strong { display: block; color: #cf222e; margin-bottom: 4px; }
+  .danger-item-text span { font-size: 13px; color: #656d76; }
+  .collab-list { list-style: none; padding: 0; margin: 0; }
+  .collab-list li { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eaeef2; }
+  .collab-list li:last-child { border-bottom: none; }
+  .avatar-sm { width: 32px; height: 32px; border-radius: 50%; background: #0969da; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; }
+  .collab-info { flex: 1; }
+  .collab-info .name { font-weight: 600; font-size: 14px; }
+  .collab-info .login { font-size: 12px; color: #656d76; }
+  .webhook-list { list-style: none; padding: 0; margin: 0; }
+  .webhook-list li { display: flex; justify-content: space-between; align-items: center; padding: 12px; border: 1px solid #d1d9e0; border-radius: 6px; margin-bottom: 8px; }
+  .webhook-url { font-family: ui-monospace, monospace; font-size: 13px; }
+  .invite-form { display: flex; gap: 8px; margin-top: 16px; }
+  .invite-form input { flex: 1; padding: 6px 12px; border: 1px solid #d1d9e0; border-radius: 6px; }
+  .btn { display: inline-block; padding: 6px 16px; border-radius: 6px; font-size: 14px; font-weight: 500; text-decoration: none; cursor: pointer; border: 1px solid transparent; }
+  .btn-primary { background: #1f883d; color: #fff; border-color: rgba(31,35,40,0.15); }
+  .btn-secondary { background: #f6f8fa; color: #1f2328; border-color: #d1d9e0; }
+  .btn-danger { background: #fff; color: #cf222e; border-color: #cf222e; }
+  .btn-danger:hover { background: #cf222e; color: #fff; }
+  .badge { display: inline-block; padding: 2px 8px; font-size: 11px; border-radius: 12px; border: 1px solid #d1d9e0; }
+  .badge-success { background: #dafbe1; color: #1a7f37; border-color: transparent; }
+</style>
+
+
+
+<header class="app-bar">
+  <div style="display:flex;align-items:center;gap:24px;">
+    <div class="header-brand">🐙 OpenHub</div>
+    <nav class="header-nav">
+      <a href="03-dashboard.html">ダッシュボード</a>
+      <a href="04-explore.html">Explore</a>
+      <a href="05-search.html">検索</a>
+    </nav>
+  </div>
+  <div class="header-actions">
+    <a href="09-notifications.html" style="color:#fff;text-decoration:none;">🔔</a>
+    <a href="08-profile.html" style="color:#fff;text-decoration:none;">👤 yamada-taro</a>
+  </div>
+</header>
+
+<div class="repo-header">
+  <div class="breadcrumb"><a href="08-profile.html" style="color:#0969da;text-decoration:none;">yamada-taro</a> / <a href="07-repo-detail.html" style="color:#0969da;text-decoration:none;">awesome-project</a></div>
+  <h1 class="repo-title">⚙️ リポジトリ設定 <span class="badge badge-success">Public</span></h1>
+</div>
+
+<div class="layout">
+  <aside class="side-menu">
+    <h3>設定</h3>
+    <a href="10-repo-settings.html" class="active">General</a>
+    <a href="10-repo-settings.html">Collaborators</a>
+    <a href="10-repo-settings.html">Webhooks</a>
+    <a href="10-repo-settings.html">Branches</a>
+    <a href="10-repo-settings.html">Actions</a>
+    <a href="10-repo-settings.html">Secrets</a>
+    <a href="10-repo-settings.html">Pages</a>
+    <h3>その他</h3>
+    <a href="10-repo-settings.html" style="color:#cf222e;">Danger Zone</a>
+    <a href="07-repo-detail.html">← リポジトリへ戻る</a>
+  </aside>
+
+  <main class="main">
+
+    
+    <section class="section">
+      <h2>General</h2>
+      <p class="section-desc">リポジトリの基本情報を管理します。</p>
+
+      <div class="setting-row">
+        <div class="setting-label">リポジトリ名<span class="hint">URLに使用されます</span></div>
+        <div class="setting-control"><input type="text" value="awesome-project"></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">説明<span class="hint">短い概要を記述</span></div>
+        <div class="setting-control"><input type="text" value="A modern web framework for building scalable applications"></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">デフォルトブランチ</div>
+        <div class="setting-control">
+          <select class="form-select">
+            <option>main</option>
+            <option>develop</option>
+            <option>master</option>
+          </select>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">Issues を有効化<span class="hint">バグや要望の追跡</span></div>
+        <div class="setting-control"><label class="toggle"><input type="checkbox"><span class="toggle-slider"></span></label></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">Wiki を有効化</div>
+        <div class="setting-control"><label class="toggle off"><input type="checkbox"><span class="toggle-slider"></span></label></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">Discussions を有効化</div>
+        <div class="setting-control"><label class="toggle"><input type="checkbox"><span class="toggle-slider"></span></label></div>
+      </div>
+
+      <div class="save-bar"><a href="10-repo-settings.html" class="btn btn-primary">変更を保存</a></div>
+    </section>
+
+    
+    <section class="section">
+      <h2>Collaborators</h2>
+      <p class="section-desc">このリポジトリに書き込み権限を持つメンバーを管理します。</p>
+
+      <ul class="collab-list">
+        <li>
+          <div class="avatar-sm">YT</div>
+          <div class="collab-info"><div class="name">山田 太郎</div><div class="login">@yamada-taro</div></div>
+          <span class="badge">Owner</span>
+        </li>
+        <li>
+          <div class="avatar-sm" style="background:#bf8700;">SK</div>
+          <div class="collab-info"><div class="name">鈴木 健一</div><div class="login">@suzuki-k</div></div>
+          <select class="form-select" style="width:auto;"><option>Admin</option><option>Write</option><option>Read</option></select>
+          <a href="10-repo-settings.html" class="btn btn-secondary">削除</a>
+        </li>
+        <li>
+          <div class="avatar-sm" style="background:#8250df;">MT</div>
+          <div class="collab-info"><div class="name">田中 美咲</div><div class="login">@misaki-t</div></div>
+          <select class="form-select" style="width:auto;"><option>Write</option><option>Admin</option><option>Read</option></select>
+          <a href="10-repo-settings.html" class="btn btn-secondary">削除</a>
+        </li>
+      </ul>
+
+      <div class="invite-form">
+        <input type="text" placeholder="ユーザー名またはメールアドレスを入力">
+        <a href="10-repo-settings.html" class="btn btn-primary">招待を送信</a>
+      </div>
+    </section>
+
+    
+    <section class="section">
+      <h2>Webhooks</h2>
+      <p class="section-desc">イベント発生時に外部サービスへ通知を送信します。</p>
+
+      <ul class="webhook-list">
+        <li>
+          <div>
+            <div class="webhook-url">https://ci.example.com/hooks/github</div>
+            <div style="font-size:12px;color:#656d76;margin-top:4px;">push, pull_request • <span class="badge badge-success">Active</span></div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <a href="10-repo-settings.html" class="btn btn-secondary">編集</a>
+            <a href="10-repo-settings.html" class="btn btn-danger">削除</a>
+          </div>
+        </li>
+        <li>
+          <div>
+            <div class="webhook-url">https://slack.com/api/hooks/T012345</div>
+            <div style="font-size:12px;color:#656d76;margin-top:4px;">issues, release • <span class="badge badge-success">Active</span></div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <a href="10-repo-settings.html" class="btn btn-secondary">編集</a>
+            <a href="10-repo-settings.html" class="btn btn-danger">削除</a>
+          </div>
+        </li>
+      </ul>
+
+      <div style="margin-top:16px;"><a href="10-repo-settings.html" class="btn btn-primary">+ Webhook を追加</a></div>
+    </section>
+
+    
+    <section class="section">
+      <h2>Branch protection rules</h2>
+      <p class="section-desc">特定のブランチを保護し、直接プッシュやマージを制限します。</p>
+
+      <div class="setting-row">
+        <div class="setting-label"><code style="background:#eaeef2;padding:2px 6px;border-radius:4px;">main</code><span class="hint">保護ルール適用中</span></div>
+        <div class="setting-control" style="display:flex;gap:8px;justify-content:flex-end;">
+          <a href="10-repo-settings.html" class="btn btn-secondary">編集</a>
+          <a href="10-repo-settings.html" class="btn btn-danger">削除</a>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">プルリクエスト必須</div>
+        <div class="setting-control"><label class="toggle"><input type="checkbox"><span class="toggle-slider"></span></label></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">レビュー承認数</div>
+        <div class="setting-control"><select class="form-select"><option>1</option><option>2</option><option>3</option></select></div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-label">ステータスチェック必須</div>
+        <div class="setting-control"><label class="toggle"><input type="checkbox"><span class="toggle-slider"></span></label></div>
+      </div>
+
+      <div class="save-bar"><a href="10-repo-settings.html" class="btn btn-primary">+ ブランチ保護ルールを追加</a></div>
+    </section>
+
+    
+    <section class="section danger-zone">
+      <h2>⚠️ Danger Zone</h2>
+      <p class="section-desc">これらの操作は元に戻せない場合があります。慎重に実行してください。</p>
+
+      <div class="danger-item">
+        <div class="danger-item-text">
+          <strong>可視性の変更</strong>
+          <span>このリポジトリは現在 <b>Public</b> です。Privateに変更できます。</span>
+        </div>
+        <a href="10-repo-settings.html" class="btn btn-danger">可視性を変更</a>
+      </div>
+
+      <div class="danger-item">
+        <div class="danger-item-text">
+          <strong>所有権の移譲</strong>
+          <span>このリポジトリの所有権を別のユーザーまたは組織に移譲します。</span>
+        </div>
+        <a href="10-repo-settings.html" class="btn btn-danger">所有権を移譲</a>
+      </div>
+
+      <div class="danger-item">
+        <div class="danger-item-text">
+          <strong>リポジトリのアーカイブ</strong>
+          <span>読み取り専用にします。後から解除可能です。</span>
+        </div>
+        <a href="10-repo-settings.html" class="btn btn-danger">アーカイブ</a>
+      </div>
+
+      <div class="danger-item">
+        <div class="danger-item-text">
+          <strong>リポジトリの削除</strong>
+          <span>この操作は<b>元に戻せません</b>。すべてのIssue、PR、Wikiが削除されます。</span>
+        </div>
+        <a href="10-repo-settings.html" class="btn btn-danger">このリポジトリを削除</a>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+
