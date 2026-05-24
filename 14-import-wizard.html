@@ -1,0 +1,210 @@
+
+
+
+<meta charset="UTF-8">
+<title>GitHubインポートウィザード</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { background: #f6f8fa; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .main-container { max-width: 1280px; margin: 0 auto; padding: 32px 24px; }
+  .page-header { text-align: center; margin-bottom: 40px; }
+  .page-header h1 { font-size: 28px; margin: 0 0 8px; }
+  .page-header p { color: #656d76; margin: 0; }
+
+  /* Step indicator */
+  .stepper { display: flex; justify-content: center; align-items: center; gap: 0; max-width: 720px; margin: 0 auto 40px; }
+  .step { display: flex; flex-direction: column; align-items: center; flex: 0 0 auto; position: relative; min-width: 120px; }
+  .step-circle { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; background: #eaeef2; color: #656d76; border: 2px solid #eaeef2; transition: all .2s; }
+  .step.completed .step-circle { background: #1f883d; color: white; border-color: #1f883d; }
+  .step.active .step-circle { background: #0969da; color: white; border-color: #0969da; box-shadow: 0 0 0 4px rgba(9,105,218,0.15); }
+  .step-label { margin-top: 8px; font-size: 13px; color: #656d76; font-weight: 500; }
+  .step.active .step-label { color: #0969da; font-weight: 600; }
+  .step.completed .step-label { color: #1f883d; }
+  .step-line { flex: 1; height: 2px; background: #eaeef2; margin: 0 -20px; margin-top: -28px; align-self: center; min-width: 40px; }
+  .step-line.done { background: #1f883d; }
+
+  .wizard-card { max-width: 600px; margin: 0 auto; background: white; border: 1px solid #d0d7de; border-radius: 8px; overflow: hidden; }
+  .wizard-card-header { padding: 20px 24px; border-bottom: 1px solid #d0d7de; }
+  .wizard-card-header h2 { margin: 0 0 4px; font-size: 18px; }
+  .wizard-card-header p { margin: 0; color: #656d76; font-size: 14px; }
+  .wizard-card-body { padding: 24px; }
+
+  .form-group { margin-bottom: 20px; }
+  .form-label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .form-input { width: 100%; padding: 8px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; box-sizing: border-box; font-family: inherit; }
+  .form-input:focus { outline: none; border-color: #0969da; box-shadow: 0 0 0 3px rgba(9,105,218,0.15); }
+  .form-hint { font-size: 12px; color: #656d76; margin-top: 4px; }
+
+  .check-list { display: flex; flex-direction: column; gap: 12px; }
+  .check-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid #d0d7de; border-radius: 6px; cursor: pointer; }
+  .check-item input { margin-top: 3px; }
+  .check-item-content { flex: 1; }
+  .check-item-title { font-weight: 600; font-size: 14px; }
+  .check-item-desc { font-size: 12px; color: #656d76; margin-top: 2px; }
+  .check-item-count { font-size: 12px; color: #0969da; font-weight: 500; }
+
+  .progress-section { text-align: center; }
+  .progress-bar { width: 100%; height: 8px; background: #eaeef2; border-radius: 4px; overflow: hidden; margin: 20px 0 8px; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, #0969da, #218bff); width: 65%; transition: width .3s; }
+  .progress-text { font-size: 13px; color: #656d76; margin-bottom: 24px; }
+  .progress-log { background: #0d1117; color: #c9d1d9; padding: 16px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; text-align: left; max-height: 200px; overflow-y: auto; line-height: 1.7; }
+  .log-success { color: #56d364; }
+  .log-info { color: #58a6ff; }
+  .log-pending { color: #d29922; }
+
+  .wizard-footer { max-width: 600px; margin: 16px auto 0; display: flex; justify-content: space-between; align-items: center; }
+  .wizard-actions { display: flex; gap: 8px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 500; text-decoration: none; cursor: pointer; border: 1px solid transparent; }
+  .btn-primary { background: #1f883d; color: white; border-color: rgba(31,35,40,0.15); }
+  .btn-outline { background: white; color: #1f2328; border-color: #d0d7de; }
+  .btn-ghost { background: transparent; color: #656d76; }
+
+  .app-bar { background: #24292f; color: white; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .logo { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .info-box { background: #ddf4ff; border: 1px solid #54aeff66; border-radius: 6px; padding: 12px 14px; font-size: 13px; color: #0550ae; margin-bottom: 20px; display: flex; gap: 8px; }
+</style>
+
+
+
+<div class="app-bar">
+  <div class="logo">
+    <span style="font-size:20px;">🐙</span>
+    <span>OpenSource GitHub</span>
+  </div>
+  <div>
+    <a href="05-repo-list.html" class="btn btn-ghost" style="color:#c9d1d9;">マイリポジトリ</a>
+  </div>
+</div>
+
+<div class="main-container">
+
+  <div class="page-header">
+    <h1>📥 GitHubリポジトリのインポート</h1>
+    <p>既存のGitHubリポジトリをこのプラットフォームに移行します</p>
+  </div>
+
+  
+  <div class="stepper">
+    <div class="step completed">
+      <div class="step-circle">✓</div>
+      <div class="step-label">URL入力</div>
+    </div>
+    <div class="step-line done"></div>
+    <div class="step completed">
+      <div class="step-circle">✓</div>
+      <div class="step-label">認証</div>
+    </div>
+    <div class="step-line done"></div>
+    <div class="step active">
+      <div class="step-circle">3</div>
+      <div class="step-label">移行範囲</div>
+    </div>
+    <div class="step-line"></div>
+    <div class="step">
+      <div class="step-circle">4</div>
+      <div class="step-label">インポート</div>
+    </div>
+  </div>
+
+  
+  <div class="wizard-card">
+    <div class="wizard-card-header">
+      <h2>移行対象を選択</h2>
+      <p>インポートするデータの種類を選んでください</p>
+    </div>
+    <div class="wizard-card-body">
+
+      <div class="info-box">
+        <span>ℹ️</span>
+        <div>リポジトリ <strong>facebook/react</strong> から以下のデータを検出しました。必要な項目のみインポートできます。</div>
+      </div>
+
+      <div class="check-list">
+        <label class="check-item">
+          <input type="checkbox">
+          <div class="check-item-content">
+            <div class="check-item-title">📂 Code（ソースコード）</div>
+            <div class="check-item-desc">全ブランチ・タグ・コミット履歴を含む完全な複製</div>
+            <div class="check-item-count">推定サイズ: 245 MB / 38,420 コミット</div>
+          </div>
+        </label>
+
+        <label class="check-item">
+          <input type="checkbox">
+          <div class="check-item-content">
+            <div class="check-item-title">🐛 Issues</div>
+            <div class="check-item-desc">課題・ラベル・コメント・添付ファイル</div>
+            <div class="check-item-count">12,847 件のIssue（うちOpen: 1,283）</div>
+          </div>
+        </label>
+
+        <label class="check-item">
+          <input type="checkbox">
+          <div class="check-item-content">
+            <div class="check-item-title">🔀 Pull Requests</div>
+            <div class="check-item-desc">PR・レビュー・コメント・マージ履歴</div>
+            <div class="check-item-count">8,921 件のPR（うちOpen: 412）</div>
+          </div>
+        </label>
+
+        <label class="check-item">
+          <input type="checkbox">
+          <div class="check-item-content">
+            <div class="check-item-title">📖 Wiki</div>
+            <div class="check-item-desc">Wikiページとリビジョン履歴</div>
+            <div class="check-item-count">86 ページ</div>
+          </div>
+        </label>
+
+        <label class="check-item">
+          <input type="checkbox">
+          <div class="check-item-content">
+            <div class="check-item-title">🚀 Releases</div>
+            <div class="check-item-desc">リリースタグとリリースノート</div>
+            <div class="check-item-count">142 リリース</div>
+          </div>
+        </label>
+      </div>
+
+      <div style="margin-top:20px; padding:12px; background:#f6f8fa; border-radius:6px; font-size:13px;">
+        <strong>推定インポート時間:</strong> 約 15〜20 分<br>
+        <span class="text-muted" style="color:#656d76;">バックグラウンドで実行され、完了時に通知されます</span>
+      </div>
+
+    </div>
+  </div>
+
+  
+  <div class="wizard-footer">
+    <a href="05-repo-list.html" class="btn btn-ghost">✕ キャンセル</a>
+    <div class="wizard-actions">
+      <a href="14-import-wizard.html" class="btn btn-outline">← 戻る</a>
+      <a href="07-repo-detail.html" class="btn btn-primary">インポート実行 →</a>
+    </div>
+  </div>
+
+  
+  <div style="max-width:600px; margin:40px auto 0;">
+    <details style="background:white; border:1px solid #d0d7de; border-radius:8px; padding:12px 16px;">
+      <summary style="cursor:pointer; font-weight:600; color:#656d76; font-size:13px;">👁 ステップ4プレビュー（実行中の表示）</summary>
+      <div style="margin-top:16px;" class="progress-section">
+        <h3 style="margin:0 0 4px; font-size:16px;">インポート実行中...</h3>
+        <p class="progress-text">facebook/react をインポートしています</p>
+        <div class="progress-bar">
+          <div class="progress-fill"></div>
+        </div>
+        <div class="progress-text"><strong>65%</strong> 完了 — 残り 約 6 分</div>
+        <div class="progress-log">
+          <div class="log-success">[✓] リポジトリ初期化完了</div>
+          <div class="log-success">[✓] Code: 38,420 コミットをクローン</div>
+          <div class="log-success">[✓] Issues: 12,847 件をインポート</div>
+          <div class="log-info">[→] Pull Requests を処理中... (5,234 / 8,921)</div>
+          <div class="log-pending">[…] レビューコメントを変換しています</div>
+        </div>
+      </div>
+    </details>
+  </div>
+
+</div>
+
+

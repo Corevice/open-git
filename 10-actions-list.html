@@ -1,0 +1,361 @@
+
+
+
+<meta charset="UTF-8">
+<title>Actions - オープンソースGitHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { margin: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .container { max-width: 1280px; margin: 0 auto; padding: 24px; }
+  .repo-header { background: #fff; border-bottom: 1px solid #d0d7de; padding: 16px 24px; }
+  .repo-path { font-size: 20px; font-weight: 600; }
+  .repo-path a { color: #0969da; text-decoration: none; }
+  .tabs { display: flex; gap: 4px; margin-top: 16px; border-bottom: 1px solid transparent; }
+  .tab { padding: 8px 16px; border-radius: 6px 6px 0 0; text-decoration: none; color: #1f2328; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+  .tab.active { border-bottom: 2px solid #fd8c73; font-weight: 600; }
+  .tab:hover { background: #f3f4f6; }
+  .layout { display: grid; grid-template-columns: 256px 1fr; gap: 24px; margin-top: 24px; }
+  .workflows-side .sidebar-section-title { font-size: 12px; text-transform: uppercase; color: #656d76; margin-bottom: 8px; }
+  .workflow-item { display: block; padding: 8px 12px; border-radius: 6px; text-decoration: none; color: #1f2328; font-size: 14px; margin-bottom: 2px; }
+  .workflow-item:hover { background: #f3f4f6; }
+  .workflow-item.active { background: #ddf4ff; color: #0969da; font-weight: 600; }
+  .filter-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .filter-bar input[type="text"] { flex: 1; min-width: 240px; padding: 6px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
+  .filter-bar select { padding: 6px 28px 6px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; background: #f6f8fa; }
+  .runs-table { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden; }
+  .runs-header { padding: 12px 16px; background: #f6f8fa; border-bottom: 1px solid #d0d7de; font-size: 14px; color: #656d76; display: flex; justify-content: space-between; align-items: center; }
+  .run-row { display: grid; grid-template-columns: 32px 1fr auto auto auto auto; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid #d8dee4; }
+  .run-row:last-child { border-bottom: none; }
+  .run-row:nth-child(even) { background: #fafbfc; }
+  .status-icon { font-size: 16px; }
+  .run-title { font-size: 14px; font-weight: 600; }
+  .run-title a { color: #1f2328; text-decoration: none; }
+  .run-title a:hover { color: #0969da; }
+  .run-meta { font-size: 12px; color: #656d76; margin-top: 2px; display: flex; gap: 8px; align-items: center; }
+  .branch-pill { background: #ddf4ff; color: #0969da; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 11px; }
+  .duration { font-size: 12px; color: #656d76; min-width: 70px; text-align: right; }
+  .time { font-size: 12px; color: #656d76; min-width: 100px; text-align: right; }
+  .actions-cell { display: flex; gap: 4px; }
+  .icon-btn { background: none; border: 1px solid #d0d7de; padding: 4px 8px; border-radius: 6px; cursor: pointer; text-decoration: none; color: #1f2328; font-size: 12px; }
+  .icon-btn:hover { background: #f3f4f6; }
+  .log-viewer { background: #0d1117; color: #e6edf3; border-radius: 6px; padding: 16px; margin-top: 24px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; line-height: 1.6; max-height: 320px; overflow-y: auto; }
+  .log-viewer-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #161b22; color: #e6edf3; border-radius: 6px 6px 0 0; margin-top: 24px; font-size: 13px; }
+  .log-viewer-header + .log-viewer { margin-top: 0; border-radius: 0 0 6px 6px; }
+  .log-line { white-space: pre; }
+  .log-line .ts { color: #7d8590; margin-right: 8px; }
+  .log-line.ok { color: #3fb950; }
+  .log-line.warn { color: #d29922; }
+  .log-line.err { color: #f85149; }
+  .pagination { display: flex; justify-content: center; gap: 4px; margin-top: 24px; }
+  .pagination a { padding: 6px 12px; border: 1px solid #d0d7de; border-radius: 6px; text-decoration: none; color: #1f2328; font-size: 14px; }
+  .pagination a.active { background: #0969da; color: #fff; border-color: #0969da; }
+  .pagination a:hover:not(.active) { background: #f3f4f6; }
+  .summary-bar { display: flex; gap: 16px; margin-bottom: 16px; }
+  .summary-card { flex: 1; background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: 12px 16px; }
+  .summary-card .num { font-size: 24px; font-weight: 600; }
+  .summary-card .lbl { font-size: 12px; color: #656d76; }
+</style>
+
+
+
+<header class="app-bar">
+  <div class="logo">
+    <span class="logo-icon">🐙</span>
+    <strong>OpenHub</strong>
+  </div>
+  <div class="header-right">
+    <a href="07-repo-detail.html" class="btn btn-ghost btn-sm">← リポジトリへ戻る</a>
+  </div>
+</header>
+
+<div class="repo-header">
+  <div class="repo-path">
+    <a href="07-repo-detail.html">openhub</a> / <a href="07-repo-detail.html"><strong>awesome-project</strong></a>
+    <span class="badge badge-info">Public</span>
+  </div>
+  <nav class="tabs">
+    <a href="07-repo-detail.html" class="tab">📄 Code</a>
+    <a href="08-issues-list.html" class="tab">⊙ Issues <span class="count">23</span></a>
+    <a href="09-pr-list.html" class="tab">⇆ Pull requests <span class="count">5</span></a>
+    <a href="10-actions-list.html" class="tab active">▶ Actions</a>
+    <a href="07-repo-detail.html" class="tab">📊 Insights</a>
+    <a href="07-repo-detail.html" class="tab">⚙ Settings</a>
+  </nav>
+</div>
+
+<div class="container">
+
+  <div class="summary-bar">
+    <div class="summary-card"><div class="num" style="color:#1a7f37;">142</div><div class="lbl">Success</div></div>
+    <div class="summary-card"><div class="num" style="color:#cf222e;">8</div><div class="lbl">Failed</div></div>
+    <div class="summary-card"><div class="num" style="color:#9a6700;">3</div><div class="lbl">In progress</div></div>
+    <div class="summary-card"><div class="num" style="color:#656d76;">12</div><div class="lbl">Cancelled</div></div>
+  </div>
+
+  <div class="layout">
+
+    <aside class="workflows-side">
+      <div class="sidebar-section-title">Workflows</div>
+      <a href="10-actions-list.html" class="workflow-item active">▶ All workflows</a>
+      <a href="10-actions-list.html" class="workflow-item">🔧 CI Build</a>
+      <a href="10-actions-list.html" class="workflow-item">🧪 Test Suite</a>
+      <a href="10-actions-list.html" class="workflow-item">🚀 Deploy Production</a>
+      <a href="10-actions-list.html" class="workflow-item">📦 Release Package</a>
+      <a href="10-actions-list.html" class="workflow-item">🔍 Lint &amp; Format</a>
+      <a href="10-actions-list.html" class="workflow-item">🛡 CodeQL Analysis</a>
+
+      <div class="sidebar-section-title" style="margin-top:24px;">Management</div>
+      <a href="10-actions-list.html" class="workflow-item">⚙ Caches</a>
+      <a href="10-actions-list.html" class="workflow-item">⚙ Runners</a>
+      <a href="10-actions-list.html" class="workflow-item">⚙ Attestations</a>
+    </aside>
+
+    <main>
+
+      <div class="filter-bar">
+        <input type="text" placeholder="🔍 Filter workflow runs (例: branch:main event:push)">
+        <select>
+          <option>Event ▾</option>
+          <option>push</option>
+          <option>pull_request</option>
+          <option>workflow_dispatch</option>
+          <option>schedule</option>
+        </select>
+        <select>
+          <option>Status ▾</option>
+          <option>Success</option>
+          <option>Failure</option>
+          <option>In progress</option>
+          <option>Cancelled</option>
+        </select>
+        <select>
+          <option>Branch ▾</option>
+          <option>main</option>
+          <option>develop</option>
+          <option>feature/*</option>
+        </select>
+        <select>
+          <option>Actor ▾</option>
+          <option>yamada-taro</option>
+          <option>suzuki-hanako</option>
+        </select>
+        <a href="10-actions-list.html" class="btn btn-outline btn-sm">↕ Sort</a>
+      </div>
+
+      <div class="runs-table">
+        <div class="runs-header">
+          <span><strong>168</strong> workflow runs</span>
+          <span class="text-muted">最終更新: 2分前</span>
+        </div>
+
+        <div class="run-row">
+          <span class="status-icon" title="Success" style="color:#1a7f37;">✅</span>
+          <div>
+            <div class="run-title"><a href="10-actions-list.html">feat: ユーザー認証フローの改善 #4521</a></div>
+            <div class="run-meta">
+              <span>CI Build</span> ·
+              <span class="branch-pill">main</span> ·
+              <span>push by <strong>yamada-taro</strong></span> ·
+              <span class="mono">a3f9d21</span>
+            </div>
+          </div>
+          <span class="badge badge-success">Success</span>
+          <span class="duration">2m 14s</span>
+          <span class="time">5分前</span>
+          <div class="actions-cell">
+            <a href="10-actions-list.html" class="icon-btn" title="ログ">📄</a>
+            <a href="10-actions-list.html" class="icon-btn" title="再実行">↻</a>
+          </div>
+        </div>
+
+        <div class="run-row">
+          <span class="status-icon" title="Failed" style="color:#cf222e;">❌</span>
+          <div>
+            <div class="run-title"><a href="10-actions-list.html">fix: DB接続プールのリーク修正 #4520</a></div>
+            <div class="run-meta">
+              <span>Test Suite</span> ·
+              <span class="branch-pill">develop</span> ·
+              <span>pull_request by <strong>suzuki-hanako</strong></span> ·
+              <span class="mono">b7c2e44</span>
+            </div>
+          </div>
+          <span class="badge badge-danger">Failed</span>
+          <span class="duration">4m 38s</span>
+          <span class="time">23分前</span>
+          <div class="actions-cell">
+            <a href="10-actions-list.html" class="icon-btn" title="ログ">📄</a>
+            <a href="10-actions-list.html" class="icon-btn" title="再実行">↻</a>
+          </div>
+        </div>
+
+        <div class="run-row">
+          <span class="status-icon" title="In progress" style="color:#9a6700;">🟡</span>
+          <div>
+            <div class="run-title"><a href="10-actions-list.html">chore: 依存パッケージの更新 #4519</a></div>
+            <div class="run-meta">
+              <span>Deploy Production</span> ·
+              <span class="branch-pill">main</span> ·
+              <span>workflow_dispatch by <strong>tanaka-jiro</strong></span> ·
+              <span class="mono">d1e8a09</span>
+            </div>
+          </div>
+          <span class="badge badge-warning">In progress</span>
+          <span class="duration">1m 02s</span>
+          <span class="time">1分前</span>
+          <div class="actions-cell">
+            <a href="10-actions-list.html" class="icon-btn" title="ログ">📄</a>
+            <a href="10-actions-list.html" class="icon-btn" title="キャンセル">✕</a>
+          </div>
+        </div>
+
+        <div class="run-row">
+          <span class="status-icon" title="Success" style="color:#1a7f37;">✅</span>
+          <div>
+            <div class="run-title"><a href="10-actions-list.html">docs: READMEのセットアップ手順を追記 #4518</a></div>
+            <div class="run-meta">
+              <span>Lint &amp; Format</span> ·
+              <span class="branch-pill">feature/docs</span> ·
+              <span>push by <strong>yamada-taro</strong></span> ·
+              <span class="mono">f0a3b71</span>
+            </div>
+          </div>
+          <span class="badge badge-success">Success</span>
+          <span class="duration">0m 47s</span>
+          <span class="time">42分前</span>
+          <div class="actions-cell">
+            <a href="10-actions-list.html" class="icon-btn" title="ログ">📄</a>
+            <a href="10-actions-list.html" class="icon-btn" title="再実行">↻</a>
+          </div>
+        </div>
+
+        <div class="run-row">
+          <span class="status-icon" title="Cancelled" style="color:#656d76;">⊘</span>
+          <div>
+            <div class="run-title"><a href="10-actions-list.html">refactor: APIレスポンス型の整理 #4517</a></div>
+            <div class="run-meta">
+              <span>CI Build</span> ·
+              <span class="branch-pill">refactor/api</span> ·
+              <span>push by <strong>sato-ichiro</strong></span> ·
+              <span class="mono">9b4e6f2</span>
+            </div>
+          </div>
+          <span class="badge">Cancelled</span>
+          <span class="duration">0m 33s</span>
+          <span class="time">1時間前</span>
+          <div class="actions-cell">
+            <a href="10-actions-list.html" class="icon-btn" title="ログ">📄</a>
+            <a href="10-actions-list.html" class="icon-btn" title="再実行">↻</a>
+          </div>
+        </div>
+
+        <div class="run-row">
+          <span class="status-icon" title="Success" style="color:#1a7f37;">✅</span>
+          <div>
+            <div class="run-title"><a href="10-actions-list.html">test: E2Eテストカバレッジ向上 #4516</a></div>
+            <div class="run-meta">
+              <span>Test Suite</span> ·
+              <span class="branch-pill">main</span> ·
+              <span>schedule (nightly)</span> ·
+              <span class="mono">2c8d1a5</span>
+            </div>
+          </div>
+          <span class="badge badge-success">Success</span>
+          <span class="duration">8m 21s</span>
+          <span class="time">3時間前</span>
+          <div class="actions-cell">
+            <a href="10-actions-list.html" class="icon-btn" title="ログ">📄</a>
+            <a href="10-actions-list.html" class="icon-btn" title="再実行">↻</a>
+          </div>
+        </div>
+
+        <div class="run-row">
+          <span class="status-icon" title="Failed" style="color:#cf222e;">❌</span>
+          <div>
+            <div class="run-title"><a href="10-actions-list.html">feat: Webhook配信機能の追加 #4515</a></div>
+            <div class="run-meta">
+              <span>CodeQL Analysis</span> ·
+              <span class="branch-pill">feature/webhook</span> ·
+              <span>pull_request by <strong>suzuki-hanako</strong></span> ·
+              <span class="mono">5e7f0c3</span>
+            </div>
+          </div>
+          <span class="badge badge-danger">Failed</span>
+          <span class="duration">3m 09s</span>
+          <span class="time">5時間前</span>
+          <div class="actions-cell">
+            <a href="10-actions-list.html" class="icon-btn" title="ログ">📄</a>
+            <a href="10-actions-list.html" class="icon-btn" title="再実行">↻</a>
+          </div>
+        </div>
+
+        <div class="run-row">
+          <span class="status-icon" title="Success" style="color:#1a7f37;">✅</span>
+          <div>
+            <div class="run-title"><a href="10-actions-list.html">build: Docker imageの最適化 #4514</a></div>
+            <div class="run-meta">
+              <span>Release Package</span> ·
+              <span class="branch-pill">main</span> ·
+              <span>push by <strong>tanaka-jiro</strong></span> ·
+              <span class="mono">8a1b2c4</span>
+            </div>
+          </div>
+          <span class="badge badge-success">Success</span>
+          <span class="duration">5m 56s</span>
+          <span class="time">昨日</span>
+          <div class="actions-cell">
+            <a href="10-actions-list.html" class="icon-btn" title="ログ">📄</a>
+            <a href="10-actions-list.html" class="icon-btn" title="再実行">↻</a>
+          </div>
+        </div>
+
+      </div>
+
+      
+      <div class="log-viewer-header">
+        <div>
+          <strong>📄 ログプレビュー</strong>
+          <span class="text-muted" style="margin-left:8px;">fix: DB接続プールのリーク修正 #4520 / job: test-integration</span>
+        </div>
+        <div>
+          <a href="10-actions-list.html" class="btn btn-sm btn-ghost" style="color:#e6edf3;">⬇ Raw</a>
+          <a href="10-actions-list.html" class="btn btn-sm btn-ghost" style="color:#e6edf3;">↻ Re-run job</a>
+        </div>
+      </div>
+      <div class="log-viewer">
+<div class="log-line"><span class="ts">14:23:01</span>▶ Setting up job environment</div>
+<div class="log-line ok"><span class="ts">14:23:02</span>✓ Runner ubuntu-22.04 (4 cores, 16GB RAM) acquired</div>
+<div class="log-line"><span class="ts">14:23:04</span>▶ Run actions/checkout@v4</div>
+<div class="log-line ok"><span class="ts">14:23:06</span>✓ Repository checked out at commit b7c2e44</div>
+<div class="log-line"><span class="ts">14:23:07</span>▶ Setup Node.js 20.x</div>
+<div class="log-line ok"><span class="ts">14:23:14</span>✓ Node v20.11.1, npm 10.2.4 installed</div>
+<div class="log-line"><span class="ts">14:23:15</span>▶ npm ci</div>
+<div class="log-line"><span class="ts">14:24:02</span>  added 1,432 packages in 47s</div>
+<div class="log-line warn"><span class="ts">14:24:03</span>⚠ 3 moderate severity vulnerabilities</div>
+<div class="log-line"><span class="ts">14:24:04</span>▶ npm run test:integration</div>
+<div class="log-line"><span class="ts">14:25:48</span>  PASS  src/auth/login.test.ts (12 tests)</div>
+<div class="log-line"><span class="ts">14:26:31</span>  PASS  src/users/profile.test.ts (8 tests)</div>
+<div class="log-line err"><span class="ts">14:27:35</span>  FAIL  src/db/connection-pool.test.ts</div>
+<div class="log-line err"><span class="ts">14:27:35</span>    ● should release connection after timeout</div>
+<div class="log-line err"><span class="ts">14:27:35</span>      Expected pool.active to be 0, received 3</div>
+<div class="log-line err"><span class="ts">14:27:35</span>      at Object.&lt;anonymous&gt; (src/db/connection-pool.test.ts:84:25)</div>
+<div class="log-line err"><span class="ts">14:27:39</span>✗ Process exited with code 1</div>
+<div class="log-line"><span class="ts">14:27:39</span>▶ Post: cleanup workspace</div>
+<div class="log-line"><span class="ts">14:27:40</span>  Job completed in 4m 38s</div>
+      </div>
+
+      <div class="pagination">
+        <a href="10-actions-list.html">‹ Prev</a>
+        <a href="10-actions-list.html" class="active">1</a>
+        <a href="10-actions-list.html">2</a>
+        <a href="10-actions-list.html">3</a>
+        <a href="10-actions-list.html">4</a>
+        <a href="10-actions-list.html">…</a>
+        <a href="10-actions-list.html">21</a>
+        <a href="10-actions-list.html">Next ›</a>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+

@@ -1,0 +1,342 @@
+
+
+
+<meta charset="UTF-8">
+<title>リポジトリ設定 - OctoHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { margin: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .container { max-width: 1280px; margin: 0 auto; padding: 0 24px; }
+  .repo-header { background: #fff; border-bottom: 1px solid #d0d7de; padding: 16px 0; }
+  .repo-title { display: flex; align-items: center; gap: 8px; font-size: 20px; }
+  .repo-tabs { display: flex; gap: 4px; margin-top: 16px; }
+  .repo-tab { padding: 8px 16px; border-radius: 6px 6px 0 0; color: #1f2328; text-decoration: none; font-size: 14px; }
+  .repo-tab.active { border-bottom: 2px solid #fd8c73; font-weight: 600; }
+  .layout { display: grid; grid-template-columns: 240px 1fr; gap: 32px; padding: 24px 0; }
+  .settings-nav { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: 8px 0; height: fit-content; }
+  .settings-nav-section { padding: 8px 16px; font-size: 12px; font-weight: 600; color: #656d76; text-transform: uppercase; }
+  .settings-nav-item { display: block; padding: 8px 16px; color: #1f2328; text-decoration: none; font-size: 14px; border-left: 3px solid transparent; }
+  .settings-nav-item:hover { background: #f6f8fa; }
+  .settings-nav-item.active { border-left-color: #fd8c73; background: #fff8f4; font-weight: 600; }
+  .main { display: flex; flex-direction: column; gap: 24px; }
+  .section-card { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden; }
+  .section-card.danger { border-color: #cf222e; }
+  .section-header { padding: 16px 20px; border-bottom: 1px solid #d0d7de; background: #f6f8fa; }
+  .section-header.danger { background: #ffebe9; color: #cf222e; }
+  .section-title { font-size: 16px; font-weight: 600; margin: 0; }
+  .section-desc { font-size: 13px; color: #656d76; margin: 4px 0 0 0; }
+  .section-body { padding: 20px; }
+  .form-row { display: grid; grid-template-columns: 240px 1fr; gap: 16px; padding: 16px 0; border-bottom: 1px solid #eaeef2; align-items: center; }
+  .form-row:last-child { border-bottom: none; }
+  .form-row-label { font-size: 14px; font-weight: 600; }
+  .form-row-hint { font-size: 12px; color: #656d76; font-weight: normal; margin-top: 2px; }
+  .input { width: 100%; padding: 6px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+  .toggle { position: relative; display: inline-block; width: 40px; height: 22px; background: #d0d7de; border-radius: 11px; }
+  .toggle.on { background: #2da44e; }
+  .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; background: #fff; border-radius: 50%; transition: 0.2s; }
+  .toggle.on::after { left: 20px; }
+  .collab-list, .hook-list, .branch-list { list-style: none; padding: 0; margin: 0; }
+  .collab-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eaeef2; }
+  .collab-item:last-child { border: none; }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #fd8c73, #d63384); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; }
+  .collab-info { flex: 1; }
+  .collab-name { font-weight: 600; font-size: 14px; }
+  .collab-role { font-size: 12px; color: #656d76; }
+  .hook-item, .branch-item { padding: 12px 16px; border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+  .hook-url { font-family: monospace; font-size: 13px; }
+  .hook-meta { font-size: 12px; color: #656d76; margin-top: 4px; }
+  .danger-action { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px solid #ffebe9; }
+  .danger-action:last-child { border: none; }
+  .danger-text { font-size: 14px; }
+  .danger-title { font-weight: 600; color: #cf222e; }
+  .danger-desc { color: #656d76; font-size: 13px; margin-top: 2px; }
+  .save-bar { padding: 16px 20px; background: #f6f8fa; border-top: 1px solid #d0d7de; display: flex; justify-content: flex-end; gap: 8px; }
+  .breadcrumb { font-size: 14px; color: #656d76; }
+  .breadcrumb a { color: #0969da; text-decoration: none; }
+</style>
+
+
+
+<header class="app-bar">
+  <div class="container" style="display:flex; align-items:center; justify-content:space-between;">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <a href="07-repo-detail.html" class="logo" style="text-decoration:none; color:inherit;">
+        <span class="logo-icon">🐙</span> <span class="text-gradient">OctoHub</span>
+      </a>
+      <span class="text-muted">/</span>
+      <span class="breadcrumb"><a href="07-repo-detail.html">octocat/awesome-project</a></span>
+    </div>
+    <div class="header-right">
+      <a href="07-repo-detail.html" class="btn btn-sm btn-ghost">← Codeに戻る</a>
+    </div>
+  </div>
+</header>
+
+<div class="repo-header">
+  <div class="container">
+    <div class="repo-title">
+      📁 <a href="07-repo-detail.html" style="color:#0969da; text-decoration:none;">octocat</a>
+      <span class="text-muted">/</span>
+      <a href="07-repo-detail.html" style="color:#0969da; text-decoration:none; font-weight:600;">awesome-project</a>
+      <span class="badge badge-info">Public</span>
+    </div>
+    <nav class="repo-tabs">
+      <a href="07-repo-detail.html" class="repo-tab">📄 Code</a>
+      <a href="07-repo-detail.html" class="repo-tab">⊙ Issues <span class="count">24</span></a>
+      <a href="07-repo-detail.html" class="repo-tab">⇄ Pull requests <span class="count">7</span></a>
+      <a href="07-repo-detail.html" class="repo-tab">▶ Actions</a>
+      <a href="11-repo-settings.html" class="repo-tab active">⚙ Settings</a>
+    </nav>
+  </div>
+</div>
+
+<div class="container">
+  <div class="layout">
+
+    <aside class="settings-nav">
+      <div class="settings-nav-section">一般</div>
+      <a href="11-repo-settings.html" class="settings-nav-item active">General</a>
+      <a href="11-repo-settings.html" class="settings-nav-item">Access</a>
+      <div class="settings-nav-section">コード・自動化</div>
+      <a href="11-repo-settings.html" class="settings-nav-item">Collaborators</a>
+      <a href="11-repo-settings.html" class="settings-nav-item">Branches</a>
+      <a href="11-repo-settings.html" class="settings-nav-item">Tags</a>
+      <a href="11-repo-settings.html" class="settings-nav-item">Actions</a>
+      <a href="11-repo-settings.html" class="settings-nav-item">Webhooks</a>
+      <div class="settings-nav-section">セキュリティ</div>
+      <a href="11-repo-settings.html" class="settings-nav-item">Code security</a>
+      <a href="11-repo-settings.html" class="settings-nav-item">Secrets</a>
+    </aside>
+
+    <main class="main">
+
+      
+      <section class="section-card" id="general">
+        <div class="section-header">
+          <h2 class="section-title">一般設定</h2>
+          <p class="section-desc">リポジトリの基本情報と公開範囲を設定します</p>
+        </div>
+        <div class="section-body">
+          <div class="form-row">
+            <div class="form-row-label">リポジトリ名
+              <div class="form-row-hint">URLに使用されます</div>
+            </div>
+            <input type="text" class="input" value="awesome-project">
+          </div>
+          <div class="form-row">
+            <div class="form-row-label">説明</div>
+            <input type="text" class="input" value="A curated list of awesome tools and resources">
+          </div>
+          <div class="form-row">
+            <div class="form-row-label">デフォルトブランチ</div>
+            <select class="form-select">
+              <option>main</option>
+              <option>develop</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-row-label">可視性
+              <div class="form-row-hint">誰がこのリポジトリを見られるか</div>
+            </div>
+            <select class="form-select">
+              <option>Public - 誰でも閲覧可能</option>
+              <option>Private - 招待されたメンバーのみ</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-row-label">Issues</div>
+            <span class="toggle on"></span>
+          </div>
+          <div class="form-row">
+            <div class="form-row-label">Wiki</div>
+            <span class="toggle on"></span>
+          </div>
+          <div class="form-row">
+            <div class="form-row-label">Discussions</div>
+            <span class="toggle"></span>
+          </div>
+        </div>
+        <div class="save-bar">
+          <a href="11-repo-settings.html" class="btn btn-secondary btn-sm">キャンセル</a>
+          <a href="11-repo-settings.html" class="btn btn-primary btn-sm">変更を保存</a>
+        </div>
+      </section>
+
+      
+      <section class="section-card" id="collaborators">
+        <div class="section-header">
+          <h2 class="section-title">コラボレーター</h2>
+          <p class="section-desc">このリポジトリに書き込み権限を持つユーザーを管理します</p>
+        </div>
+        <div class="section-body">
+          <div style="display:flex; gap:8px; margin-bottom:16px;">
+            <input type="text" class="input" placeholder="ユーザー名またはメールアドレスで検索" style="flex:1;">
+            <a href="11-repo-settings.html" class="btn btn-primary">+ 追加</a>
+          </div>
+          <ul class="collab-list">
+            <li class="collab-item">
+              <div class="avatar">O</div>
+              <div class="collab-info">
+                <div class="collab-name">octocat <span class="badge badge-primary">Owner</span></div>
+                <div class="collab-role">フルアクセス</div>
+              </div>
+              <select class="form-select" style="width:120px;"><option>Admin</option></select>
+            </li>
+            <li class="collab-item">
+              <div class="avatar" style="background:linear-gradient(135deg,#0969da,#54aeff);">A</div>
+              <div class="collab-info">
+                <div class="collab-name">alice-dev</div>
+                <div class="collab-role">2024年3月から参加</div>
+              </div>
+              <select class="form-select" style="width:120px;"><option>Write</option><option>Read</option></select>
+              <a href="11-repo-settings.html" class="btn btn-sm btn-danger">削除</a>
+            </li>
+            <li class="collab-item">
+              <div class="avatar" style="background:linear-gradient(135deg,#2da44e,#4ac26b);">B</div>
+              <div class="collab-info">
+                <div class="collab-name">bob-coder</div>
+                <div class="collab-role">2024年5月から参加</div>
+              </div>
+              <select class="form-select" style="width:120px;"><option>Write</option></select>
+              <a href="11-repo-settings.html" class="btn btn-sm btn-danger">削除</a>
+            </li>
+            <li class="collab-item">
+              <div class="avatar" style="background:linear-gradient(135deg,#bf3989,#e85aad);">C</div>
+              <div class="collab-info">
+                <div class="collab-name">carol-design</div>
+                <div class="collab-role">2024年8月から参加</div>
+              </div>
+              <select class="form-select" style="width:120px;"><option>Read</option></select>
+              <a href="11-repo-settings.html" class="btn btn-sm btn-danger">削除</a>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      
+      <section class="section-card" id="webhooks">
+        <div class="section-header" style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h2 class="section-title">Webhooks</h2>
+            <p class="section-desc">イベント発生時にHTTP POSTで通知を送信します</p>
+          </div>
+          <a href="11-repo-settings.html" class="btn btn-primary btn-sm">+ Webhook追加</a>
+        </div>
+        <div class="section-body">
+          <ul class="hook-list">
+            <li class="hook-item">
+              <div>
+                <div class="hook-url">https://ci.example.com/hooks/github</div>
+                <div class="hook-meta">✓ push, pull_request イベント · 最終配信: 2分前</div>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <span class="badge badge-success">Active</span>
+                <a href="11-repo-settings.html" class="btn btn-sm btn-secondary">編集</a>
+              </div>
+            </li>
+            <li class="hook-item">
+              <div>
+                <div class="hook-url">https://slack.example.com/hooks/abc123</div>
+                <div class="hook-meta">✓ issues, issue_comment イベント · 最終配信: 1時間前</div>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <span class="badge badge-success">Active</span>
+                <a href="11-repo-settings.html" class="btn btn-sm btn-secondary">編集</a>
+              </div>
+            </li>
+            <li class="hook-item">
+              <div>
+                <div class="hook-url">https://deploy.example.com/webhook</div>
+                <div class="hook-meta">⚠ release イベント · 最終配信失敗: 502 Bad Gateway</div>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <span class="badge badge-warning">エラー</span>
+                <a href="11-repo-settings.html" class="btn btn-sm btn-secondary">編集</a>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      
+      <section class="section-card" id="branches">
+        <div class="section-header" style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h2 class="section-title">ブランチ保護ルール</h2>
+            <p class="section-desc">特定のブランチへのプッシュやマージに条件を設定します</p>
+          </div>
+          <a href="11-repo-settings.html" class="btn btn-primary btn-sm">+ ルール追加</a>
+        </div>
+        <div class="section-body">
+          <ul class="branch-list">
+            <li class="hook-item">
+              <div>
+                <div style="font-family:monospace; font-weight:600;">main</div>
+                <div class="hook-meta">PRレビュー必須 (2人) · ステータスチェック必須 · 強制プッシュ禁止</div>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <span class="badge badge-success">保護中</span>
+                <a href="11-repo-settings.html" class="btn btn-sm btn-secondary">編集</a>
+              </div>
+            </li>
+            <li class="hook-item">
+              <div>
+                <div style="font-family:monospace; font-weight:600;">release/*</div>
+                <div class="hook-meta">PRレビュー必須 (1人) · 管理者を含む</div>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <span class="badge badge-success">保護中</span>
+                <a href="11-repo-settings.html" class="btn btn-sm btn-secondary">編集</a>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      
+      <section class="section-card danger" id="danger">
+        <div class="section-header danger">
+          <h2 class="section-title">⚠ 危険ゾーン</h2>
+          <p class="section-desc" style="color:#cf222e;">以下の操作は取り消せません。慎重に実行してください</p>
+        </div>
+        <div class="section-body">
+          <div class="danger-action">
+            <div class="danger-text">
+              <div class="danger-title">可視性をPrivateに変更</div>
+              <div class="danger-desc">このリポジトリは現在Publicです。Privateにすると外部からアクセスできなくなります</div>
+            </div>
+            <a href="11-repo-settings.html" class="btn btn-outline" style="border-color:#cf222e; color:#cf222e;">Privateに変更</a>
+          </div>
+          <div class="danger-action">
+            <div class="danger-text">
+              <div class="danger-title">リポジトリを移譲</div>
+              <div class="danger-desc">所有権を別のユーザーまたは組織に移譲します</div>
+            </div>
+            <a href="11-repo-settings.html" class="btn btn-outline" style="border-color:#cf222e; color:#cf222e;">移譲する</a>
+          </div>
+          <div class="danger-action">
+            <div class="danger-text">
+              <div class="danger-title">リポジトリをアーカイブ</div>
+              <div class="danger-desc">読み取り専用にします。Issues、PR、コードのコメントができなくなります</div>
+            </div>
+            <a href="11-repo-settings.html" class="btn btn-outline" style="border-color:#cf222e; color:#cf222e;">アーカイブする</a>
+          </div>
+          <div class="danger-action">
+            <div class="danger-text">
+              <div class="danger-title">リポジトリを削除</div>
+              <div class="danger-desc">このリポジトリと、関連するすべてのデータ（Issues、PR、Wiki等）が完全に削除されます。<strong>この操作は取り消せません。</strong></div>
+            </div>
+            <a href="11-repo-settings.html" class="btn btn-danger">このリポジトリを削除</a>
+          </div>
+        </div>
+      </section>
+
+      <div style="text-align:center; padding:24px 0; color:#656d76; font-size:13px;">
+        <a href="07-repo-detail.html" style="color:#0969da; text-decoration:none;">← Codeタブに戻る</a>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+

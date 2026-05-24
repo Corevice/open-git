@@ -1,0 +1,310 @@
+
+
+
+<meta charset="UTF-8">
+<title>Issue一覧・詳細 - OctoOSS</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { margin: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .container { max-width: 1280px; margin: 0 auto; padding: 0 24px; }
+  .repo-nav { background: #fff; border-bottom: 1px solid #d0d7de; padding: 0 24px; display: flex; gap: 4px; }
+  .repo-nav a { padding: 12px 16px; text-decoration: none; color: #1f2328; border-bottom: 2px solid transparent; font-size: 14px; }
+  .repo-nav a.active { border-bottom-color: #fd8c73; font-weight: 600; }
+  .repo-nav a:hover:not(.active) { border-bottom-color: #d0d7de; }
+  .repo-title { padding: 16px 0; font-size: 20px; }
+  .repo-title strong { color: #0969da; }
+  .layout { display: grid; grid-template-columns: 1fr 420px; gap: 20px; padding: 20px 0; }
+  .filter-bar { display: flex; gap: 8px; align-items: center; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px 6px 0 0; padding: 12px 16px; }
+  .search-input { flex: 1; padding: 6px 12px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; font-size: 14px; }
+  .dropdown { padding: 6px 12px; background: transparent; border: none; cursor: pointer; font-size: 14px; color: #1f2328; }
+  .dropdown:hover { color: #0969da; }
+  .issue-tabs { display: flex; gap: 16px; font-size: 14px; font-weight: 600; }
+  .issue-tabs .open { color: #1f2328; }
+  .issue-tabs .closed { color: #656d76; font-weight: 400; }
+  .issue-table { background: #fff; border: 1px solid #d0d7de; border-top: none; border-radius: 0 0 6px 6px; }
+  .issue-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; border-top: 1px solid #d0d7de; }
+  .issue-row:hover { background: #f6f8fa; }
+  .issue-row.selected { background: #ddf4ff; border-left: 3px solid #0969da; padding-left: 13px; }
+  .issue-row input[type=checkbox] { margin-top: 4px; }
+  .issue-icon { color: #1a7f37; font-size: 16px; margin-top: 2px; }
+  .issue-main { flex: 1; min-width: 0; }
+  .issue-title-link { font-size: 15px; font-weight: 600; color: #1f2328; text-decoration: none; }
+  .issue-title-link:hover { color: #0969da; }
+  .issue-meta { font-size: 12px; color: #656d76; margin-top: 4px; }
+  .label-pill { display: inline-block; padding: 0 8px; border-radius: 10px; font-size: 11px; font-weight: 600; line-height: 18px; margin-left: 6px; color: #fff; }
+  .label-bug { background: #d1242f; }
+  .label-feat { background: #1f883d; }
+  .label-doc { background: #0969da; }
+  .label-help { background: #8250df; }
+  .label-good { background: #7c3aed; }
+  .issue-side { font-size: 12px; color: #656d76; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .pagination { display: flex; justify-content: center; gap: 4px; padding: 20px 0; }
+  .pagination a { padding: 6px 12px; border: 1px solid #d0d7de; border-radius: 6px; text-decoration: none; color: #0969da; font-size: 14px; }
+  .pagination a.active { background: #0969da; color: #fff; border-color: #0969da; }
+  .detail-panel { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: 20px; height: fit-content; position: sticky; top: 20px; }
+  .detail-title { font-size: 20px; margin: 0 0 8px; }
+  .detail-number { color: #656d76; font-weight: 400; }
+  .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px; border-radius: 20px; background: #1a7f37; color: #fff; font-size: 12px; font-weight: 600; margin-bottom: 12px; }
+  .detail-section { padding: 12px 0; border-top: 1px solid #d0d7de; }
+  .detail-section h4 { margin: 0 0 8px; font-size: 12px; color: #656d76; font-weight: 600; text-transform: uppercase; }
+  .assignee { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .avatar { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #0969da, #8250df); display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 600; }
+  .comment { padding: 12px 0; border-top: 1px solid #d0d7de; }
+  .comment-header { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 6px; }
+  .comment-author { font-weight: 600; }
+  .comment-time { color: #656d76; }
+  .comment-body { font-size: 14px; color: #1f2328; padding-left: 32px; }
+  .editor-area { margin-top: 16px; }
+  .editor-toolbar { display: flex; gap: 4px; padding: 6px; border: 1px solid #d0d7de; border-bottom: none; border-radius: 6px 6px 0 0; background: #f6f8fa; font-size: 14px; }
+  .editor-toolbar span { padding: 4px 8px; cursor: pointer; border-radius: 4px; }
+  .editor-toolbar span:hover { background: #eaeef2; }
+  .editor-textarea { width: 100%; min-height: 100px; padding: 8px; border: 1px solid #d0d7de; border-radius: 0 0 6px 6px; font-family: inherit; font-size: 14px; resize: vertical; box-sizing: border-box; }
+  .editor-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .new-issue-btn { background: #1f883d; color: #fff; padding: 6px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px; border: 1px solid rgba(31,35,40,0.15); }
+</style>
+
+
+
+<header class="app-bar">
+  <div class="logo">
+    <span class="logo-icon">🐙</span>
+    <strong>OctoOSS</strong>
+  </div>
+  <div class="header-right">
+    <input class="search-input" placeholder="Search or jump to..." style="width:280px;">
+    <a href="13-pr-list.html" class="btn btn-ghost btn-sm">Pull Requests</a>
+    <a href="12-issue-list.html" class="btn btn-ghost btn-sm">Issues</a>
+    <span class="avatar">YK</span>
+  </div>
+</header>
+
+<nav class="repo-nav">
+  <a href="07-repo-detail.html">📄 Code</a>
+  <a href="12-issue-list.html" class="active">⊙ Issues <span class="badge badge-info">42</span></a>
+  <a href="13-pr-list.html">⇄ Pull requests <span class="badge">7</span></a>
+  <a href="12-issue-list.html">▶ Actions</a>
+  <a href="12-issue-list.html">📊 Insights</a>
+  <a href="12-issue-list.html">⚙ Settings</a>
+</nav>
+
+<div class="container">
+  <div class="repo-title">
+    <strong>octocorp</strong> / <strong>awesome-framework</strong>
+    <span class="badge badge-primary" style="margin-left:8px;">Public</span>
+  </div>
+
+  <div class="layout">
+    
+    <div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-outline btn-sm">Labels <span class="count">18</span></button>
+          <button class="btn btn-outline btn-sm">Milestones <span class="count">4</span></button>
+        </div>
+        <a href="12-issue-list.html" class="new-issue-btn">New issue</a>
+      </div>
+
+      <div class="filter-bar">
+        <input type="checkbox">
+        <input type="text" class="search-input" placeholder="is:issue is:open" value="is:issue is:open">
+        <button class="dropdown">Author ▾</button>
+        <button class="dropdown">Label ▾</button>
+        <button class="dropdown">Projects ▾</button>
+        <button class="dropdown">Milestones ▾</button>
+        <button class="dropdown">Assignee ▾</button>
+        <button class="dropdown">Sort ▾</button>
+      </div>
+
+      <div class="filter-bar" style="border-top:none; border-radius:0;">
+        <div class="issue-tabs">
+          <span class="open">⊙ 42 Open</span>
+          <span class="closed">✓ 187 Closed</span>
+        </div>
+      </div>
+
+      <div class="issue-table">
+        <div class="issue-row selected">
+          <input type="checkbox">
+          <span class="issue-icon">⊙</span>
+          <div class="issue-main">
+            <a href="12-issue-list.html" class="issue-title-link">SSR時にハイドレーションエラーが発生する</a>
+            <span class="label-pill label-bug">bug</span>
+            <span class="label-pill label-help">help wanted</span>
+            <div class="issue-meta">#1247 opened 3 hours ago by tanaka-dev · 8 comments</div>
+          </div>
+          <div class="issue-side">
+            <span class="avatar" style="width:20px;height:20px;font-size:9px;">YK</span>
+            💬 8
+          </div>
+        </div>
+
+        <div class="issue-row">
+          <input type="checkbox">
+          <span class="issue-icon">⊙</span>
+          <div class="issue-main">
+            <a href="12-issue-list.html" class="issue-title-link">ダークモード対応の追加要望</a>
+            <span class="label-pill label-feat">enhancement</span>
+            <span class="label-pill label-good">good first issue</span>
+            <div class="issue-meta">#1245 opened yesterday by sato_ui · 12 comments</div>
+          </div>
+          <div class="issue-side">💬 12</div>
+        </div>
+
+        <div class="issue-row">
+          <input type="checkbox">
+          <span class="issue-icon">⊙</span>
+          <div class="issue-main">
+            <a href="12-issue-list.html" class="issue-title-link">README.mdのインストール手順が古い</a>
+            <span class="label-pill label-doc">documentation</span>
+            <div class="issue-meta">#1243 opened 2 days ago by suzuki_doc · 3 comments</div>
+          </div>
+          <div class="issue-side">💬 3</div>
+        </div>
+
+        <div class="issue-row">
+          <input type="checkbox">
+          <span class="issue-icon">⊙</span>
+          <div class="issue-main">
+            <a href="12-issue-list.html" class="issue-title-link">TypeScript 5.4対応のロードマップ</a>
+            <span class="label-pill label-feat">enhancement</span>
+            <div class="issue-meta">#1240 opened 4 days ago by maintainer · 24 comments</div>
+          </div>
+          <div class="issue-side">💬 24</div>
+        </div>
+
+        <div class="issue-row">
+          <input type="checkbox">
+          <span class="issue-icon">⊙</span>
+          <div class="issue-main">
+            <a href="12-issue-list.html" class="issue-title-link">useEffect内のメモリリーク</a>
+            <span class="label-pill label-bug">bug</span>
+            <div class="issue-meta">#1238 opened 5 days ago by yamada_qa · 6 comments</div>
+          </div>
+          <div class="issue-side">💬 6</div>
+        </div>
+
+        <div class="issue-row">
+          <input type="checkbox">
+          <span class="issue-icon">⊙</span>
+          <div class="issue-main">
+            <a href="12-issue-list.html" class="issue-title-link">i18nプラグインで日本語対応強化</a>
+            <span class="label-pill label-feat">enhancement</span>
+            <span class="label-pill label-help">help wanted</span>
+            <div class="issue-meta">#1235 opened 1 week ago by i18n_team · 4 comments</div>
+          </div>
+          <div class="issue-side">💬 4</div>
+        </div>
+
+        <div class="issue-row">
+          <input type="checkbox">
+          <span class="issue-icon">⊙</span>
+          <div class="issue-main">
+            <a href="12-issue-list.html" class="issue-title-link">CLIコマンド `init` がWindowsで動作しない</a>
+            <span class="label-pill label-bug">bug</span>
+            <div class="issue-meta">#1232 opened 1 week ago by win_user · 9 comments</div>
+          </div>
+          <div class="issue-side">💬 9</div>
+        </div>
+      </div>
+
+      <div class="pagination">
+        <a href="12-issue-list.html">← Prev</a>
+        <a href="12-issue-list.html" class="active">1</a>
+        <a href="12-issue-list.html">2</a>
+        <a href="12-issue-list.html">3</a>
+        <a href="12-issue-list.html">4</a>
+        <a href="12-issue-list.html">5</a>
+        <a href="12-issue-list.html">Next →</a>
+      </div>
+    </div>
+
+    
+    <aside class="detail-panel">
+      <div class="status-badge">⊙ Open</div>
+      <h2 class="detail-title">SSR時にハイドレーションエラーが発生する <span class="detail-number">#1247</span></h2>
+      <div style="font-size:13px; color:#656d76; margin-bottom:8px;">
+        <strong>tanaka-dev</strong> opened this issue 3 hours ago · 8 comments
+      </div>
+
+      <div class="detail-section">
+        <h4>Assignees</h4>
+        <div class="assignee"><span class="avatar">YK</span> yuki-kobayashi</div>
+        <div class="assignee" style="margin-top:6px;"><span class="avatar" style="background:linear-gradient(135deg,#1f883d,#0969da);">MT</span> maintainer-team</div>
+      </div>
+
+      <div class="detail-section">
+        <h4>Labels</h4>
+        <span class="label-pill label-bug">bug</span>
+        <span class="label-pill label-help">help wanted</span>
+      </div>
+
+      <div class="detail-section">
+        <h4>Milestone</h4>
+        <a href="12-issue-list.html" style="font-size:13px; color:#0969da; text-decoration:none;">📌 v2.5.0 Release (78%)</a>
+      </div>
+
+      <div class="detail-section">
+        <h4>Linked Pull Requests</h4>
+        <a href="13-pr-list.html" style="font-size:13px; color:#0969da; text-decoration:none;">⇄ #1251 Fix hydration on SSR</a>
+      </div>
+
+      <div class="detail-section">
+        <h4>Activity (3 of 8)</h4>
+
+        <div class="comment">
+          <div class="comment-header">
+            <span class="avatar">TD</span>
+            <span class="comment-author">tanaka-dev</span>
+            <span class="comment-time">commented 3 hours ago</span>
+          </div>
+          <div class="comment-body">
+            Next.js 14.1でSSR有効時にハイドレーションエラーが出ます。再現コードは以下:<br>
+            <code style="background:#f6f8fa; padding:2px 4px; border-radius:3px;">npm create awesome@latest -- --ssr</code>
+          </div>
+        </div>
+
+        <div class="comment">
+          <div class="comment-header">
+            <span class="avatar">YK</span>
+            <span class="comment-author">yuki-kobayashi</span>
+            <span class="comment-time">commented 2 hours ago</span>
+          </div>
+          <div class="comment-body">
+            確認しました。<code>useLayoutEffect</code>がサーバーで実行されているのが原因のようです。調査中。
+          </div>
+        </div>
+
+        <div class="comment">
+          <div class="comment-header">
+            <span class="avatar" style="background:linear-gradient(135deg,#1f883d,#0969da);">MT</span>
+            <span class="comment-author">maintainer-team</span>
+            <span class="comment-time">commented 1 hour ago</span>
+          </div>
+          <div class="comment-body">
+            PR #1251 で修正を進めています。v2.5.0に含める予定です。
+          </div>
+        </div>
+      </div>
+
+      <div class="editor-area">
+        <h4 style="font-size:12px; color:#656d76; font-weight:600; text-transform:uppercase; margin:0 0 8px;">Add a comment</h4>
+        <div class="editor-toolbar">
+          <span><strong>B</strong></span>
+          <span><em>I</em></span>
+          <span>🔗</span>
+          <span>📷</span>
+          <span>📋</span>
+          <span>` `</span>
+          <span>@</span>
+        </div>
+        <textarea class="editor-textarea" placeholder="Leave a comment (Markdown supported)"></textarea>
+        <div class="editor-actions">
+          <a href="12-issue-list.html" class="btn btn-outline btn-sm">Close issue</a>
+          <a href="12-issue-list.html" class="btn btn-primary btn-sm" style="background:#1f883d; border-color:#1f883d;">Comment</a>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+

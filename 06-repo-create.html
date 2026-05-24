@@ -5,159 +5,167 @@
 <title>新規リポジトリ作成 - OpenHub</title>
 <link rel="stylesheet" href="base.css">
 <style>
-  body { background: #f6f8fa; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
-  .container { max-width: 880px; margin: 0 auto; padding: 32px 24px; }
-  .page-title { font-size: 24px; font-weight: 400; margin: 0 0 8px; }
-  .page-desc { color: #656d76; font-size: 14px; margin: 0 0 24px; padding-bottom: 24px; border-bottom: 1px solid #d0d7de; }
+  body { background: #f6f8fa; margin: 0; min-height: 100vh; }
+  .page-container { max-width: 640px; margin: 0 auto; padding: 32px 24px; }
+  .page-header { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #d1d9e0; }
+  .page-title { font-size: 24px; font-weight: 600; margin: 0 0 8px; }
+  .page-subtitle { color: #59636e; font-size: 14px; margin: 0; }
   .form-row { display: grid; grid-template-columns: 1fr auto 2fr; gap: 12px; align-items: end; }
-  .slash { font-size: 28px; color: #656d76; padding-bottom: 8px; }
-  .form-input, .form-select, .form-textarea {
-    width: 100%; padding: 8px 12px; border: 1px solid #d0d7de; border-radius: 6px;
-    font-size: 14px; background: #fff; box-sizing: border-box;
-  }
-  .form-input:focus, .form-select:focus, .form-textarea:focus {
-    outline: none; border-color: #0969da; box-shadow: 0 0 0 3px rgba(9,105,218,0.3);
-  }
-  .form-label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
-  .form-label .required { color: #cf222e; }
-  .form-hint { color: #656d76; font-size: 12px; margin-top: 4px; }
-  .form-success { color: #1a7f37; font-size: 12px; margin-top: 4px; }
-  .form-group { margin-bottom: 20px; }
-  .divider { border-bottom: 1px solid #d0d7de; margin: 24px 0; }
-  .radio-option {
-    display: flex; align-items: flex-start; gap: 12px; padding: 12px;
-    border-radius: 6px; cursor: pointer;
-  }
-  .radio-option:hover { background: #f6f8fa; }
-  .radio-option input { margin-top: 4px; }
-  .radio-icon { font-size: 20px; margin-right: 4px; }
-  .radio-title { font-weight: 600; font-size: 14px; }
-  .radio-desc { color: #656d76; font-size: 13px; margin-top: 2px; }
-  .init-section { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 16px; }
-  .init-section h3 { margin: 0 0 8px; font-size: 16px; }
-  .init-desc { color: #656d76; font-size: 13px; margin-bottom: 16px; }
-  .checkbox-row { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+  .form-row-separator { font-size: 24px; color: #59636e; padding-bottom: 8px; user-select: none; }
+  .form-input { width: 100%; padding: 8px 12px; border: 1px solid #d1d9e0; border-radius: 6px; font-size: 14px; box-sizing: border-box; font-family: inherit; }
+  .form-input:focus { outline: none; border-color: #0969da; box-shadow: 0 0 0 3px rgba(9,105,218,0.15); }
+  .visibility-option { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border: 1px solid #d1d9e0; border-radius: 6px; margin-bottom: 8px; cursor: pointer; }
+  .visibility-option:hover { background: #f6f8fa; }
+  .visibility-option input { margin-top: 4px; }
+  .visibility-option-icon { font-size: 20px; }
+  .visibility-option-content { flex: 1; }
+  .visibility-option-title { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+  .visibility-option-desc { font-size: 13px; color: #59636e; }
+  .init-section { border: 1px solid #d1d9e0; border-radius: 6px; padding: 16px; background: #f6f8fa; }
+  .init-section-title { font-weight: 600; font-size: 14px; margin: 0 0 4px; }
+  .init-section-desc { font-size: 13px; color: #59636e; margin: 0 0 16px; }
+  .checkbox-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; }
   .checkbox-row input { margin-top: 3px; }
-  .checkbox-label { font-weight: 600; font-size: 14px; }
-  .checkbox-desc { color: #656d76; font-size: 12px; }
-  .select-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
-  .actions { display: flex; justify-content: space-between; align-items: center; margin-top: 24px; padding-top: 24px; border-top: 1px solid #d0d7de; }
-  .app-bar { background: #24292f; color: #fff; padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
-  .header-brand { font-weight: 700; font-size: 18px; color: #fff; text-decoration: none; }
-  .header-nav { display: flex; gap: 16px; flex: 1; margin-left: 24px; }
-  .header-nav a { color: #fff; text-decoration: none; font-size: 14px; opacity: 0.85; }
-  .btn { display: inline-block; padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 500; text-decoration: none; border: 1px solid transparent; cursor: pointer; }
-  .btn-primary { background: #1f883d; color: #fff; border-color: rgba(31,35,40,0.15); }
-  .btn-secondary { background: #f6f8fa; color: #24292f; border-color: #d0d7de; }
+  .checkbox-label { font-size: 14px; font-weight: 500; }
+  .checkbox-desc { font-size: 13px; color: #59636e; margin-top: 2px; }
+  .form-divider { border: none; border-top: 1px solid #d1d9e0; margin: 24px 0; }
+  .form-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 8px; }
+  .form-group { margin-bottom: 16px; }
+  .form-label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .required { color: #cf222e; }
+  .form-hint { font-size: 12px; color: #59636e; margin-top: 4px; }
+  .preview-url { font-size: 13px; color: #1f883d; margin-top: 6px; }
 </style>
 
 
 
 <header class="app-bar">
-  <a href="05-repo-list.html" class="header-brand">⊕ OpenHub</a>
-  <nav class="header-nav">
-    <a href="05-repo-list.html">リポジトリ</a>
-    <a href="05-repo-list.html">Issues</a>
-    <a href="05-repo-list.html">Pull Requests</a>
-    <a href="05-repo-list.html">Explore</a>
-  </nav>
+  <div class="logo">
+    <span class="logo-icon">🐙</span>
+    <span>OpenHub</span>
+  </div>
+  <div class="header-right">
+    <a href="05-repo-list.html" class="btn btn-ghost btn-sm">リポジトリ</a>
+    <a href="05-repo-list.html" class="btn btn-ghost btn-sm">マイページ</a>
+  </div>
 </header>
 
-<div class="container">
-  <h1 class="page-title">新しいリポジトリを作成</h1>
-  <p class="page-desc">リポジトリには、リビジョン履歴を含むすべてのプロジェクトファイルが含まれます。既存のリポジトリがありますか? <a href="05-repo-list.html">代わりにインポート</a></p>
-
-  <div class="form-group">
-    <div class="form-row">
-      <div>
-        <label class="form-label">所有者 <span class="required">*</span></label>
-        <select class="form-select">
-          <option>👤 yamada-taro</option>
-          <option>🏢 acme-corp</option>
-          <option>🏢 opensource-team</option>
-        </select>
-      </div>
-      <div class="slash">/</div>
-      <div>
-        <label class="form-label">リポジトリ名 <span class="required">*</span></label>
-        <input type="text" class="form-input" value="awesome-project" placeholder="my-new-repo">
-      </div>
-    </div>
-    <p class="form-success">✓ 素晴らしいリポジトリ名です。短くて覚えやすい名前は最高ですね。</p>
+<div class="page-container">
+  <div class="page-header">
+    <h1 class="page-title">新しいリポジトリを作成</h1>
+    <p class="page-subtitle">リポジトリには、プロジェクトのすべてのファイル、リビジョン履歴が含まれます。既存のリポジトリを別の場所にお持ちですか？ <a href="06-repo-create.html">インポートできます</a>。</p>
   </div>
 
-  <div class="form-group">
-    <label class="form-label">説明 <span style="color:#656d76;font-weight:400;">(任意)</span></label>
-    <textarea class="form-textarea" rows="2" placeholder="リポジトリの簡単な説明">モダンな技術スタックで構築されたオープンソースのWebアプリケーションテンプレート</textarea>
-  </div>
-
-  <div class="divider"></div>
-
-  <div class="form-group">
-    <label class="form-label">可視性</label>
-    <label class="radio-option">
-      <input type="radio" name="visibility">
-      <span class="radio-icon">📖</span>
-      <div>
-        <div class="radio-title">Public</div>
-        <div class="radio-desc">インターネット上のすべての人がこのリポジトリを閲覧できます。コミットできるユーザーは選択できます。</div>
+  <form>
+    <div class="form-group">
+      <div class="form-row">
+        <div>
+          <label class="form-label" for="owner">オーナー <span class="required">*</span></label>
+          <select id="owner" class="form-select form-input">
+            <option>octocat</option>
+            <option>open-source-org</option>
+            <option>my-team</option>
+          </select>
+        </div>
+        <div class="form-row-separator">/</div>
+        <div>
+          <label class="form-label" for="repo-name">リポジトリ名 <span class="required">*</span></label>
+          <input id="repo-name" class="form-input" type="text" value="awesome-project" placeholder="例: hello-world">
+        </div>
       </div>
-    </label>
-    <label class="radio-option">
-      <input type="radio" name="visibility">
-      <span class="radio-icon">🔒</span>
-      <div>
-        <div class="radio-title">Private</div>
-        <div class="radio-desc">アクセスを許可したユーザーのみがこのリポジトリを閲覧できます。コミットできるユーザーは選択できます。</div>
-      </div>
-    </label>
-  </div>
-
-  <div class="divider"></div>
-
-  <div class="init-section">
-    <h3>このリポジトリを次で初期化:</h3>
-    <p class="init-desc">これにより、リポジトリをローカルマシンにすぐにクローンできるようになります。これらのファイルの作成はスキップして、後でプッシュできます。</p>
-
-    <div class="checkbox-row">
-      <input type="checkbox" id="readme">
-      <div>
-        <label class="checkbox-label" for="readme">README ファイルを追加</label>
-        <div class="checkbox-desc">これは、プロジェクトの長い説明を書くことができる場所です。<a href="05-repo-list.html">READMEについてさらに詳しく</a></div>
-      </div>
+      <div class="preview-url">✓ 利用可能な名前です。 <span class="mono text-muted">octocat/awesome-project</span></div>
+      <div class="form-hint">短く覚えやすい名前をおすすめします。何かインスピレーションが必要ですか？ <strong>fluffy-octo-spoon</strong> はいかがでしょう？</div>
     </div>
 
-    <div class="select-row">
-      <div>
-        <label class="form-label">.gitignore を追加</label>
-        <select class="form-select">
+    <div class="form-group">
+      <label class="form-label" for="description">説明 <span class="text-muted">(任意)</span></label>
+      <input id="description" class="form-input" type="text" placeholder="このリポジトリの簡単な説明">
+    </div>
+
+    <hr class="form-divider">
+
+    <div class="form-group">
+      <label class="form-label">公開範囲 <span class="required">*</span></label>
+
+      <label class="visibility-option">
+        <input type="radio" name="visibility">
+        <span class="visibility-option-icon">📖</span>
+        <div class="visibility-option-content">
+          <div class="visibility-option-title">Public</div>
+          <div class="visibility-option-desc">インターネット上の誰でもこのリポジトリを見ることができます。コミットできる人はあなたが指定します。</div>
+        </div>
+      </label>
+
+      <label class="visibility-option">
+        <input type="radio" name="visibility">
+        <span class="visibility-option-icon">🔒</span>
+        <div class="visibility-option-content">
+          <div class="visibility-option-title">Private</div>
+          <div class="visibility-option-desc">アクセス権を付与した人だけがこのリポジトリを見たり、コミットできたりします。</div>
+        </div>
+      </label>
+    </div>
+
+    <hr class="form-divider">
+
+    <div class="init-section">
+      <h3 class="init-section-title">このリポジトリを初期化</h3>
+      <p class="init-section-desc">これにより、すぐにリポジトリをクローンできるようになります。後でスキップすることもできます。</p>
+
+      <div class="checkbox-row">
+        <input type="checkbox" id="init-readme">
+        <div>
+          <label class="checkbox-label" for="init-readme">README ファイルを追加</label>
+          <div class="checkbox-desc">プロジェクトの長い説明を書ける場所です。 <a href="06-repo-create.html">README について</a>。</div>
+        </div>
+      </div>
+
+      <div class="checkbox-row">
+        <input type="checkbox" id="init-gitignore">
+        <div>
+          <label class="checkbox-label" for="init-gitignore">.gitignore を追加</label>
+          <div class="checkbox-desc">追跡しないファイルをテンプレートから選択します。 <a href="06-repo-create.html">.gitignore について</a>。</div>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-left: 30px; margin-top: 8px; margin-bottom: 12px;">
+        <label class="form-label" for="gitignore-template">.gitignore テンプレート</label>
+        <select id="gitignore-template" class="form-select form-input">
           <option>None</option>
           <option>Node</option>
           <option>Python</option>
           <option>Java</option>
           <option>Go</option>
-          <option>Ruby</option>
         </select>
-        <p class="form-hint">追跡しないファイルを選択するテンプレート</p>
       </div>
-      <div>
-        <label class="form-label">ライセンスを選択</label>
-        <select class="form-select">
+
+      <div class="checkbox-row">
+        <input type="checkbox" id="init-license">
+        <div>
+          <label class="checkbox-label" for="init-license">ライセンスを選択</label>
+          <div class="checkbox-desc">ライセンスは、他者があなたのコードで何ができて何ができないかを伝えるものです。 <a href="06-repo-create.html">ライセンスについて</a>。</div>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-left: 30px; margin-top: 8px; margin-bottom: 0;">
+        <label class="form-label" for="license">ライセンス</label>
+        <select id="license" class="form-select form-input">
           <option>None</option>
           <option>MIT License</option>
           <option>Apache License 2.0</option>
-          <option>GNU GPLv3</option>
+          <option>GNU GPL v3.0</option>
           <option>BSD 3-Clause</option>
         </select>
-        <p class="form-hint">他者があなたのコードで何をできるか、できないかを決定するライセンス</p>
       </div>
     </div>
-  </div>
 
-  <div class="actions">
-    <a href="05-repo-list.html" class="btn btn-secondary">キャンセル</a>
-    <a href="07-repo-detail.html" class="btn btn-primary">リポジトリを作成</a>
-  </div>
+    <hr class="form-divider">
+
+    <div class="form-actions">
+      <a href="05-repo-list.html" class="btn btn-secondary">キャンセル</a>
+      <a href="07-repo-detail.html" class="btn btn-primary">リポジトリを作成</a>
+    </div>
+  </form>
 </div>
 
 

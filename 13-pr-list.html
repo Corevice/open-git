@@ -1,0 +1,293 @@
+
+
+
+<meta charset="UTF-8">
+<title>Pull Request一覧・詳細 - OpenHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { background: #f6f8fa; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .container { max-width: 1280px; margin: 0 auto; padding: 0 24px; }
+  .repo-nav { background: #fff; border-bottom: 1px solid #d0d7de; padding: 0 24px; display: flex; gap: 4px; }
+  .repo-nav a { padding: 14px 16px; text-decoration: none; color: #24292f; font-size: 14px; border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 6px; }
+  .repo-nav a.active { border-bottom-color: #fd8c73; font-weight: 600; }
+  .repo-nav a:hover { background: #f6f8fa; }
+  .repo-title { background: #fff; padding: 20px 24px 12px; border-bottom: 1px solid #d0d7de; }
+  .repo-title h1 { margin: 0; font-size: 20px; font-weight: 400; }
+  .repo-title h1 strong { font-weight: 600; color: #0969da; }
+  .main-grid { display: grid; grid-template-columns: 1fr 320px; gap: 24px; padding: 24px 0; }
+  .pr-header { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 20px; margin-bottom: 16px; position: sticky; top: 0; z-index: 10; }
+  .pr-title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 12px; }
+  .pr-title-row h2 { margin: 0; font-size: 22px; font-weight: 600; }
+  .pr-title-row h2 .num { color: #6e7781; font-weight: 400; }
+  .pr-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: #57606a; }
+  .pr-status { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: #1f883d; color: #fff; font-size: 13px; font-weight: 500; }
+  .actions { display: flex; gap: 8px; }
+  .tabs { display: flex; gap: 0; background: #fff; border: 1px solid #d0d7de; border-radius: 8px 8px 0 0; border-bottom: none; padding: 0 16px; }
+  .tabs a { padding: 14px 16px; text-decoration: none; color: #24292f; font-size: 14px; border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 8px; }
+  .tabs a.active { border-bottom-color: #fd8c73; font-weight: 600; }
+  .tabs a:hover { color: #0969da; }
+  .tab-content { background: #fff; border: 1px solid #d0d7de; border-radius: 0 0 8px 8px; padding: 20px; }
+  .comment-card { border: 1px solid #d0d7de; border-radius: 8px; margin-bottom: 16px; overflow: hidden; }
+  .comment-head { background: #f6f8fa; padding: 10px 16px; border-bottom: 1px solid #d0d7de; font-size: 13px; }
+  .comment-head strong { color: #24292f; }
+  .comment-body { padding: 16px; font-size: 14px; line-height: 1.6; }
+  .diff-file { border: 1px solid #d0d7de; border-radius: 8px; margin-bottom: 16px; overflow: hidden; }
+  .diff-file-head { background: #f6f8fa; padding: 10px 16px; border-bottom: 1px solid #d0d7de; font-family: ui-monospace, monospace; font-size: 13px; display: flex; justify-content: space-between; }
+  .diff-table { width: 100%; border-collapse: collapse; font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 12px; }
+  .diff-table td { padding: 1px 10px; vertical-align: top; }
+  .diff-table .ln { width: 40px; text-align: right; color: #6e7781; user-select: none; background: #f6f8fa; }
+  .diff-table tr.add { background: #dafbe1; }
+  .diff-table tr.add .ln { background: #ccffd8; }
+  .diff-table tr.del { background: #ffebe9; }
+  .diff-table tr.del .ln { background: #ffd7d5; }
+  .diff-table tr.hunk td { background: #ddf4ff; color: #57606a; padding: 4px 10px; }
+  .merge-box { border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin-top: 16px; background: #fff; display: flex; align-items: center; gap: 16px; }
+  .merge-box .ok { font-size: 32px; color: #1f883d; }
+  .merge-box .text { flex: 1; }
+  .merge-box .text strong { display: block; margin-bottom: 4px; }
+  .review-panel { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin-top: 16px; }
+  .review-panel h3 { margin: 0 0 12px; font-size: 15px; }
+  .review-panel textarea { width: 100%; min-height: 80px; padding: 10px; border: 1px solid #d0d7de; border-radius: 6px; font-family: inherit; font-size: 14px; box-sizing: border-box; }
+  .review-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .sidebar-card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .sidebar-card h4 { margin: 0 0 12px; font-size: 13px; color: #57606a; text-transform: uppercase; letter-spacing: 0.5px; }
+  .sidebar-card .item { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 4px 0; }
+  .avatar { width: 20px; height: 20px; border-radius: 50%; background: linear-gradient(135deg, #fd8c73, #d4a017); display: inline-block; }
+  .pr-list-filter { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 8px 8px 0 0; padding: 12px 16px; display: flex; gap: 16px; font-size: 14px; }
+  .pr-list-filter a { color: #57606a; text-decoration: none; }
+  .pr-list-filter a.active { color: #24292f; font-weight: 600; }
+  .pr-list { background: #fff; border: 1px solid #d0d7de; border-top: none; border-radius: 0 0 8px 8px; margin-bottom: 24px; }
+  .pr-row { padding: 12px 16px; border-bottom: 1px solid #d0d7de; display: flex; gap: 12px; align-items: flex-start; }
+  .pr-row:last-child { border-bottom: none; }
+  .pr-row.selected { background: #fff8c5; border-left: 3px solid #fd8c73; }
+  .pr-row .icon-pr { color: #1f883d; font-size: 18px; }
+  .pr-row.closed .icon-pr { color: #cf222e; }
+  .pr-row.draft .icon-pr { color: #6e7781; }
+  .pr-row-main { flex: 1; }
+  .pr-row-title { font-size: 15px; font-weight: 600; color: #24292f; text-decoration: none; }
+  .pr-row-title:hover { color: #0969da; }
+  .pr-row-meta { font-size: 12px; color: #57606a; margin-top: 4px; }
+  .check-line { font-size: 13px; padding: 6px 0; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #eaeef2; }
+  .check-line:last-child { border-bottom: none; }
+  .check-pass { color: #1a7f37; }
+  .timeline-item { display: flex; gap: 10px; padding: 8px 0; font-size: 13px; color: #57606a; border-left: 2px solid #d0d7de; padding-left: 16px; margin-left: 8px; position: relative; }
+  .timeline-item::before { content: ''; position: absolute; left: -6px; top: 12px; width: 10px; height: 10px; border-radius: 50%; background: #d0d7de; }
+</style>
+
+
+
+<header class="app-bar">
+  <div class="logo">
+    <span class="logo-icon">🐙</span>
+    <span>OpenHub</span>
+  </div>
+  <div class="header-right">
+    <a href="12-issue-list.html" class="btn btn-ghost btn-sm">Issues</a>
+    <a href="13-pr-list.html" class="btn btn-ghost btn-sm">Pull Requests</a>
+    <span class="avatar"></span>
+  </div>
+</header>
+
+<div class="repo-title">
+  <h1>📦 <a href="07-repo-detail.html" style="color:#0969da;text-decoration:none;">octocat</a> / <strong>hello-world</strong> <span class="badge badge-info">Public</span></h1>
+</div>
+
+<nav class="repo-nav">
+  <a href="07-repo-detail.html">&lt;&gt; Code</a>
+  <a href="12-issue-list.html">⊙ Issues <span class="count">42</span></a>
+  <a href="13-pr-list.html" class="active">⇆ Pull Requests <span class="count">8</span></a>
+  <a href="13-pr-list.html">▶ Actions</a>
+  <a href="13-pr-list.html">📊 Insights</a>
+</nav>
+
+<div class="container">
+
+  <div class="pr-list-filter">
+    <a href="13-pr-list.html" class="active">🟢 6 Open</a>
+    <a href="13-pr-list.html">✓ 124 Closed</a>
+    <span style="margin-left:auto; color:#57606a;">Sort: Newest ▾</span>
+  </div>
+  <div class="pr-list">
+    <div class="pr-row selected">
+      <span class="icon-pr">⇆</span>
+      <div class="pr-row-main">
+        <a href="13-pr-list.html" class="pr-row-title">Add dark mode support to settings page</a>
+        <span class="badge badge-success" style="margin-left:8px;">Ready</span>
+        <div class="pr-row-meta">#247 opened 2 hours ago by <strong>alice-dev</strong> · ✓ 12 checks passed · 💬 5</div>
+      </div>
+      <div><span class="avatar"></span> <span class="avatar"></span></div>
+    </div>
+    <div class="pr-row">
+      <span class="icon-pr">⇆</span>
+      <div class="pr-row-main">
+        <a href="13-pr-list.html" class="pr-row-title">Refactor authentication middleware</a>
+        <div class="pr-row-meta">#246 opened yesterday by <strong>bob-coder</strong> · ⚠ 1 check failing · 💬 12</div>
+      </div>
+      <div><span class="avatar"></span></div>
+    </div>
+    <div class="pr-row draft">
+      <span class="icon-pr">⇆</span>
+      <div class="pr-row-main">
+        <a href="13-pr-list.html" class="pr-row-title">[WIP] Migrate to TypeScript 5.0</a>
+        <span class="badge" style="margin-left:8px; background:#eaeef2; color:#57606a;">Draft</span>
+        <div class="pr-row-meta">#245 opened 3 days ago by <strong>charlie</strong> · 💬 3</div>
+      </div>
+      <div><span class="avatar"></span></div>
+    </div>
+    <div class="pr-row">
+      <span class="icon-pr">⇆</span>
+      <div class="pr-row-main">
+        <a href="13-pr-list.html" class="pr-row-title">Fix memory leak in WebSocket handler</a>
+        <span class="badge badge-danger" style="margin-left:8px;">Conflicts</span>
+        <div class="pr-row-meta">#244 opened 5 days ago by <strong>diana</strong> · 💬 8</div>
+      </div>
+      <div><span class="avatar"></span></div>
+    </div>
+  </div>
+
+  <div class="pr-header">
+    <div class="pr-title-row">
+      <div>
+        <h2>Add dark mode support to settings page <span class="num">#247</span></h2>
+        <div class="pr-meta" style="margin-top:8px;">
+          <span class="pr-status">🟢 Open</span>
+          <span><strong>alice-dev</strong> wants to merge <strong>3 commits</strong> into <code class="mono">main</code> from <code class="mono">feature/dark-mode</code></span>
+        </div>
+      </div>
+      <div class="actions">
+        <a href="13-pr-list.html" class="btn btn-outline btn-sm">✏ Edit</a>
+        <a href="13-pr-list.html" class="btn btn-outline btn-sm">🔗 Share</a>
+        <a href="13-pr-list.html" class="btn btn-danger btn-sm">✕ Close</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="main-grid">
+    <div>
+      <div class="tabs">
+        <a href="13-pr-list.html" class="active">💬 Conversation <span class="count">5</span></a>
+        <a href="13-pr-list.html">⊙ Commits <span class="count">3</span></a>
+        <a href="13-pr-list.html">✓ Checks <span class="count">12</span></a>
+        <a href="13-pr-list.html">📄 Files changed <span class="count">7</span></a>
+      </div>
+
+      <div class="tab-content">
+        <div class="comment-card">
+          <div class="comment-head"><span class="avatar"></span> <strong>alice-dev</strong> commented 2 hours ago</div>
+          <div class="comment-body">
+            <p>This PR adds full dark mode support to the user settings page. Users can now toggle between light, dark, and system preference modes.</p>
+            <p><strong>Changes:</strong></p>
+            <ul>
+              <li>Added theme provider context</li>
+              <li>Updated all settings components with theme-aware styles</li>
+              <li>Persisted preference to localStorage</li>
+            </ul>
+            <p>Closes #198</p>
+          </div>
+        </div>
+
+        <div class="diff-file">
+          <div class="diff-file-head">
+            <span>📄 src/components/Settings.tsx</span>
+            <span><span style="color:#1a7f37;">+42</span> <span style="color:#cf222e;">-8</span></span>
+          </div>
+          <table class="diff-table">
+            <tbody><tr class="hunk"><td colspan="3">@@ -15,7 +15,9 @@ export function Settings() {</td></tr>
+            <tr><td class="ln">15</td><td class="ln">15</td><td>&nbsp;import React from 'react';</td></tr>
+            <tr class="del"><td class="ln">16</td><td class="ln"></td><td>- import { useState } from 'react';</td></tr>
+            <tr class="add"><td class="ln"></td><td class="ln">16</td><td>+ import { useState, useContext } from 'react';</td></tr>
+            <tr class="add"><td class="ln"></td><td class="ln">17</td><td>+ import { ThemeContext } from '../theme';</td></tr>
+            <tr><td class="ln">17</td><td class="ln">18</td><td>&nbsp;</td></tr>
+            <tr><td class="ln">18</td><td class="ln">19</td><td>&nbsp;export function Settings() {</td></tr>
+            <tr class="add"><td class="ln"></td><td class="ln">20</td><td>+   const { theme, setTheme } = useContext(ThemeContext);</td></tr>
+            <tr><td class="ln">19</td><td class="ln">21</td><td>&nbsp;  return (</td></tr>
+          </tbody></table>
+        </div>
+
+        <div class="comment-card">
+          <div class="comment-head"><span class="avatar"></span> <strong>bob-coder</strong> reviewed 1 hour ago · <span class="badge badge-success">Approved</span></div>
+          <div class="comment-body">
+            <p>LGTM! 🚀 Nice clean implementation. The theme context is well structured.</p>
+          </div>
+        </div>
+
+        <div class="comment-card">
+          <div class="comment-head"><span class="avatar"></span> <strong>charlie</strong> commented 30 min ago</div>
+          <div class="comment-body">
+            <p>Could we also add a smooth transition animation when toggling themes? Otherwise looks great.</p>
+          </div>
+        </div>
+
+        <div class="merge-box">
+          <div class="ok">✓</div>
+          <div class="text">
+            <strong>This branch has no conflicts with the base branch</strong>
+            <span class="text-muted">Merging can be performed automatically.</span>
+          </div>
+          <a href="13-pr-list.html" class="btn btn-primary">Merge pull request ▾</a>
+        </div>
+
+        <div class="review-panel">
+          <h3>💬 Add a comment / review</h3>
+          <textarea placeholder="Leave a comment..."></textarea>
+          <div class="review-actions">
+            <a href="13-pr-list.html" class="btn btn-secondary btn-sm">Comment</a>
+            <a href="13-pr-list.html" class="btn btn-success btn-sm" style="background:#1f883d;color:#fff;">✓ Approve</a>
+            <a href="13-pr-list.html" class="btn btn-outline btn-sm">💬 Request changes</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <aside>
+      <div class="sidebar-card">
+        <h4>Reviewers</h4>
+        <div class="item"><span class="avatar"></span> <strong>bob-coder</strong> <span class="badge badge-success" style="margin-left:auto;">✓</span></div>
+        <div class="item"><span class="avatar"></span> <strong>charlie</strong> <span class="text-muted" style="margin-left:auto;">pending</span></div>
+        <div class="item text-muted">+ Request review</div>
+      </div>
+
+      <div class="sidebar-card">
+        <h4>Assignees</h4>
+        <div class="item"><span class="avatar"></span> <strong>alice-dev</strong></div>
+      </div>
+
+      <div class="sidebar-card">
+        <h4>Labels</h4>
+        <div>
+          <span class="badge" style="background:#0e8a16;color:#fff;">enhancement</span>
+          <span class="badge" style="background:#5319e7;color:#fff;">ui/ux</span>
+          <span class="badge" style="background:#fbca04;color:#24292f;">good first review</span>
+        </div>
+      </div>
+
+      <div class="sidebar-card">
+        <h4>Milestone</h4>
+        <div class="item">🎯 v2.5.0 Release</div>
+      </div>
+
+      <div class="sidebar-card">
+        <h4>Linked Issues</h4>
+        <div class="item"><a href="12-issue-list.html" style="color:#0969da;text-decoration:none;">#198 Add dark mode</a></div>
+      </div>
+
+      <div class="sidebar-card">
+        <h4>Checks</h4>
+        <div class="check-line check-pass">✓ build · passed in 2m 14s</div>
+        <div class="check-line check-pass">✓ test · passed in 4m 02s</div>
+        <div class="check-line check-pass">✓ lint · passed in 32s</div>
+        <div class="check-line check-pass">✓ coverage · 92.4%</div>
+      </div>
+
+      <div class="sidebar-card">
+        <h4>Activity</h4>
+        <div class="timeline-item"><div><strong>alice-dev</strong> opened this PR<br><span class="text-muted">2 hours ago</span></div></div>
+        <div class="timeline-item"><div><strong>bob-coder</strong> approved<br><span class="text-muted">1 hour ago</span></div></div>
+        <div class="timeline-item"><div>CI checks passed<br><span class="text-muted">45 min ago</span></div></div>
+        <div class="timeline-item"><div><strong>charlie</strong> commented<br><span class="text-muted">30 min ago</span></div></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+

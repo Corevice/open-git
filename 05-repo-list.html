@@ -2,244 +2,224 @@
 
 
 <meta charset="UTF-8">
-<title>リポジトリ一覧 - オープンソースGitHub</title>
+<title>リポジトリ一覧 - OpenHub</title>
 <link rel="stylesheet" href="base.css">
 <style>
-  body { margin: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  body { margin: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   .layout { display: flex; min-height: 100vh; }
-  .main { flex: 1; }
-  .container { max-width: 1280px; margin: 0 auto; padding: 24px 32px; }
+  .main { flex: 1; padding: 24px 32px; max-width: 1280px; }
   .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
   .page-title { font-size: 24px; font-weight: 600; margin: 0; }
-  .page-subtitle { color: #656d76; font-size: 14px; margin-top: 4px; }
-  .filter-bar { display: flex; gap: 12px; align-items: center; padding: 16px; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; margin-bottom: 20px; flex-wrap: wrap; }
-  .search-input { flex: 1; min-width: 280px; padding: 8px 12px 8px 36px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; background: #f6f8fa url("data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='%23656d76'&gt;&lt;path d='M11.5 7a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zm-.82 4.74a6 6 0 111.06-1.06l3.04 3.04a.75.75 0 11-1.06 1.06l-3.04-3.04z'/&gt;&lt;/svg&gt;") no-repeat 12px center; }
-  .form-select { padding: 6px 28px 6px 12px; border: 1px solid #d0d7de; border-radius: 6px; background-color: #f6f8fa; font-size: 14px; }
-  .repo-list { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; overflow: hidden; }
-  .repo-item { display: flex; padding: 20px; border-bottom: 1px solid #d0d7de; gap: 16px; align-items: flex-start; transition: background 0.1s; }
-  .repo-item:last-child { border-bottom: none; }
-  .repo-item:hover { background: #f6f8fa; }
-  .repo-check { margin-top: 4px; }
-  .repo-content { flex: 1; }
-  .repo-name { font-size: 18px; font-weight: 600; color: #0969da; text-decoration: none; }
-  .repo-name:hover { text-decoration: underline; }
-  .repo-meta { display: flex; gap: 16px; align-items: center; margin-top: 8px; color: #656d76; font-size: 12px; flex-wrap: wrap; }
-  .repo-desc { color: #656d76; font-size: 14px; margin-top: 8px; }
-  .lang-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
-  .repo-actions { display: flex; gap: 8px; }
-  .pagination { display: flex; justify-content: center; gap: 4px; margin-top: 24px; }
-  .page-btn { padding: 6px 12px; border: 1px solid #d0d7de; background: #fff; border-radius: 6px; text-decoration: none; color: #1f2328; font-size: 14px; }
+  .header-actions { display: flex; gap: 8px; }
+  .filter-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; padding: 12px; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; }
+  .search-input { flex: 1; padding: 8px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
+  .filter-select { padding: 8px 12px; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; font-size: 14px; cursor: pointer; min-width: 140px; }
+  .repo-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .repo-card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; text-decoration: none; color: inherit; transition: border-color 0.15s; display: block; }
+  .repo-card:hover { border-color: #0969da; }
+  .repo-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .repo-name { font-size: 16px; font-weight: 600; color: #0969da; margin: 0; }
+  .repo-desc { font-size: 13px; color: #57606a; margin: 8px 0 12px 0; line-height: 1.5; }
+  .repo-meta { display: flex; gap: 16px; font-size: 12px; color: #57606a; align-items: center; }
+  .lang-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  .pagination { display: flex; justify-content: center; gap: 4px; margin-top: 32px; }
+  .page-btn { padding: 6px 12px; border: 1px solid #d0d7de; background: #fff; border-radius: 6px; cursor: pointer; font-size: 14px; text-decoration: none; color: #24292f; }
   .page-btn.active { background: #0969da; color: #fff; border-color: #0969da; }
-  .badge-vis { padding: 2px 8px; border: 1px solid #d0d7de; border-radius: 20px; font-size: 12px; color: #656d76; }
+  .icon-action { color: #57606a; padding: 4px; text-decoration: none; font-size: 14px; }
+  .sidebar { width: 240px; background: #fff; border-right: 1px solid #d0d7de; padding: 20px 0; }
 </style>
 
 
-<header class="app-bar" style="display:flex; align-items:center; justify-content:space-between; padding:12px 32px; background:#24292f; color:#fff;">
-  <div class="header-brand" style="display:flex; align-items:center; gap:12px; font-weight:600; font-size:18px;">
-    <span style="font-size:24px;">🐙</span> OSGitHub
+
+<header class="app-bar">
+  <div class="logo">
+    <span class="logo-icon">🐙</span>
+    <span>OpenHub</span>
   </div>
-  <nav class="header-nav" style="display:flex; gap:20px;">
-    <a href="03-dashboard.html" style="color:#fff; text-decoration:none;">ダッシュボード</a>
-    <a href="05-repo-list.html" style="color:#fff; text-decoration:none; font-weight:600;">リポジトリ</a>
-    <a href="14-issue-list.html" style="color:#fff; text-decoration:none;">Issue</a>
-    <a href="20-pr-list.html" style="color:#fff; text-decoration:none;">プルリク</a>
-  </nav>
-  <div class="header-actions" style="display:flex; gap:12px; align-items:center;">
-    <a href="06-repo-create.html" class="btn btn-primary" style="background:#2da44e; color:#fff; padding:6px 12px; border-radius:6px; text-decoration:none; font-size:14px;">+ 新規作成</a>
-    <div class="avatar avatar-sm" style="width:32px; height:32px; border-radius:50%; background:#0969da; display:flex; align-items:center; justify-content:center; font-size:14px;">YT</div>
+  <div class="header-right">
+    <a href="08-search-global.html" class="btn btn-ghost btn-sm">🔍 検索</a>
+    <a href="06-repo-create.html" class="btn btn-ghost btn-sm">＋</a>
+    <a href="04-dashboard.html" class="btn btn-ghost btn-sm">🏠 ダッシュボード</a>
+    <span class="badge badge-primary">@taro</span>
   </div>
 </header>
 
 <div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">ナビゲーション</div>
+      <a href="04-dashboard.html" class="sidebar-item">📊 ダッシュボード</a>
+      <a href="05-repo-list.html" class="sidebar-item active">📁 リポジトリ <span class="count">24</span></a>
+      <a href="08-search-global.html" class="sidebar-item">🔍 検索</a>
+      <a href="14-import-wizard.html" class="sidebar-item">📥 インポート</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">組織</div>
+      <a href="05-repo-list.html" class="sidebar-item">🏢 acme-corp</a>
+      <a href="05-repo-list.html" class="sidebar-item">🏢 openhub-org</a>
+    </div>
+  </aside>
+
   <main class="main">
-    <div class="container">
-      <div class="page-header">
-        <div>
-          <h1 class="page-title">リポジトリ</h1>
-          <div class="page-subtitle">yamada-taro が所有する 24 件のリポジトリ</div>
-        </div>
-        <a href="06-repo-create.html" class="btn btn-primary" style="background:#2da44e; color:#fff; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:600; font-size:14px;">+ 新しいリポジトリ</a>
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">リポジトリ</h1>
+        <p class="text-muted" style="margin: 4px 0 0 0; font-size: 14px;">24個のリポジトリがあります</p>
       </div>
-
-      <div class="filter-bar">
-        <input type="text" class="search-input" placeholder="リポジトリを検索...">
-        <select class="form-select">
-          <option>言語: すべて</option>
-          <option>JavaScript</option>
-          <option>TypeScript</option>
-          <option>Python</option>
-          <option>Go</option>
-          <option>Rust</option>
-        </select>
-        <select class="form-select">
-          <option>可視性: すべて</option>
-          <option>Public</option>
-          <option>Private</option>
-        </select>
-        <select class="form-select">
-          <option>タイプ: すべて</option>
-          <option>所有</option>
-          <option>Fork</option>
-          <option>Archive</option>
-        </select>
-        <select class="form-select">
-          <option>並び順: 最終更新</option>
-          <option>名前</option>
-          <option>作成日</option>
-          <option>Star数</option>
-        </select>
+      <div class="header-actions">
+        <a href="14-import-wizard.html" class="btn btn-outline">📥 インポート</a>
+        <a href="06-repo-create.html" class="btn btn-primary">＋ 新規作成</a>
       </div>
+    </div>
 
-      <div class="repo-list">
-        <div class="repo-item">
-          <input type="checkbox" class="repo-check">
-          <div class="repo-content">
-            <a href="07-repo-detail.html" class="repo-name">awesome-react-components</a>
-            <span class="badge-vis" style="margin-left:8px;">Public</span>
-            <div class="repo-desc">再利用可能なReactコンポーネントのコレクション。TypeScript対応、Storybook付き。</div>
-            <div class="repo-meta">
-              <span><span class="lang-dot" style="background:#3178c6;"></span>TypeScript</span>
-              <span>⭐ 1,245</span>
-              <span>🍴 89</span>
-              <span>📝 MIT</span>
-              <span>2時間前に更新</span>
-            </div>
-          </div>
-          <div class="repo-actions">
-            <a href="07-repo-detail.html" class="btn btn-outline" style="padding:4px 10px; border:1px solid #d0d7de; border-radius:6px; text-decoration:none; color:#1f2328; font-size:12px;">⭐ Star</a>
-            <a href="07-repo-detail.html" class="btn btn-ghost" style="padding:4px 8px; text-decoration:none; color:#656d76;">⋯</a>
-          </div>
+    <div class="filter-bar">
+      <input type="text" class="search-input" placeholder="🔍 リポジトリを検索...">
+      <select class="filter-select">
+        <option>すべての言語</option>
+        <option>JavaScript</option>
+        <option>TypeScript</option>
+        <option>Python</option>
+        <option>Go</option>
+        <option>Rust</option>
+      </select>
+      <select class="filter-select">
+        <option>すべての可視性</option>
+        <option>Public</option>
+        <option>Private</option>
+        <option>Internal</option>
+      </select>
+      <select class="filter-select">
+        <option>更新日順</option>
+        <option>作成日順</option>
+        <option>名前順</option>
+        <option>スター数順</option>
+      </select>
+    </div>
+
+    <div class="repo-grid">
+
+      <a href="07-repo-detail.html" class="repo-card">
+        <div class="repo-header">
+          <h3 class="repo-name">📘 awesome-webapp</h3>
+          <span class="badge badge-success">Public</span>
         </div>
-
-        <div class="repo-item">
-          <input type="checkbox" class="repo-check">
-          <div class="repo-content">
-            <a href="07-repo-detail.html" class="repo-name">go-microservices-template</a>
-            <span class="badge-vis" style="margin-left:8px;">Public</span>
-            <div class="repo-desc">Goによるマイクロサービスのテンプレートプロジェクト。gRPC、Docker、Kubernetes対応。</div>
-            <div class="repo-meta">
-              <span><span class="lang-dot" style="background:#00ADD8;"></span>Go</span>
-              <span>⭐ 856</span>
-              <span>🍴 124</span>
-              <span>📝 Apache-2.0</span>
-              <span>昨日更新</span>
-            </div>
-          </div>
-          <div class="repo-actions">
-            <a href="07-repo-detail.html" class="btn btn-outline" style="padding:4px 10px; border:1px solid #d0d7de; border-radius:6px; text-decoration:none; color:#1f2328; font-size:12px;">⭐ Star</a>
-            <a href="07-repo-detail.html" class="btn btn-ghost" style="padding:4px 8px; text-decoration:none; color:#656d76;">⋯</a>
-          </div>
+        <p class="repo-desc">モダンなWebアプリケーションのスターターテンプレート。React + TypeScript + Vite構成。</p>
+        <div class="repo-meta">
+          <span><span class="lang-dot" style="background:#f1e05a;"></span>JavaScript</span>
+          <span>⭐ 342</span>
+          <span>🍴 28</span>
+          <span>更新: 2時間前</span>
         </div>
+      </a>
 
-        <div class="repo-item">
-          <input type="checkbox" class="repo-check">
-          <div class="repo-content">
-            <a href="07-repo-detail.html" class="repo-name">ml-pipeline-toolkit</a>
-            <span class="badge-vis" style="margin-left:8px; background:#fff8c5; border-color:#d4a72c;">Private</span>
-            <div class="repo-desc">機械学習パイプライン構築のためのPythonツールキット。MLflow統合済み。</div>
-            <div class="repo-meta">
-              <span><span class="lang-dot" style="background:#3572A5;"></span>Python</span>
-              <span>⭐ 42</span>
-              <span>🍴 8</span>
-              <span>📝 MIT</span>
-              <span>3日前に更新</span>
-            </div>
-          </div>
-          <div class="repo-actions">
-            <a href="07-repo-detail.html" class="btn btn-outline" style="padding:4px 10px; border:1px solid #d0d7de; border-radius:6px; text-decoration:none; color:#1f2328; font-size:12px;">⭐ Star</a>
-            <a href="07-repo-detail.html" class="btn btn-ghost" style="padding:4px 8px; text-decoration:none; color:#656d76;">⋯</a>
-          </div>
+      <a href="07-repo-detail.html" class="repo-card">
+        <div class="repo-header">
+          <h3 class="repo-name">🔒 api-gateway</h3>
+          <span class="badge badge-warning">Private</span>
         </div>
-
-        <div class="repo-item">
-          <input type="checkbox" class="repo-check">
-          <div class="repo-content">
-            <a href="07-repo-detail.html" class="repo-name">rust-cli-tools</a>
-            <span class="badge-vis" style="margin-left:8px;">Public</span>
-            <div class="repo-desc">Rustで書かれた便利なCLIツール集。ファイル操作、テキスト処理、ネットワーク診断など。</div>
-            <div class="repo-meta">
-              <span><span class="lang-dot" style="background:#dea584;"></span>Rust</span>
-              <span>⭐ 324</span>
-              <span>🍴 31</span>
-              <span>📝 MIT</span>
-              <span>1週間前に更新</span>
-            </div>
-          </div>
-          <div class="repo-actions">
-            <a href="07-repo-detail.html" class="btn btn-outline" style="padding:4px 10px; border:1px solid #d0d7de; border-radius:6px; text-decoration:none; color:#1f2328; font-size:12px;">⭐ Star</a>
-            <a href="07-repo-detail.html" class="btn btn-ghost" style="padding:4px 8px; text-decoration:none; color:#656d76;">⋯</a>
-          </div>
+        <p class="repo-desc">マイクロサービス用のAPIゲートウェイ実装。認証・レート制限・ロギング機能を提供。</p>
+        <div class="repo-meta">
+          <span><span class="lang-dot" style="background:#3178c6;"></span>TypeScript</span>
+          <span>⭐ 87</span>
+          <span>🍴 12</span>
+          <span>更新: 5時間前</span>
         </div>
+      </a>
 
-        <div class="repo-item">
-          <input type="checkbox" class="repo-check">
-          <div class="repo-content">
-            <a href="07-repo-detail.html" class="repo-name">vue3-dashboard-starter</a>
-            <span class="badge-vis" style="margin-left:8px;">Public</span>
-            <div class="repo-desc">Vue 3 + Vite + Pinia による管理画面スターターキット。認証・権限管理込み。</div>
-            <div class="repo-meta">
-              <span><span class="lang-dot" style="background:#41b883;"></span>Vue</span>
-              <span>⭐ 567</span>
-              <span>🍴 92</span>
-              <span>📝 MIT</span>
-              <span>2週間前に更新</span>
-            </div>
-          </div>
-          <div class="repo-actions">
-            <a href="07-repo-detail.html" class="btn btn-outline" style="padding:4px 10px; border:1px solid #d0d7de; border-radius:6px; text-decoration:none; color:#1f2328; font-size:12px;">⭐ Star</a>
-            <a href="07-repo-detail.html" class="btn btn-ghost" style="padding:4px 8px; text-decoration:none; color:#656d76;">⋯</a>
-          </div>
+      <a href="07-repo-detail.html" class="repo-card">
+        <div class="repo-header">
+          <h3 class="repo-name">📘 data-pipeline</h3>
+          <span class="badge badge-success">Public</span>
         </div>
-
-        <div class="repo-item">
-          <input type="checkbox" class="repo-check">
-          <div class="repo-content">
-            <a href="07-repo-detail.html" class="repo-name">dotfiles</a>
-            <span class="badge-vis" style="margin-left:8px;">Public</span>
-            <div class="repo-desc">個人の設定ファイル集。zsh、vim、tmux、git、各種エディタの設定。</div>
-            <div class="repo-meta">
-              <span><span class="lang-dot" style="background:#89e051;"></span>Shell</span>
-              <span>⭐ 18</span>
-              <span>🍴 2</span>
-              <span>1ヶ月前に更新</span>
-            </div>
-          </div>
-          <div class="repo-actions">
-            <a href="07-repo-detail.html" class="btn btn-outline" style="padding:4px 10px; border:1px solid #d0d7de; border-radius:6px; text-decoration:none; color:#1f2328; font-size:12px;">⭐ Star</a>
-            <a href="07-repo-detail.html" class="btn btn-ghost" style="padding:4px 8px; text-decoration:none; color:#656d76;">⋯</a>
-          </div>
+        <p class="repo-desc">大規模データ処理パイプライン。Apache Sparkベースの分散処理フレームワーク。</p>
+        <div class="repo-meta">
+          <span><span class="lang-dot" style="background:#3572A5;"></span>Python</span>
+          <span>⭐ 1.2k</span>
+          <span>🍴 156</span>
+          <span>更新: 1日前</span>
         </div>
+      </a>
 
-        <div class="repo-item">
-          <input type="checkbox" class="repo-check">
-          <div class="repo-content">
-            <a href="07-repo-detail.html" class="repo-name">node-api-boilerplate</a>
-            <span class="badge-vis" style="margin-left:8px;">Public</span>
-            <div class="repo-desc">Express + TypeScript + PostgreSQL によるRESTful API雛形。Swagger UI付き。</div>
-            <div class="repo-meta">
-              <span><span class="lang-dot" style="background:#f1e05a;"></span>JavaScript</span>
-              <span>⭐ 234</span>
-              <span>🍴 47</span>
-              <span>📝 ISC</span>
-              <span>2ヶ月前に更新</span>
-            </div>
-          </div>
-          <div class="repo-actions">
-            <a href="07-repo-detail.html" class="btn btn-outline" style="padding:4px 10px; border:1px solid #d0d7de; border-radius:6px; text-decoration:none; color:#1f2328; font-size:12px;">⭐ Star</a>
-            <a href="07-repo-detail.html" class="btn btn-ghost" style="padding:4px 8px; text-decoration:none; color:#656d76;">⋯</a>
-          </div>
+      <a href="07-repo-detail.html" class="repo-card">
+        <div class="repo-header">
+          <h3 class="repo-name">🔒 internal-tools</h3>
+          <span class="badge badge-info">Internal</span>
         </div>
-      </div>
+        <p class="repo-desc">社内向け開発ツール集。CLIユーティリティとスクリプトのコレクション。</p>
+        <div class="repo-meta">
+          <span><span class="lang-dot" style="background:#00ADD8;"></span>Go</span>
+          <span>⭐ 24</span>
+          <span>🍴 6</span>
+          <span>更新: 2日前</span>
+        </div>
+      </a>
 
-      <div class="pagination">
-        <a href="05-repo-list.html" class="page-btn">‹ 前へ</a>
-        <a href="05-repo-list.html" class="page-btn active">1</a>
-        <a href="05-repo-list.html" class="page-btn">2</a>
-        <a href="05-repo-list.html" class="page-btn">3</a>
-        <a href="05-repo-list.html" class="page-btn">4</a>
-        <a href="05-repo-list.html" class="page-btn">次へ ›</a>
-      </div>
+      <a href="07-repo-detail.html" class="repo-card">
+        <div class="repo-header">
+          <h3 class="repo-name">📘 rust-cli-tools</h3>
+          <span class="badge badge-success">Public</span>
+        </div>
+        <p class="repo-desc">高速なCLIツールセット。ファイル操作・テキスト処理・ネットワーク診断機能を提供。</p>
+        <div class="repo-meta">
+          <span><span class="lang-dot" style="background:#dea584;"></span>Rust</span>
+          <span>⭐ 567</span>
+          <span>🍴 43</span>
+          <span>更新: 3日前</span>
+        </div>
+      </a>
+
+      <a href="07-repo-detail.html" class="repo-card">
+        <div class="repo-header">
+          <h3 class="repo-name">📘 ml-experiments</h3>
+          <span class="badge badge-success">Public</span>
+        </div>
+        <p class="repo-desc">機械学習実験用リポジトリ。各種モデルの学習スクリプトとNotebook。</p>
+        <div class="repo-meta">
+          <span><span class="lang-dot" style="background:#3572A5;"></span>Python</span>
+          <span>⭐ 89</span>
+          <span>🍴 11</span>
+          <span>更新: 1週間前</span>
+        </div>
+      </a>
+
+      <a href="07-repo-detail.html" class="repo-card">
+        <div class="repo-header">
+          <h3 class="repo-name">🔒 mobile-app</h3>
+          <span class="badge badge-warning">Private</span>
+        </div>
+        <p class="repo-desc">クロスプラットフォームモバイルアプリ。React Native + Expo構成。</p>
+        <div class="repo-meta">
+          <span><span class="lang-dot" style="background:#3178c6;"></span>TypeScript</span>
+          <span>⭐ 15</span>
+          <span>🍴 2</span>
+          <span>更新: 2週間前</span>
+        </div>
+      </a>
+
+      <a href="07-repo-detail.html" class="repo-card">
+        <div class="repo-header">
+          <h3 class="repo-name">📘 design-system</h3>
+          <span class="badge badge-success">Public</span>
+        </div>
+        <p class="repo-desc">統一されたデザインシステム。コンポーネントライブラリとデザイントークン。</p>
+        <div class="repo-meta">
+          <span><span class="lang-dot" style="background:#f1e05a;"></span>JavaScript</span>
+          <span>⭐ 234</span>
+          <span>🍴 31</span>
+          <span>更新: 3週間前</span>
+        </div>
+      </a>
+
+    </div>
+
+    <div class="pagination">
+      <a href="05-repo-list.html" class="page-btn">‹ 前へ</a>
+      <a href="05-repo-list.html" class="page-btn active">1</a>
+      <a href="05-repo-list.html" class="page-btn">2</a>
+      <a href="05-repo-list.html" class="page-btn">3</a>
+      <a href="05-repo-list.html" class="page-btn">次へ ›</a>
     </div>
   </main>
 </div>
+
 
