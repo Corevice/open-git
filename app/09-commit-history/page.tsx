@@ -192,7 +192,7 @@ export default function Page() {
                 </div>
                 <table className="w-full border-collapse font-mono text-xs">
                   <tbody>
-                    <tr className="bg-[#ddf4ff] text-[#57606a]"><td className="w-[50px] text-right px-2.5 py-1 border-r border-[#d0d7de]"></td><td className="px-2.5 py-1 whitespace-pre">@@ -15,8 +15,12 @@ export async function login(req, res) {"}</td></tr>
+                    <tr className="bg-[#ddf4ff] text-[#57606a]"><td className="w-[50px] text-right px-2.5 py-1 border-r border-[#d0d7de]"></td><td className="px-2.5 py-1 whitespace-pre">@@ -15,8 +15,12 @@ export async function login(req, res) {"{"}</td></tr>
                     <tr><td className="w-[50px] text-right px-2.5 py-0.5 text-[#8c959f] bg-[#f6f8fa] border-r border-[#d0d7de] select-none">15</td><td className="px-2.5 py-0.5 whitespace-pre">  const &#123; email, password &#125; = req.body;</td></tr>
                     <tr><td className="w-[50px] text-right px-2.5 py-0.5 text-[#8c959f] bg-[#f6f8fa] border-r border-[#d0d7de] select-none">16</td><td className="px-2.5 py-0.5 whitespace-pre">  const user = await findUser(email);</td></tr>
                     {[
