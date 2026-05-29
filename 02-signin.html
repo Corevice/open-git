@@ -1,0 +1,226 @@
+
+
+
+<meta charset="UTF-8">
+<title>サインイン - オープンソースGitHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body {
+    background: #0d1117;
+    color: #c9d1d9;
+    margin: 0;
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .signin-wrapper {
+    max-width: 340px;
+    margin: 0 auto;
+    padding: 40px 20px;
+  }
+  .signin-logo {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  .signin-logo-icon {
+    font-size: 48px;
+    color: #c9d1d9;
+  }
+  .signin-title {
+    text-align: center;
+    font-size: 24px;
+    font-weight: 300;
+    margin-bottom: 24px;
+    color: #c9d1d9;
+  }
+  .signin-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .signin-card .form-group {
+    margin-bottom: 16px;
+  }
+  .signin-card .form-label {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #c9d1d9;
+  }
+  .signin-card input[type="text"],
+  .signin-card input[type="password"] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 12px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #c9d1d9;
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .forgot-link {
+    font-size: 12px;
+    color: #58a6ff;
+    text-decoration: none;
+  }
+  .forgot-link:hover {
+    text-decoration: underline;
+  }
+  .btn-signin {
+    width: 100%;
+    background: #238636;
+    color: #ffffff;
+    border: 1px solid rgba(240,246,252,0.1);
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    text-decoration: none;
+    display: block;
+    box-sizing: border-box;
+  }
+  .btn-signin:hover {
+    background: #2ea043;
+  }
+  .divider {
+    display: flex;
+    align-items: center;
+    margin: 16px 0;
+    color: #8b949e;
+    font-size: 12px;
+  }
+  .divider::before,
+  .divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: #30363d;
+  }
+  .divider span {
+    padding: 0 12px;
+  }
+  .oauth-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 16px;
+    background: #21262d;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    margin-bottom: 8px;
+  }
+  .oauth-btn:hover {
+    background: #30363d;
+  }
+  .signup-prompt {
+    text-align: center;
+    padding: 16px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    font-size: 14px;
+    color: #c9d1d9;
+  }
+  .signup-prompt a {
+    color: #58a6ff;
+    text-decoration: none;
+    margin-left: 4px;
+  }
+  .signup-prompt a:hover {
+    text-decoration: underline;
+  }
+  .footer-links {
+    margin-top: 48px;
+    text-align: center;
+    font-size: 12px;
+    color: #8b949e;
+  }
+  .footer-links a {
+    color: #58a6ff;
+    text-decoration: none;
+    margin: 0 8px;
+  }
+  .form-error {
+    color: #f85149;
+    font-size: 12px;
+    margin-top: 4px;
+  }
+</style>
+
+
+
+<div class="signin-wrapper">
+  <div class="signin-logo">
+    <span class="signin-logo-icon">⌥</span>
+  </div>
+
+  <h1 class="signin-title">OpenHub にサインイン</h1>
+
+  <div class="signin-card">
+    <form>
+      <div class="form-group">
+        <label class="form-label" for="login">ユーザー名またはメールアドレス</label>
+        <input type="text" id="login" name="login">
+      </div>
+
+      <div class="form-group">
+        <div class="label-row">
+          <label class="form-label" for="password" style="margin-bottom:0;">パスワード</label>
+          <a href="02-signin.html" class="forgot-link">パスワードをお忘れですか?</a>
+        </div>
+        <input type="password" id="password" name="password">
+      </div>
+
+      <a href="04-dashboard.html" class="btn-signin">サインイン</a>
+    </form>
+
+    <div class="divider"><span>または</span></div>
+
+    <a href="04-dashboard.html" class="oauth-btn">
+      <span style="font-size:16px;">🔑</span>
+      <span>パスキーでサインイン</span>
+    </a>
+
+    <a href="04-dashboard.html" class="oauth-btn">
+      <span style="font-size:16px;">🔐</span>
+      <span>SSOでサインイン</span>
+    </a>
+
+    <a href="04-dashboard.html" class="oauth-btn">
+      <span style="font-size:16px;">🐙</span>
+      <span>OAuth Apps でサインイン</span>
+    </a>
+  </div>
+
+  <div class="signup-prompt">
+    アカウントをお持ちでない方
+    <a href="03-signup.html">新規登録</a>
+  </div>
+
+  <div class="footer-links">
+    <a href="02-signin.html">利用規約</a>
+    <a href="02-signin.html">プライバシー</a>
+    <a href="02-signin.html">セキュリティ</a>
+    <a href="02-signin.html">ヘルプ</a>
+  </div>
+</div>
+
+

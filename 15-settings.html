@@ -1,0 +1,325 @@
+
+
+
+<meta charset="UTF-8">
+<title>ユーザー設定 - オープンソースGitHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { margin: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1f2328; }
+  .layout { display: grid; grid-template-columns: 240px 1fr; gap: 32px; max-width: 1280px; margin: 0 auto; padding: 24px; }
+  .settings-nav { position: sticky; top: 24px; align-self: start; }
+  .settings-nav .sidebar-item { display: block; padding: 8px 12px; border-radius: 6px; text-decoration: none; color: #1f2328; margin-bottom: 2px; border-left: 3px solid transparent; }
+  .settings-nav .sidebar-item.active { background: #f3f4f6; border-left-color: #0969da; font-weight: 600; }
+  .settings-nav .sidebar-item:hover { background: #f3f4f6; }
+  .main { min-width: 0; }
+  .section { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; margin-bottom: 24px; }
+  .section-head { padding: 16px 20px; border-bottom: 1px solid #d0d7de; }
+  .section-head h2 { margin: 0 0 4px; font-size: 18px; }
+  .section-head p { margin: 0; color: #656d76; font-size: 13px; }
+  .section-body { padding: 20px; }
+  .row { display: grid; grid-template-columns: 200px 1fr; gap: 16px; padding: 12px 0; align-items: center; border-bottom: 1px solid #f0f1f3; }
+  .row:last-child { border-bottom: none; }
+  .row label { font-weight: 500; font-size: 14px; }
+  .row input[type=text], .row input[type=email], .row .form-select, .row textarea { width: 100%; padding: 8px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+  .row textarea { font-family: 'SF Mono', Monaco, monospace; min-height: 100px; }
+  .section-foot { padding: 16px 20px; border-top: 1px solid #d0d7de; background: #f6f8fa; border-radius: 0 0 8px 8px; display: flex; justify-content: flex-end; gap: 8px; }
+  .token-list, .oauth-list, .ssh-list { padding: 0; }
+  .token-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid #f0f1f3; }
+  .token-item:last-child { border-bottom: none; }
+  .token-meta { font-size: 12px; color: #656d76; margin-top: 4px; }
+  .token-name { font-weight: 600; font-size: 14px; }
+  .scopes { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+  .danger-zone { border-color: #cf222e; }
+  .danger-zone .section-head { border-color: #cf222e; background: #ffebe9; }
+  .danger-zone .section-head h2 { color: #cf222e; }
+  .danger-text { color: #cf222e; font-size: 13px; }
+  .checkbox-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; }
+  .checkbox-group label { display: flex; align-items: center; gap: 6px; font-weight: normal; cursor: pointer; }
+  .breadcrumb { padding: 0 0 16px; font-size: 13px; color: #656d76; }
+  .breadcrumb a { color: #0969da; text-decoration: none; }
+  .avatar { width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #0969da, #8250df); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 28px; font-weight: 600; }
+</style>
+
+
+
+<header class="app-bar">
+  <div class="logo">
+    <span class="logo-icon">🐙</span>
+    <span>OpenHub</span>
+  </div>
+  <div class="header-right">
+    <a href="04-dashboard.html" class="btn btn-ghost btn-sm">ダッシュボード</a>
+    <span class="badge badge-info">@taro_dev</span>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="settings-nav">
+    <div class="breadcrumb">
+      <a href="04-dashboard.html">← ダッシュボードへ戻る</a>
+    </div>
+    <div class="sidebar-section-title" style="font-size:12px; color:#656d76; text-transform:uppercase; padding:4px 12px; margin-bottom:8px;">設定</div>
+    <a href="#profile" class="sidebar-item active">👤 プロファイル</a>
+    <a href="#tokens" class="sidebar-item">🔑 Personal Access Tokens</a>
+    <a href="#oauth" class="sidebar-item">🔗 OAuth Apps</a>
+    <a href="#ssh" class="sidebar-item">🖥️ SSH Keys</a>
+    <a href="#notifications" class="sidebar-item">🔔 通知</a>
+    <a href="#billing" class="sidebar-item">💳 プラン</a>
+    <a href="#danger" class="sidebar-item" style="color:#cf222e;">⚠️ 危険な操作</a>
+  </aside>
+
+  <main class="main">
+
+    
+    <section class="section" id="profile">
+      <div class="section-head">
+        <h2>プロファイル</h2>
+        <p>あなたの公開プロフィール情報を編集します。</p>
+      </div>
+      <div class="section-body">
+        <div class="row">
+          <label>アバター</label>
+          <div style="display:flex; align-items:center; gap:16px;">
+            <div class="avatar">T</div>
+            <a href="#" class="btn btn-outline btn-sm">画像を変更</a>
+          </div>
+        </div>
+        <div class="row">
+          <label>表示名</label>
+          <input type="text" value="Taro Yamada">
+        </div>
+        <div class="row">
+          <label>ユーザー名</label>
+          <input type="text" value="taro_dev" class="mono">
+        </div>
+        <div class="row">
+          <label>メールアドレス</label>
+          <input type="email" value="taro@example.com">
+        </div>
+        <div class="row">
+          <label>自己紹介</label>
+          <textarea>OSS愛好家。Rust / TypeScript / Go。</textarea>
+        </div>
+        <div class="row">
+          <label>所在地</label>
+          <input type="text" value="Tokyo, Japan">
+        </div>
+      </div>
+      <div class="section-foot">
+        <a href="#" class="btn btn-ghost">キャンセル</a>
+        <a href="15-settings.html" class="btn btn-primary">変更を保存</a>
+      </div>
+    </section>
+
+    
+    <section class="section" id="tokens">
+      <div class="section-head">
+        <h2>Personal Access Tokens (PAT)</h2>
+        <p>APIアクセス用のトークンを発行・管理します。トークンは発行時にのみ表示されます。</p>
+      </div>
+      <div class="section-body">
+        <div class="row">
+          <label>トークン名 <span class="required">*</span></label>
+          <input type="text" placeholder="例: ci-deploy-token">
+        </div>
+        <div class="row">
+          <label>有効期限</label>
+          <select class="form-select">
+            <option>30日</option>
+            <option>60日</option>
+            <option>90日</option>
+            <option>1年</option>
+            <option>無期限（非推奨）</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>スコープ</label>
+          <div class="checkbox-group">
+            <label><input type="checkbox"> repo (リポジトリ全権限)</label>
+            <label><input type="checkbox"> workflow</label>
+            <label><input type="checkbox"> read:user</label>
+            <label><input type="checkbox"> write:packages</label>
+            <label><input type="checkbox"> admin:org</label>
+            <label><input type="checkbox"> delete_repo</label>
+          </div>
+        </div>
+      </div>
+      <div class="section-foot">
+        <a href="15-settings.html" class="btn btn-primary">トークンを発行</a>
+      </div>
+
+      <div class="section-head" style="border-top:1px solid #d0d7de;">
+        <h2 style="font-size:15px;">発行済みトークン</h2>
+      </div>
+      <div class="token-list">
+        <div class="token-item">
+          <div>
+            <div class="token-name">ci-deploy-token <span class="badge badge-success">有効</span></div>
+            <div class="token-meta">作成: 2025-09-12 / 期限: 2025-12-11 / 最終使用: 3時間前</div>
+            <div class="scopes">
+              <span class="tag">repo</span>
+              <span class="tag">workflow</span>
+            </div>
+          </div>
+          <a href="#" class="btn btn-danger btn-sm">取消</a>
+        </div>
+        <div class="token-item">
+          <div>
+            <div class="token-name">local-dev <span class="badge badge-warning">期限間近</span></div>
+            <div class="token-meta">作成: 2025-07-01 / 期限: 2025-10-30 / 最終使用: 昨日</div>
+            <div class="scopes">
+              <span class="tag">read:user</span>
+              <span class="tag">repo</span>
+            </div>
+          </div>
+          <a href="#" class="btn btn-danger btn-sm">取消</a>
+        </div>
+        <div class="token-item">
+          <div>
+            <div class="token-name">old-script <span class="badge badge-danger">期限切れ</span></div>
+            <div class="token-meta">作成: 2024-12-01 / 期限: 2025-03-01 / 最終使用: 7ヶ月前</div>
+          </div>
+          <a href="#" class="btn btn-outline btn-sm">削除</a>
+        </div>
+      </div>
+    </section>
+
+    
+    <section class="section" id="oauth">
+      <div class="section-head">
+        <h2>OAuth Apps</h2>
+        <p>外部アプリケーションがあなたのアカウントへアクセスするためのOAuthアプリを登録します。</p>
+      </div>
+      <div class="section-body">
+        <div class="row">
+          <label>アプリ名 <span class="required">*</span></label>
+          <input type="text" placeholder="My Awesome App">
+        </div>
+        <div class="row">
+          <label>ホームページURL <span class="required">*</span></label>
+          <input type="text" placeholder="https://example.com">
+        </div>
+        <div class="row">
+          <label>説明</label>
+          <input type="text" placeholder="アプリの説明（任意）">
+        </div>
+        <div class="row">
+          <label>コールバックURL <span class="required">*</span></label>
+          <input type="text" placeholder="https://example.com/auth/callback">
+        </div>
+      </div>
+      <div class="section-foot">
+        <a href="15-settings.html" class="btn btn-primary">OAuth Appを作成</a>
+      </div>
+
+      <div class="section-head" style="border-top:1px solid #d0d7de;">
+        <h2 style="font-size:15px;">登録済みアプリ</h2>
+      </div>
+      <div class="token-list">
+        <div class="token-item">
+          <div>
+            <div class="token-name">DevDashboard</div>
+            <div class="token-meta mono">Client ID: a7c3f9e2b1d4e5f6</div>
+            <div class="token-meta">作成: 2025-08-20</div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <a href="#" class="btn btn-outline btn-sm">編集</a>
+            <a href="#" class="btn btn-danger btn-sm">削除</a>
+          </div>
+        </div>
+        <div class="token-item">
+          <div>
+            <div class="token-name">CodeReviewBot</div>
+            <div class="token-meta mono">Client ID: 9f8e7d6c5b4a3210</div>
+            <div class="token-meta">作成: 2025-06-10</div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <a href="#" class="btn btn-outline btn-sm">編集</a>
+            <a href="#" class="btn btn-danger btn-sm">削除</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    
+    <section class="section" id="ssh">
+      <div class="section-head">
+        <h2>SSH Keys</h2>
+        <p>Gitリポジトリへの SSH 認証に使用する公開鍵を追加します。</p>
+      </div>
+      <div class="section-body">
+        <div class="row">
+          <label>タイトル <span class="required">*</span></label>
+          <input type="text" placeholder="例: MacBook Pro 2024">
+        </div>
+        <div class="row">
+          <label>キータイプ</label>
+          <select class="form-select">
+            <option>Authentication Key</option>
+            <option>Signing Key</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>公開鍵 <span class="required">*</span></label>
+          <textarea placeholder="ssh-ed25519 AAAAC3Nz... your_email@example.com" class="mono"></textarea>
+        </div>
+      </div>
+      <div class="section-foot">
+        <a href="15-settings.html" class="btn btn-primary">SSHキーを追加</a>
+      </div>
+
+      <div class="section-head" style="border-top:1px solid #d0d7de;">
+        <h2 style="font-size:15px;">登録済みSSHキー</h2>
+      </div>
+      <div class="token-list">
+        <div class="token-item">
+          <div>
+            <div class="token-name">MacBook Pro 2024 <span class="badge badge-primary">ED25519</span></div>
+            <div class="token-meta mono">SHA256:aB3xKjF9pQrTvWxYz1234567890AbCdEfGhIjKlMn</div>
+            <div class="token-meta">追加: 2025-09-01 / 最終使用: 2時間前</div>
+          </div>
+          <a href="#" class="btn btn-danger btn-sm">削除</a>
+        </div>
+        <div class="token-item">
+          <div>
+            <div class="token-name">Work Desktop <span class="badge badge-primary">RSA 4096</span></div>
+            <div class="token-meta mono">SHA256:zY9wVuT8sR7qPoN6mLkJ5hG4fE3dC2bA1zYxWvU</div>
+            <div class="token-meta">追加: 2024-11-15 / 最終使用: 5日前</div>
+          </div>
+          <a href="#" class="btn btn-danger btn-sm">削除</a>
+        </div>
+      </div>
+    </section>
+
+    
+    <section class="section danger-zone" id="danger">
+      <div class="section-head">
+        <h2>⚠️ 危険な操作</h2>
+        <p class="danger-text">これらの操作は元に戻せません。慎重に実行してください。</p>
+      </div>
+      <div class="section-body">
+        <div class="row">
+          <label>全トークンを無効化</label>
+          <div>
+            <p class="danger-text" style="margin:0 0 8px;">発行済みの全PATが即座に取り消されます。</p>
+            <a href="#" class="btn btn-danger btn-sm">全トークンを無効化</a>
+          </div>
+        </div>
+        <div class="row">
+          <label>アカウント削除</label>
+          <div>
+            <p class="danger-text" style="margin:0 0 8px;">あなたのアカウントと全データが完全に削除されます。</p>
+            <a href="#" class="btn btn-danger btn-sm">アカウントを削除</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div style="text-align:center; padding:16px; color:#656d76; font-size:12px;">
+      <a href="04-dashboard.html" style="color:#0969da; text-decoration:none;">← ダッシュボードへ戻る</a>
+    </div>
+
+  </main>
+</div>
+
+

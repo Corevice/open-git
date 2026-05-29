@@ -1,0 +1,183 @@
+
+
+
+<meta charset="UTF-8">
+<title>ファイル表示・編集 - OpenHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { margin: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .breadcrumb { padding: 16px 24px; background: #fff; border-bottom: 1px solid #e1e4e8; font-size: 14px; }
+  .breadcrumb a { color: #0969da; text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  .breadcrumb .sep { margin: 0 6px; color: #57606a; }
+  .file-toolbar { background: #fff; border: 1px solid #d0d7de; border-radius: 6px 6px 0 0; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; margin: 16px 24px 0; }
+  .file-toolbar-left { display: flex; align-items: center; gap: 16px; font-size: 13px; color: #57606a; }
+  .file-toolbar-right { display: flex; gap: 6px; }
+  .toggle-group { display: inline-flex; border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden; }
+  .toggle-group a { padding: 4px 12px; font-size: 13px; color: #24292f; text-decoration: none; background: #fff; border-right: 1px solid #d0d7de; }
+  .toggle-group a:last-child { border-right: none; }
+  .toggle-group a.active { background: #0969da; color: #fff; }
+  .editor-wrap { margin: 0 24px 16px; border: 1px solid #d0d7de; border-top: none; background: #fff; display: flex; min-height: 600px; }
+  .editor-pane { flex: 0 0 60%; border-right: 1px solid #e1e4e8; overflow: auto; }
+  .preview-pane { flex: 1; padding: 16px 20px; background: #fafbfc; overflow: auto; }
+  .preview-pane h3 { margin-top: 0; font-size: 13px; color: #57606a; text-transform: uppercase; letter-spacing: .5px; }
+  .code-table { width: 100%; border-collapse: collapse; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .code-table td { padding: 0 12px; vertical-align: top; line-height: 20px; }
+  .code-table .ln { text-align: right; color: #8c959f; user-select: none; width: 48px; border-right: 1px solid #eaeef2; background: #f6f8fa; }
+  .code-table .code { white-space: pre; color: #24292f; }
+  .kw { color: #cf222e; }
+  .str { color: #0a3069; }
+  .fn { color: #8250df; }
+  .com { color: #6e7781; font-style: italic; }
+  .num { color: #0550ae; }
+  .commit-bar { background: #f6f8fa; border-bottom: 1px solid #e1e4e8; padding: 10px 16px; display: flex; align-items: center; gap: 12px; font-size: 13px; }
+  .avatar { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #6e40c9, #218bff); display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 600; }
+  .status-bar { background: #24292f; color: #c9d1d9; padding: 8px 24px; display: flex; justify-content: space-between; font-size: 12px; font-family: ui-monospace, monospace; }
+  .status-bar .status-left, .status-bar .status-right { display: flex; gap: 20px; }
+  .saved-dot { color: #3fb950; }
+  .preview-meta { font-size: 13px; color: #57606a; line-height: 1.6; }
+  .preview-meta dt { font-weight: 600; color: #24292f; margin-top: 10px; }
+  .preview-meta dd { margin: 2px 0 0; }
+</style>
+
+
+
+<header class="app-bar">
+  <div class="logo">
+    <span class="logo-icon">🐙</span>
+    <span class="text-gradient">OpenHub</span>
+  </div>
+  <div class="header-right">
+    <a href="09-commit-history.html" class="btn btn-ghost btn-sm">📜 履歴</a>
+    <a href="07-repo-detail.html" class="btn btn-ghost btn-sm">📁 リポジトリ</a>
+    <span class="avatar">YT</span>
+  </div>
+</header>
+
+<nav class="breadcrumb">
+  <a href="07-repo-detail.html">yamada-taro</a>
+  <span class="sep">/</span>
+  <a href="07-repo-detail.html"><strong>awesome-app</strong></a>
+  <span class="sep">/</span>
+  <a href="07-repo-detail.html">src</a>
+  <span class="sep">/</span>
+  <a href="07-repo-detail.html">components</a>
+  <span class="sep">/</span>
+  <span>Button.tsx</span>
+  <span class="badge badge-info" style="margin-left:8px;">main</span>
+</nav>
+
+<div class="commit-bar" style="margin: 0 24px; border: 1px solid #d0d7de; border-top: none;">
+  <span class="avatar">YT</span>
+  <strong>yamada-taro</strong>
+  <a href="09-commit-history.html" style="color:#0969da; text-decoration:none;">feat: ボタンコンポーネントにdisabled状態を追加</a>
+  <span class="text-muted" style="margin-left:auto;">
+    <span class="mono">a3f7c1b</span> · 2時間前 · <a href="09-commit-history.html" style="color:#0969da;">142 commits</a>
+  </span>
+</div>
+
+<div class="file-toolbar">
+  <div class="file-toolbar-left">
+    <span>📄 <strong>Button.tsx</strong></span>
+    <span>48 行</span>
+    <span>1.2 KB</span>
+    <span>TypeScript</span>
+  </div>
+  <div class="file-toolbar-right">
+    <div class="toggle-group">
+      <a href="08-file-viewer.html" class="active">Code</a>
+      <a href="08-file-viewer.html">Blame</a>
+      <a href="08-file-viewer.html">Raw</a>
+    </div>
+    <a href="08-file-viewer.html" class="btn btn-sm btn-ghost" title="コピー">📋</a>
+    <a href="09-commit-history.html" class="btn btn-sm btn-ghost" title="履歴">🕐</a>
+    <a href="08-file-viewer.html" class="btn btn-sm btn-primary">✏️ 編集</a>
+  </div>
+</div>
+
+<div class="editor-wrap">
+  <div class="editor-pane">
+    <table class="code-table">
+      <tbody><tr><td class="ln">1</td><td class="code"><span class="kw">import</span> React <span class="kw">from</span> <span class="str">'react'</span>;</td></tr>
+      <tr><td class="ln">2</td><td class="code"><span class="kw">import</span> styles <span class="kw">from</span> <span class="str">'./Button.module.css'</span>;</td></tr>
+      <tr><td class="ln">3</td><td class="code"></td></tr>
+      <tr><td class="ln">4</td><td class="code"><span class="com">// ボタンコンポーネントのProps定義</span></td></tr>
+      <tr><td class="ln">5</td><td class="code"><span class="kw">export interface</span> <span class="fn">ButtonProps</span> {</td></tr>
+      <tr><td class="ln">6</td><td class="code">  label: <span class="kw">string</span>;</td></tr>
+      <tr><td class="ln">7</td><td class="code">  variant?: <span class="str">'primary'</span> | <span class="str">'secondary'</span>;</td></tr>
+      <tr><td class="ln">8</td><td class="code">  disabled?: <span class="kw">boolean</span>;</td></tr>
+      <tr><td class="ln">9</td><td class="code">  onClick?: () =&gt; <span class="kw">void</span>;</td></tr>
+      <tr><td class="ln">10</td><td class="code">}</td></tr>
+      <tr><td class="ln">11</td><td class="code"></td></tr>
+      <tr><td class="ln">12</td><td class="code"><span class="kw">export const</span> <span class="fn">Button</span>: React.FC&lt;ButtonProps&gt; = ({</td></tr>
+      <tr><td class="ln">13</td><td class="code">  label,</td></tr>
+      <tr><td class="ln">14</td><td class="code">  variant = <span class="str">'primary'</span>,</td></tr>
+      <tr><td class="ln">15</td><td class="code">  disabled = <span class="kw">false</span>,</td></tr>
+      <tr><td class="ln">16</td><td class="code">  onClick,</td></tr>
+      <tr><td class="ln">17</td><td class="code">}) =&gt; {</td></tr>
+      <tr><td class="ln">18</td><td class="code">  <span class="kw">const</span> className = <span class="str">`</span><span class="str">${styles.btn} ${styles[variant]}</span><span class="str">`</span>;</td></tr>
+      <tr><td class="ln">19</td><td class="code"></td></tr>
+      <tr><td class="ln">20</td><td class="code">  <span class="kw">return</span> (</td></tr>
+      <tr><td class="ln">21</td><td class="code">    &lt;<span class="fn">button</span></td></tr>
+      <tr><td class="ln">22</td><td class="code">      className={className}</td></tr>
+      <tr><td class="ln">23</td><td class="code">      disabled={disabled}</td></tr>
+      <tr><td class="ln">24</td><td class="code">      onClick={onClick}</td></tr>
+      <tr><td class="ln">25</td><td class="code">      aria-label={label}</td></tr>
+      <tr><td class="ln">26</td><td class="code">    &gt;</td></tr>
+      <tr><td class="ln">27</td><td class="code">      {label}</td></tr>
+      <tr><td class="ln">28</td><td class="code">    &lt;/<span class="fn">button</span>&gt;</td></tr>
+      <tr><td class="ln">29</td><td class="code">  );</td></tr>
+      <tr><td class="ln">30</td><td class="code">};</td></tr>
+      <tr><td class="ln">31</td><td class="code"></td></tr>
+      <tr><td class="ln">32</td><td class="code"><span class="kw">export default</span> Button;</td></tr>
+    </tbody></table>
+  </div>
+  <div class="preview-pane">
+    <h3>📋 ファイル情報</h3>
+    <dl class="preview-meta">
+      <dt>パス</dt>
+      <dd class="mono">src/components/Button.tsx</dd>
+      <dt>サイズ</dt>
+      <dd>1,247 bytes</dd>
+      <dt>行数</dt>
+      <dd>48 行</dd>
+      <dt>言語</dt>
+      <dd>TypeScript (React)</dd>
+      <dt>最終更新</dt>
+      <dd>2024-01-15 14:32 (2時間前)</dd>
+      <dt>コミットハッシュ</dt>
+      <dd class="mono">a3f7c1b9</dd>
+    </dl>
+
+    <h3 style="margin-top:24px;">👥 コントリビューター</h3>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <span class="avatar" title="yamada-taro">YT</span>
+      <span class="avatar" title="suzuki-hanako" style="background:linear-gradient(135deg,#e85d75,#f59e0b);">SH</span>
+      <span class="avatar" title="tanaka-jiro" style="background:linear-gradient(135deg,#10b981,#0ea5e9);">TJ</span>
+    </div>
+
+    <h3 style="margin-top:24px;">🔗 アクション</h3>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <a href="09-commit-history.html" class="btn btn-sm btn-outline">📜 このファイルの履歴</a>
+      <a href="08-file-viewer.html" class="btn btn-sm btn-outline">👁 Blame表示</a>
+      <a href="08-file-viewer.html" class="btn btn-sm btn-outline">📋 パスをコピー</a>
+      <a href="08-file-viewer.html" class="btn btn-sm btn-outline">⬇️ Raw ダウンロード</a>
+    </div>
+  </div>
+</div>
+
+<div class="status-bar">
+  <div class="status-left">
+    <span>UTF-8</span>
+    <span>LF</span>
+    <span>TypeScript</span>
+    <span>32 行 / 1,247 文字</span>
+  </div>
+  <div class="status-right">
+    <span class="saved-dot">● 保存済み</span>
+    <span>最終更新: 2024-01-15 14:32</span>
+    <span>main</span>
+  </div>
+</div>
+
+

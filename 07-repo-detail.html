@@ -1,0 +1,231 @@
+
+
+
+<meta charset="UTF-8">
+<title>octocat/awesome-project - OSS GitHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { background: #f6f8fa; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .container { max-width: 1280px; margin: 0 auto; padding: 0 24px; }
+  .repo-header { background: #fff; border-bottom: 1px solid #d0d7de; padding: 16px 0; position: sticky; top: 0; z-index: 10; }
+  .repo-title { font-size: 20px; margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .repo-title a { color: #0969da; text-decoration: none; }
+  .repo-actions { display: flex; gap: 8px; margin-left: auto; }
+  .title-row { display: flex; align-items: center; gap: 12px; }
+  .repo-tabs { display: flex; gap: 4px; margin-top: 16px; border-bottom: 1px solid transparent; }
+  .repo-tab { padding: 8px 16px; text-decoration: none; color: #24292f; border-radius: 6px 6px 0 0; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+  .repo-tab:hover { background: #f3f4f6; }
+  .repo-tab.active { border-bottom: 2px solid #fd8c73; font-weight: 600; }
+  .repo-tab .count { background: #eaeef2; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .main-layout { display: grid; grid-template-columns: 1fr 360px; gap: 24px; padding: 24px 0; }
+  .code-section { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; overflow: hidden; }
+  .code-toolbar { padding: 12px 16px; border-bottom: 1px solid #d0d7de; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .branch-selector { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  .toolbar-info { color: #57606a; font-size: 13px; }
+  .clone-box { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .clone-url { background: #f6f8fa; border: 1px solid #d0d7de; padding: 6px 10px; border-radius: 6px; font-family: monospace; font-size: 12px; min-width: 280px; }
+  .file-tree { list-style: none; padding: 0; margin: 0; }
+  .file-tree li a { display: flex; align-items: center; padding: 10px 16px; border-bottom: 1px solid #eaeef2; text-decoration: none; color: #24292f; font-size: 14px; gap: 12px; }
+  .file-tree li a:hover { background: #f6f8fa; }
+  .file-tree li:last-child a { border-bottom: none; }
+  .file-icon { width: 16px; color: #57606a; }
+  .file-name { flex: 1; }
+  .file-msg { color: #57606a; font-size: 13px; flex: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-age { color: #57606a; font-size: 13px; }
+  .readme-card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; margin-top: 24px; }
+  .readme-header { padding: 12px 16px; border-bottom: 1px solid #d0d7de; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .readme-body { padding: 32px; }
+  .readme-body h1 { border-bottom: 1px solid #d0d7de; padding-bottom: 8px; }
+  .readme-body code { background: #f6f8fa; padding: 2px 6px; border-radius: 4px; font-size: 90%; }
+  .readme-body pre { background: #f6f8fa; padding: 16px; border-radius: 6px; overflow: auto; }
+  .side-card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .side-card h3 { font-size: 14px; margin: 0 0 12px 0; }
+  .about-desc { color: #57606a; font-size: 14px; line-height: 1.5; }
+  .meta-list { list-style: none; padding: 0; margin: 12px 0 0 0; font-size: 13px; color: #57606a; }
+  .meta-list li { padding: 4px 0; }
+  .stat-row { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; }
+  .stat-row a { color: #57606a; text-decoration: none; }
+  .stat-row a:hover { color: #0969da; }
+  .lang-bar { height: 8px; border-radius: 4px; overflow: hidden; display: flex; margin: 8px 0; }
+  .lang-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }
+  .lang-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+</style>
+
+
+
+<header class="app-bar">
+  <div class="container" style="display:flex;align-items:center;justify-content:space-between;height:100%;">
+    <div class="logo"><span class="logo-icon">🐙</span> OSS GitHub</div>
+    <div class="header-right">
+      <a href="12-issue-list.html" class="btn btn-ghost btn-sm">🔔</a>
+      <a href="11-repo-settings.html" class="btn btn-ghost btn-sm">⚙️</a>
+      <span class="badge badge-primary">octocat</span>
+    </div>
+  </div>
+</header>
+
+<div class="repo-header">
+  <div class="container">
+    <div class="title-row">
+      <h1 class="repo-title">
+        📁 <a href="07-repo-detail.html">octocat</a> / <a href="07-repo-detail.html"><strong>awesome-project</strong></a>
+        <span class="badge badge-info">Public</span>
+      </h1>
+      <div class="repo-actions">
+        <a href="07-repo-detail.html" class="btn btn-secondary btn-sm">👁 Watch <span class="count">42</span></a>
+        <a href="07-repo-detail.html" class="btn btn-secondary btn-sm">🍴 Fork <span class="count">128</span></a>
+        <a href="07-repo-detail.html" class="btn btn-primary btn-sm">⭐ Star <span class="count">2.4k</span></a>
+      </div>
+    </div>
+
+    <nav class="repo-tabs">
+      <a href="07-repo-detail.html" class="repo-tab active">📄 Code</a>
+      <a href="12-issue-list.html" class="repo-tab">⊙ Issues <span class="count">23</span></a>
+      <a href="13-pr-list.html" class="repo-tab">⇄ Pull requests <span class="count">7</span></a>
+      <a href="10-actions-list.html" class="repo-tab">▶ Actions</a>
+      <a href="09-commit-history.html" class="repo-tab">⟳ Commits</a>
+      <a href="11-repo-settings.html" class="repo-tab">⚙ Settings</a>
+    </nav>
+  </div>
+</div>
+
+<div class="container">
+  <div class="main-layout">
+    <div>
+      <div class="code-section">
+        <div class="code-toolbar">
+          <a href="07-repo-detail.html" class="branch-selector">⎇ <strong>main</strong> ▾</a>
+          <span class="toolbar-info">12 branches · 8 tags</span>
+          <div class="clone-box">
+            <a href="09-commit-history.html" class="btn btn-secondary btn-sm">⟳ History</a>
+            <span class="clone-url mono">git@github.com:octocat/awesome-project.git</span>
+            <a href="07-repo-detail.html" class="btn btn-primary btn-sm">📋 Copy</a>
+          </div>
+        </div>
+
+        <ul class="file-tree">
+          <li><a href="08-file-viewer.html"><span class="file-icon">📁</span><span class="file-name">.github</span><span class="file-msg">Update workflow permissions</span><span class="file-age">3 days ago</span></a></li>
+          <li><a href="08-file-viewer.html"><span class="file-icon">📁</span><span class="file-name">src</span><span class="file-msg">Refactor authentication module</span><span class="file-age">5 hours ago</span></a></li>
+          <li><a href="08-file-viewer.html"><span class="file-icon">📁</span><span class="file-name">tests</span><span class="file-msg">Add integration tests for API</span><span class="file-age">2 days ago</span></a></li>
+          <li><a href="08-file-viewer.html"><span class="file-icon">📁</span><span class="file-name">docs</span><span class="file-msg">Update API documentation</span><span class="file-age">1 week ago</span></a></li>
+          <li><a href="08-file-viewer.html"><span class="file-icon">📄</span><span class="file-name">.gitignore</span><span class="file-msg">Initial commit</span><span class="file-age">6 months ago</span></a></li>
+          <li><a href="08-file-viewer.html"><span class="file-icon">📄</span><span class="file-name">LICENSE</span><span class="file-msg">Add MIT License</span><span class="file-age">6 months ago</span></a></li>
+          <li><a href="08-file-viewer.html"><span class="file-icon">📄</span><span class="file-name">README.md</span><span class="file-msg">Update installation guide</span><span class="file-age">3 days ago</span></a></li>
+          <li><a href="08-file-viewer.html"><span class="file-icon">📄</span><span class="file-name">package.json</span><span class="file-msg">Bump version to 2.4.0</span><span class="file-age">1 day ago</span></a></li>
+          <li><a href="08-file-viewer.html"><span class="file-icon">📄</span><span class="file-name">tsconfig.json</span><span class="file-msg">Enable strict mode</span><span class="file-age">2 weeks ago</span></a></li>
+        </ul>
+      </div>
+
+      <div class="readme-card">
+        <div class="readme-header">📖 README.md</div>
+        <div class="readme-body">
+          <h1>Awesome Project</h1>
+          <p>
+            <span class="badge badge-success">build passing</span>
+            <span class="badge badge-info">coverage 94%</span>
+            <span class="badge badge-primary">v2.4.0</span>
+          </p>
+          <p>A modern, fast, and developer-friendly toolkit for building scalable web applications. This project provides a comprehensive set of utilities and components to streamline your development workflow.</p>
+
+          <h2>✨ Features</h2>
+          <ul>
+            <li>🚀 Lightning-fast performance with minimal overhead</li>
+            <li>🔧 Modular architecture for easy customization</li>
+            <li>📦 Zero-config setup with sensible defaults</li>
+            <li>🧪 Comprehensive test coverage</li>
+            <li>📚 Detailed documentation and examples</li>
+          </ul>
+
+          <h2>📥 Installation</h2>
+          <pre><code>npm install awesome-project
+# or
+yarn add awesome-project</code></pre>
+
+          <h2>🚀 Quick Start</h2>
+          <pre><code>import { createApp } from 'awesome-project';
+
+const app = createApp({
+  name: 'my-app',
+  version: '1.0.0'
+});
+
+app.start();</code></pre>
+
+          <h2>📖 Documentation</h2>
+          <p>For detailed documentation, please visit <a href="08-file-viewer.html">docs/</a>.</p>
+
+          <h2>🤝 Contributing</h2>
+          <p>Contributions are welcome! Please see <code>CONTRIBUTING.md</code> for guidelines.</p>
+
+          <h2>📄 License</h2>
+          <p>This project is licensed under the MIT License.</p>
+        </div>
+      </div>
+    </div>
+
+    <aside>
+      <div class="side-card">
+        <h3>About</h3>
+        <p class="about-desc">A modern, fast, and developer-friendly toolkit for building scalable web applications.</p>
+        <ul class="meta-list">
+          <li>🔗 <a href="07-repo-detail.html" style="color:#0969da;text-decoration:none;">awesome-project.dev</a></li>
+          <li>📜 MIT License</li>
+          <li>⭐ 2,431 stars</li>
+          <li>👁 42 watching</li>
+          <li>🍴 128 forks</li>
+        </ul>
+        <div style="margin-top:12px;">
+          <span class="tag">javascript</span>
+          <span class="tag">typescript</span>
+          <span class="tag">toolkit</span>
+          <span class="tag">framework</span>
+          <span class="tag">web</span>
+        </div>
+      </div>
+
+      <div class="side-card">
+        <h3>Releases <span class="count">12</span></h3>
+        <div style="font-size:13px;">
+          <div style="margin-bottom:8px;"><strong>v2.4.0</strong> <span class="badge badge-success">Latest</span></div>
+          <div class="text-muted">Released 1 day ago</div>
+        </div>
+        <a href="07-repo-detail.html" style="color:#0969da;text-decoration:none;font-size:13px;display:block;margin-top:12px;">+ 11 releases</a>
+      </div>
+
+      <div class="side-card">
+        <h3>Packages</h3>
+        <div class="text-muted" style="font-size:13px;">No packages published</div>
+      </div>
+
+      <div class="side-card">
+        <h3>Contributors <span class="count">24</span></h3>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px;">
+          <span style="width:32px;height:32px;border-radius:50%;background:#f97583;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;">OC</span>
+          <span style="width:32px;height:32px;border-radius:50%;background:#79c0ff;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;">JD</span>
+          <span style="width:32px;height:32px;border-radius:50%;background:#a5d6ff;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;">AM</span>
+          <span style="width:32px;height:32px;border-radius:50%;background:#d2a8ff;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;">KS</span>
+          <span style="width:32px;height:32px;border-radius:50%;background:#ffa657;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;">RT</span>
+          <span style="width:32px;height:32px;border-radius:50%;background:#7ee787;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;">+19</span>
+        </div>
+      </div>
+
+      <div class="side-card">
+        <h3>Languages</h3>
+        <div class="lang-bar">
+          <div style="width:65%;background:#3178c6;"></div>
+          <div style="width:22%;background:#f1e05a;"></div>
+          <div style="width:8%;background:#563d7c;"></div>
+          <div style="width:5%;background:#89e051;"></div>
+        </div>
+        <div class="lang-legend">
+          <span><span class="lang-dot" style="background:#3178c6;"></span>TypeScript 65.0%</span>
+          <span><span class="lang-dot" style="background:#f1e05a;"></span>JavaScript 22.0%</span>
+          <span><span class="lang-dot" style="background:#563d7c;"></span>CSS 8.0%</span>
+          <span><span class="lang-dot" style="background:#89e051;"></span>Shell 5.0%</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+

@@ -1,0 +1,338 @@
+
+
+
+<meta charset="UTF-8">
+<title>Pull Request #342 - octo-org/awesome-project</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { background: #f6f8fa; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .top-bar { background: #24292f; color: #fff; padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+  .top-bar a { color: #fff; text-decoration: none; }
+  .breadcrumb { font-size: 14px; padding: 12px 24px; background: #fff; border-bottom: 1px solid #d0d7de; }
+  .breadcrumb a { color: #0969da; text-decoration: none; }
+  .pr-header { background: #fff; padding: 20px 24px; border-bottom: 1px solid #d0d7de; position: sticky; top: 0; z-index: 10; }
+  .pr-title { font-size: 26px; font-weight: 400; margin: 0 0 8px; }
+  .pr-title .num { color: #59636e; font-weight: 300; }
+  .pr-meta-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .pr-actions { margin-left: auto; display: flex; gap: 8px; }
+  .pr-status-line { font-size: 14px; color: #59636e; }
+  .pr-status-line strong { color: #1f2328; }
+  .layout { display: grid; grid-template-columns: 1fr 320px; gap: 24px; padding: 24px; max-width: 1280px; margin: 0 auto; }
+  .tabs { display: flex; border-bottom: 1px solid #d0d7de; background: #fff; padding: 0 16px; border-radius: 6px 6px 0 0; gap: 4px; }
+  .tab { padding: 12px 16px; border: none; background: none; font-size: 14px; color: #1f2328; text-decoration: none; border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 6px; }
+  .tab.active { border-bottom-color: #fd8c73; font-weight: 600; }
+  .tab .count { background: #eaeef2; padding: 2px 7px; border-radius: 20px; font-size: 12px; }
+  .section-card { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: 16px; }
+  .conv-item { display: flex; gap: 12px; padding: 16px; border-bottom: 1px solid #d0d7de; }
+  .conv-item:last-child { border-bottom: none; }
+  .conv-body { flex: 1; border: 1px solid #d0d7de; border-radius: 6px; }
+  .conv-head { background: #f6f8fa; padding: 8px 12px; border-bottom: 1px solid #d0d7de; font-size: 13px; }
+  .conv-head strong { color: #1f2328; }
+  .conv-text { padding: 12px; font-size: 14px; line-height: 1.6; }
+  .diff-file { border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: 12px; }
+  .diff-head { background: #f6f8fa; padding: 8px 12px; font-size: 13px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #d0d7de; }
+  .diff-stat-add { color: #1a7f37; }
+  .diff-stat-del { color: #cf222e; }
+  .diff-body { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
+  .diff-line { display: flex; padding: 0 8px; }
+  .diff-line .ln { width: 40px; color: #59636e; text-align: right; padding-right: 8px; user-select: none; }
+  .diff-add { background: #dafbe1; }
+  .diff-add .ln { background: #ccffd8; }
+  .diff-del { background: #ffebe9; }
+  .diff-del .ln { background: #ffd7d5; }
+  .diff-hunk { background: #ddf4ff; color: #59636e; padding: 4px 12px; font-family: ui-monospace, monospace; font-size: 12px; }
+  .status-checks { padding: 16px; }
+  .check-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eaeef2; font-size: 14px; }
+  .check-row:last-child { border-bottom: none; }
+  .merge-box { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 16px; margin-top: 16px; }
+  .merge-box.success { border-color: #1a7f37; background: #dafbe1; }
+  .merge-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .review-form { padding: 16px; }
+  .review-form textarea { width: 100%; min-height: 100px; padding: 8px; border: 1px solid #d0d7de; border-radius: 6px; font-family: inherit; box-sizing: border-box; }
+  .side-card { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: 16px; margin-bottom: 16px; font-size: 13px; }
+  .side-card h3 { font-size: 12px; color: #59636e; text-transform: uppercase; margin: 0 0 12px; font-weight: 600; }
+  .side-card .row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .avatar-mini { width: 20px; height: 20px; border-radius: 50%; background: #ccc; display: inline-block; }
+  .label-pill { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 12px; font-weight: 500; margin: 2px 2px 2px 0; }
+  .status-open { background: #1a7f37; color: #fff; padding: 6px 14px; border-radius: 20px; font-weight: 500; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
+  .pr-list-strip { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: 16px; }
+  .pr-list-strip-header { padding: 12px 16px; border-bottom: 1px solid #d0d7de; font-size: 13px; color: #59636e; display: flex; gap: 16px; }
+  .pr-list-strip-header a { color: #59636e; text-decoration: none; }
+  .pr-list-strip-header a.active { color: #1f2328; font-weight: 600; }
+  .pr-row { padding: 12px 16px; border-bottom: 1px solid #eaeef2; display: flex; gap: 12px; align-items: flex-start; }
+  .pr-row:last-child { border-bottom: none; }
+  .pr-row.current { background: #ddf4ff; }
+  .pr-row-title { font-size: 15px; color: #1f2328; text-decoration: none; font-weight: 500; }
+  .pr-row-title:hover { color: #0969da; }
+  .pr-row-meta { font-size: 12px; color: #59636e; margin-top: 4px; }
+  .icon-circ { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; }
+  .commits-list .conv-item { align-items: center; }
+  .commit-sha { font-family: ui-monospace, monospace; font-size: 12px; background: #f6f8fa; padding: 2px 6px; border-radius: 4px; }
+</style>
+
+
+
+<div class="top-bar">
+  <strong>🐙 GitHub</strong>
+  <a href="07-repo-detail.html">octo-org / awesome-project</a>
+  <div style="margin-left:auto; display:flex; gap:12px;">
+    <a href="11-issue-list.html">Issues</a>
+    <a href="12-pr-list.html"><strong>Pull requests</strong></a>
+    <a href="13-actions-runs.html">Actions</a>
+  </div>
+</div>
+
+<div class="breadcrumb">
+  <a href="07-repo-detail.html">← リポジトリへ戻る</a> &nbsp;/&nbsp;
+  <a href="12-pr-list.html">Pull requests</a> &nbsp;/&nbsp;
+  <span>#342</span>
+</div>
+
+<div class="pr-header">
+  <h1 class="pr-title">Add dark mode support to settings page <span class="num">#342</span></h1>
+  <div class="pr-meta-row">
+    <span class="status-open">⊙ Open</span>
+    <span class="pr-status-line">
+      <strong>octocat-jane</strong> wants to merge <strong>5 commits</strong> into
+      <span class="mono">main</span> from <span class="mono">feature/dark-mode</span>
+    </span>
+    <div class="pr-actions">
+      <a href="12-pr-list.html" class="btn btn-outline btn-sm">✏️ Edit</a>
+      <a href="12-pr-list.html" class="btn btn-outline btn-sm">🔗 Share</a>
+      <a href="12-pr-list.html" class="btn btn-danger btn-sm">Close PR</a>
+    </div>
+  </div>
+</div>
+
+<div class="layout">
+
+  <div>
+    
+    <div class="pr-list-strip">
+      <div class="pr-list-strip-header">
+        <a href="12-pr-list.html" class="active">⊙ 12 Open</a>
+        <a href="12-pr-list.html">✓ 87 Closed</a>
+      </div>
+      <div class="pr-row current">
+        <div class="icon-circ" style="color:#1a7f37;">⊙</div>
+        <div style="flex:1;">
+          <a href="12-pr-list.html" class="pr-row-title">Add dark mode support to settings page</a>
+          <span class="label-pill" style="background:#0969da;color:#fff;">enhancement</span>
+          <span class="label-pill" style="background:#fbca04;color:#1f2328;">ui</span>
+          <div class="pr-row-meta">#342 opened 2 days ago by <strong>octocat-jane</strong> · 3 reviews · 8 comments</div>
+        </div>
+      </div>
+      <div class="pr-row">
+        <div class="icon-circ" style="color:#1a7f37;">⊙</div>
+        <div style="flex:1;">
+          <a href="12-pr-list.html" class="pr-row-title">Fix memory leak in image loader</a>
+          <span class="label-pill" style="background:#d73a4a;color:#fff;">bug</span>
+          <div class="pr-row-meta">#341 opened 3 days ago by <strong>devuser-7</strong> · 2 reviews</div>
+        </div>
+      </div>
+      <div class="pr-row">
+        <div class="icon-circ" style="color:#1a7f37;">⊙</div>
+        <div style="flex:1;">
+          <a href="12-pr-list.html" class="pr-row-title">Refactor authentication middleware</a>
+          <span class="label-pill" style="background:#a371f7;color:#fff;">refactor</span>
+          <div class="pr-row-meta">#339 opened 5 days ago by <strong>backend-bob</strong> · 1 review</div>
+        </div>
+      </div>
+    </div>
+
+    
+    <div class="tabs">
+      <a href="12-pr-list.html" class="tab active">💬 Conversation <span class="count">8</span></a>
+      <a href="12-pr-list.html" class="tab">🕓 Commits <span class="count">5</span></a>
+      <a href="12-pr-list.html" class="tab">✅ Checks <span class="count">4</span></a>
+      <a href="12-pr-list.html" class="tab">📄 Files changed <span class="count">12</span></a>
+    </div>
+
+    
+    <div class="section-card" style="border-top: none; border-radius: 0 0 6px 6px;">
+      <div class="conv-item">
+        <div class="avatar-mini" style="background:#fd8c73; width:40px;height:40px;"></div>
+        <div class="conv-body">
+          <div class="conv-head"><strong>octocat-jane</strong> commented 2 days ago</div>
+          <div class="conv-text">
+            This PR adds full dark mode support to the settings page. <br>
+            - Added theme toggle in sidebar<br>
+            - Updated all color variables to use CSS custom properties<br>
+            - Closes <a href="11-issue-list.html">#287</a><br><br>
+            Please review when you have time 🙏
+          </div>
+        </div>
+      </div>
+
+      <div class="conv-item">
+        <div class="avatar-mini" style="background:#0969da; width:40px;height:40px;"></div>
+        <div class="conv-body">
+          <div class="conv-head"><strong>reviewer-alex</strong> reviewed 1 day ago · <span class="badge badge-success">Approved</span></div>
+          <div class="conv-text">LGTM! The implementation is clean and well-tested. One minor suggestion in the file comments.</div>
+        </div>
+      </div>
+
+      <div class="conv-item">
+        <div class="avatar-mini" style="background:#8250df; width:40px;height:40px;"></div>
+        <div class="conv-body">
+          <div class="conv-head"><strong>maintainer-mike</strong> requested changes 18 hours ago · <span class="badge badge-warning">Changes requested</span></div>
+          <div class="conv-text">Could you also add tests for the localStorage persistence? Otherwise looks great.</div>
+        </div>
+      </div>
+    </div>
+
+    
+    <div class="section-card">
+      <div class="card-header" style="padding:12px 16px; border-bottom:1px solid #d0d7de;">
+        <strong>Files changed</strong> · <span style="color:#59636e;">12 files</span>
+        <span style="margin-left:8px;"><span class="diff-stat-add">+248</span> <span class="diff-stat-del">−87</span></span>
+      </div>
+
+      <div style="padding: 12px;">
+        <div class="diff-file">
+          <div class="diff-head">
+            📄 <span class="mono">src/components/Settings.tsx</span>
+            <span style="margin-left:auto;"><span class="diff-stat-add">+24</span> <span class="diff-stat-del">−6</span></span>
+          </div>
+          <div class="diff-body">
+            <div class="diff-hunk">@@ -12,7 +12,9 @@ export function Settings() {</div>
+            <div class="diff-line"><span class="ln">12</span><span>  const [user, setUser] = useState(null);</span></div>
+            <div class="diff-line diff-del"><span class="ln">13</span><span>-  const theme = 'light';</span></div>
+            <div class="diff-line diff-add"><span class="ln">13</span><span>+  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light');</span></div>
+            <div class="diff-line diff-add"><span class="ln">14</span><span>+  </span></div>
+            <div class="diff-line diff-add"><span class="ln">15</span><span>+  useEffect(() =&gt; { document.body.dataset.theme = theme; }, [theme]);</span></div>
+            <div class="diff-line"><span class="ln">16</span><span>  return (</span></div>
+          </div>
+        </div>
+
+        <div class="diff-file">
+          <div class="diff-head">
+            📄 <span class="mono">src/styles/theme.css</span>
+            <span style="margin-left:auto;"><span class="diff-stat-add">+45</span> <span class="diff-stat-del">−12</span></span>
+          </div>
+          <div class="diff-body">
+            <div class="diff-hunk">@@ -1,5 +1,12 @@</div>
+            <div class="diff-line diff-add"><span class="ln">1</span><span>+:root[data-theme="dark"] {</span></div>
+            <div class="diff-line diff-add"><span class="ln">2</span><span>+  --bg: #0d1117;</span></div>
+            <div class="diff-line diff-add"><span class="ln">3</span><span>+  --fg: #c9d1d9;</span></div>
+            <div class="diff-line diff-add"><span class="ln">4</span><span>+}</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    
+    <div class="section-card">
+      <div class="card-header" style="padding:12px 16px; border-bottom:1px solid #d0d7de;">
+        <strong>Status checks</strong> — <span style="color:#1a7f37;">3 successful</span>, <span style="color:#cf222e;">1 failing</span>
+      </div>
+      <div class="status-checks">
+        <div class="check-row">
+          <span style="color:#1a7f37;">✓</span>
+          <span><strong>build / ubuntu-latest</strong> — Successful in 2m 14s</span>
+          <a href="13-actions-runs.html" style="margin-left:auto; color:#0969da; font-size:13px;">Details</a>
+        </div>
+        <div class="check-row">
+          <span style="color:#1a7f37;">✓</span>
+          <span><strong>test / unit</strong> — Successful in 1m 32s</span>
+          <a href="13-actions-runs.html" style="margin-left:auto; color:#0969da; font-size:13px;">Details</a>
+        </div>
+        <div class="check-row">
+          <span style="color:#1a7f37;">✓</span>
+          <span><strong>lint / eslint</strong> — Successful in 24s</span>
+          <a href="13-actions-runs.html" style="margin-left:auto; color:#0969da; font-size:13px;">Details</a>
+        </div>
+        <div class="check-row">
+          <span style="color:#cf222e;">✗</span>
+          <span><strong>test / e2e</strong> — Failing after 4m 51s</span>
+          <a href="13-actions-runs.html" style="margin-left:auto; color:#0969da; font-size:13px;">Details</a>
+        </div>
+      </div>
+    </div>
+
+    
+    <div class="merge-box">
+      <div class="merge-title">⚠️ This branch has conflicts that must be resolved</div>
+      <div style="font-size:13px; color:#59636e; margin-bottom:12px;">
+        Merging can be performed automatically once the failing check passes and conflicts are resolved.
+      </div>
+      <div style="display:flex; gap:8px;">
+        <a href="12-pr-list.html" class="btn btn-primary">Merge pull request ▾</a>
+        <a href="12-pr-list.html" class="btn btn-outline">Squash and merge</a>
+        <a href="12-pr-list.html" class="btn btn-outline">Rebase and merge</a>
+      </div>
+    </div>
+
+    
+    <div class="section-card" style="margin-top:16px;">
+      <div class="card-header" style="padding:12px 16px; border-bottom:1px solid #d0d7de;">
+        <strong>Add your review</strong>
+      </div>
+      <div class="review-form">
+        <textarea placeholder="Leave a comment..."></textarea>
+        <div style="margin-top:12px; display:flex; gap:8px; align-items:center;">
+          <label style="font-size:13px;"><input type="radio" name="review"> Comment</label>
+          <label style="font-size:13px;"><input type="radio" name="review"> Approve</label>
+          <label style="font-size:13px;"><input type="radio" name="review"> Request changes</label>
+          <a href="12-pr-list.html" class="btn btn-primary btn-sm" style="margin-left:auto;">Submit review</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  
+  <aside>
+    <div class="side-card">
+      <h3>Reviewers</h3>
+      <div class="row"><span class="avatar-mini" style="background:#0969da;"></span> reviewer-alex <span style="margin-left:auto;color:#1a7f37;">✓</span></div>
+      <div class="row"><span class="avatar-mini" style="background:#8250df;"></span> maintainer-mike <span style="margin-left:auto;color:#bf8700;">●</span></div>
+      <div class="row"><span class="avatar-mini" style="background:#cf222e;"></span> sarah-frontend <span style="margin-left:auto;color:#59636e;">⏳</span></div>
+    </div>
+
+    <div class="side-card">
+      <h3>Assignees</h3>
+      <div class="row"><span class="avatar-mini" style="background:#fd8c73;"></span> octocat-jane</div>
+    </div>
+
+    <div class="side-card">
+      <h3>Labels</h3>
+      <span class="label-pill" style="background:#0969da;color:#fff;">enhancement</span>
+      <span class="label-pill" style="background:#fbca04;color:#1f2328;">ui</span>
+      <span class="label-pill" style="background:#a371f7;color:#fff;">good first review</span>
+    </div>
+
+    <div class="side-card">
+      <h3>Milestone</h3>
+      <div>📌 <a href="12-pr-list.html" style="color:#0969da;text-decoration:none;">v2.4 Release</a></div>
+      <div style="margin-top:4px; color:#59636e;">Due in 12 days · 67% complete</div>
+    </div>
+
+    <div class="side-card">
+      <h3>Linked Issues</h3>
+      <div>🔗 <a href="11-issue-list.html" style="color:#0969da;text-decoration:none;">#287 Dark mode request</a></div>
+      <div style="margin-top:6px;">🔗 <a href="11-issue-list.html" style="color:#0969da;text-decoration:none;">#301 Theme persistence</a></div>
+    </div>
+
+    <div class="side-card">
+      <h3>5 Commits</h3>
+      <div style="margin-bottom:6px;"><span class="commit-sha">a3f9c21</span> Add theme toggle</div>
+      <div style="margin-bottom:6px;"><span class="commit-sha">b8e2d45</span> CSS variables</div>
+      <div style="margin-bottom:6px;"><span class="commit-sha">c7d1e89</span> Persist to localStorage</div>
+      <div style="margin-bottom:6px;"><span class="commit-sha">d2a4f12</span> Add tests</div>
+      <div><span class="commit-sha">e9b3c67</span> Fix lint warnings</div>
+    </div>
+
+    <div class="side-card">
+      <h3>Participants (4)</h3>
+      <div style="display:flex; gap:4px;">
+        <span class="avatar-mini" style="background:#fd8c73;"></span>
+        <span class="avatar-mini" style="background:#0969da;"></span>
+        <span class="avatar-mini" style="background:#8250df;"></span>
+        <span class="avatar-mini" style="background:#1a7f37;"></span>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+

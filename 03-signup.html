@@ -1,0 +1,231 @@
+
+
+
+<meta charset="UTF-8">
+<title>サインアップ - OctoHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body {
+    background: #f6f8fa;
+    min-height: 100vh;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .signup-wrapper {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+  }
+  .brand {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .brand-icon {
+    font-size: 48px;
+    line-height: 1;
+  }
+  .brand-title {
+    font-size: 24px;
+    font-weight: 600;
+    margin: 12px 0 4px;
+  }
+  .brand-subtitle {
+    color: #57606a;
+    font-size: 14px;
+  }
+  .form-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    font-size: 14px;
+    box-sizing: border-box;
+    background: #fff;
+  }
+  .form-input:focus {
+    outline: none;
+    border-color: #0969da;
+    box-shadow: 0 0 0 3px rgba(9,105,218,0.2);
+  }
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .form-group {
+    margin-bottom: 16px;
+  }
+  .terms {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 20px 0;
+    font-size: 13px;
+    color: #57606a;
+  }
+  .terms input { margin-top: 3px; }
+  .terms a { color: #0969da; text-decoration: none; }
+  .password-strength {
+    height: 4px;
+    background: #eaeef2;
+    border-radius: 2px;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .password-strength-bar {
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(90deg, #1f883d, #bf8700);
+  }
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 24px 0;
+    color: #57606a;
+    font-size: 12px;
+  }
+  .divider::before, .divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: #d0d7de;
+  }
+  .signin-link {
+    text-align: center;
+    margin-top: 16px;
+    font-size: 14px;
+    color: #57606a;
+  }
+  .signin-link a {
+    color: #0969da;
+    text-decoration: none;
+    font-weight: 500;
+  }
+  .btn-block {
+    width: 100%;
+    justify-content: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .features {
+    margin-top: 32px;
+    padding: 16px;
+    background: #ddf4ff;
+    border: 1px solid #54aeff66;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #0550ae;
+  }
+  .features ul {
+    margin: 8px 0 0;
+    padding-left: 20px;
+  }
+  .features li { margin: 4px 0; }
+</style>
+
+
+
+<header class="app-bar">
+  <a href="01-landing.html" class="logo" style="text-decoration:none;color:inherit;">
+    <span class="logo-icon">🐙</span>
+    <span>OctoHub</span>
+  </a>
+  <div class="header-right">
+    <a href="02-signin.html" class="btn btn-ghost btn-sm">サインイン</a>
+  </div>
+</header>
+
+<div class="signup-wrapper">
+  <div class="brand">
+    <div class="brand-icon">🐙</div>
+    <div class="brand-title">OctoHubへようこそ</div>
+    <div class="brand-subtitle">数百万の開発者と一緒に、コードで世界を変えよう</div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">アカウントを作成</div>
+    </div>
+    <div class="card-body">
+      <form>
+        <div class="form-group">
+          <label class="form-label">ユーザー名 <span class="required">*</span></label>
+          <input type="text" class="form-input" value="octocat-dev" placeholder="例: octocat-dev">
+          <div class="form-hint">英数字とハイフンが使用できます。3〜39文字。</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">メールアドレス <span class="required">*</span></label>
+          <input type="email" class="form-input" value="developer@example.com" placeholder="you@example.com">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">表示名</label>
+            <input type="text" class="form-input" value="Octo Cat" placeholder="表示用の名前">
+          </div>
+          <div class="form-group">
+            <label class="form-label">国 / 地域</label>
+            <select class="form-select">
+              <option>日本</option>
+              <option>United States</option>
+              <option>United Kingdom</option>
+              <option>Germany</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">パスワード <span class="required">*</span></label>
+          <input type="password" class="form-input" value="dummy-password">
+          <div class="password-strength"><div class="password-strength-bar"></div></div>
+          <div class="form-hint">15文字以上、または8文字以上で数字と小文字を含む</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">パスワード（確認）<span class="required">*</span></label>
+          <input type="password" class="form-input" value="dummy-password">
+        </div>
+
+        <div class="terms">
+          <input type="checkbox" id="terms">
+          <label for="terms">
+            <a href="03-signup.html">利用規約</a>および<a href="03-signup.html">プライバシーポリシー</a>に同意します。製品アップデートや開発者向けニュースの受信に同意します。
+          </label>
+        </div>
+
+        <a href="04-dashboard.html" class="btn btn-primary btn-lg btn-block">
+          アカウントを作成 →
+        </a>
+      </form>
+
+      <div class="divider">または</div>
+
+      <a href="04-dashboard.html" class="btn btn-outline btn-block" style="margin-bottom:8px;">
+        <span>🐙</span> GitHubアカウントで続行
+      </a>
+      <a href="04-dashboard.html" class="btn btn-outline btn-block">
+        <span>🔑</span> SSOで続行
+      </a>
+    </div>
+    <div class="card-footer">
+      <div class="signin-link">
+        すでにアカウントをお持ちですか？ <a href="02-signin.html">サインイン</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="features">
+    <strong>無料アカウントで利用できる機能:</strong>
+    <ul>
+      <li>無制限のパブリック・プライベートリポジトリ</li>
+      <li>2,000分/月の Actions 実行時間</li>
+      <li>500MBのパッケージストレージ</li>
+      <li>コミュニティサポート</li>
+    </ul>
+  </div>
+</div>
+
+

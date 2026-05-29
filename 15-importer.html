@@ -1,0 +1,214 @@
+
+
+
+<meta charset="UTF-8">
+<title>GitHubインポーター - オープンソースGitHub</title>
+<link rel="stylesheet" href="base.css">
+<style>
+  body { background: #f6f8fa; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2328; }
+  .page-wrap { max-width: 900px; margin: 0 auto; padding: 32px 24px 80px; }
+  .page-title { font-size: 24px; font-weight: 600; margin: 0 0 8px; }
+  .page-sub { color: #59636e; margin: 0 0 32px; font-size: 14px; }
+
+  /* Stepper */
+  .stepper { display: flex; align-items: center; justify-content: space-between; max-width: 720px; margin: 0 auto 40px; }
+  .step { display: flex; flex-direction: column; align-items: center; flex: 0 0 auto; position: relative; z-index: 1; }
+  .step-circle { width: 36px; height: 36px; border-radius: 50%; background: #d1d9e0; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; border: 2px solid #d1d9e0; }
+  .step.completed .step-circle { background: #1f883d; border-color: #1f883d; }
+  .step.current .step-circle { background: #0969da; border-color: #0969da; box-shadow: 0 0 0 4px rgba(9,105,218,0.15); }
+  .step-label { margin-top: 8px; font-size: 12px; color: #59636e; font-weight: 500; }
+  .step.current .step-label { color: #0969da; font-weight: 600; }
+  .step.completed .step-label { color: #1f883d; }
+  .step-line { flex: 1; height: 2px; background: #d1d9e0; margin: 0 -4px; margin-bottom: 24px; }
+  .step-line.completed { background: #1f883d; }
+
+  /* Card */
+  .wizard-card { max-width: 600px; margin: 0 auto; background: #fff; border: 1px solid #d1d9e0; border-radius: 8px; padding: 32px; }
+  .wizard-card h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+  .wizard-card .desc { color: #59636e; font-size: 14px; margin: 0 0 24px; }
+
+  .form-group { margin-bottom: 20px; }
+  .form-label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .form-input { width: 100%; padding: 8px 12px; border: 1px solid #d1d9e0; border-radius: 6px; font-size: 14px; box-sizing: border-box; font-family: inherit; }
+  .form-input:focus { outline: none; border-color: #0969da; box-shadow: 0 0 0 3px rgba(9,105,218,0.15); }
+  .form-hint { font-size: 12px; color: #59636e; margin-top: 4px; }
+
+  /* Import options */
+  .import-option { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1px solid #d1d9e0; border-radius: 6px; margin-bottom: 10px; cursor: pointer; }
+  .import-option input { margin-top: 3px; }
+  .opt-title { font-weight: 600; font-size: 14px; }
+  .opt-desc { font-size: 12px; color: #59636e; margin-top: 2px; }
+
+  /* Progress */
+  .progress-row { margin-bottom: 16px; }
+  .progress-label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
+  .progress-bar { height: 8px; background: #eaeef2; border-radius: 4px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #0969da; }
+  .progress-fill.done { background: #1f883d; }
+
+  /* Summary */
+  .summary-icon { text-align: center; font-size: 48px; margin-bottom: 12px; }
+  .summary-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 24px 0; }
+  .stat { text-align: center; padding: 12px; background: #f6f8fa; border-radius: 6px; }
+  .stat-num { font-size: 22px; font-weight: 600; color: #0969da; }
+  .stat-label { font-size: 12px; color: #59636e; margin-top: 2px; }
+
+  /* Footer actions */
+  .wizard-actions { max-width: 600px; margin: 24px auto 0; display: flex; justify-content: space-between; align-items: center; }
+  .wizard-actions .right { display: flex; gap: 8px; }
+
+  /* App bar */
+  .app-bar { background: #24292f; color: #fff; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .header-brand { font-weight: 600; font-size: 16px; color: #fff; text-decoration: none; }
+  .header-brand .icon { margin-right: 6px; }
+  .header-actions a { color: #fff; text-decoration: none; font-size: 14px; margin-left: 16px; }
+
+  .repo-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #d1d9e0; border-radius: 6px; margin-bottom: 8px; }
+  .repo-item input { margin: 0; }
+  .repo-name { font-weight: 600; font-size: 14px; }
+  .repo-meta { font-size: 12px; color: #59636e; }
+
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 6px; font-size: 14px; font-weight: 500; text-decoration: none; cursor: pointer; border: 1px solid transparent; }
+  .btn-primary { background: #1f883d; color: #fff; border-color: rgba(31,35,40,0.15); }
+  .btn-outline { background: #fff; color: #1f2328; border-color: #d1d9e0; }
+  .btn-ghost { background: transparent; color: #59636e; }
+</style>
+
+
+
+<header class="app-bar">
+  <a href="04-dashboard.html" class="header-brand"><span class="icon">🐙</span>OpenSource GitHub</a>
+  <div class="header-actions">
+    <a href="04-dashboard.html">ダッシュボード</a>
+    <a href="04-dashboard.html">キャンセル ✕</a>
+  </div>
+</header>
+
+<div class="page-wrap">
+  <h1 class="page-title">GitHubからインポート</h1>
+  <p class="page-sub">既存のGitHubリポジトリのコード、Issue、Pull Request、Wikiを移行できます。</p>
+
+  
+  <div class="stepper">
+    <div class="step completed">
+      <div class="step-circle">✓</div>
+      <div class="step-label">認証</div>
+    </div>
+    <div class="step-line completed"></div>
+    <div class="step completed">
+      <div class="step-circle">✓</div>
+      <div class="step-label">リポジトリ選択</div>
+    </div>
+    <div class="step-line completed"></div>
+    <div class="step current">
+      <div class="step-circle">3</div>
+      <div class="step-label">インポート対象</div>
+    </div>
+    <div class="step-line"></div>
+    <div class="step">
+      <div class="step-circle">4</div>
+      <div class="step-label">実行</div>
+    </div>
+    <div class="step-line"></div>
+    <div class="step">
+      <div class="step-circle">5</div>
+      <div class="step-label">完了</div>
+    </div>
+  </div>
+
+  
+  <div class="wizard-card">
+    <h2>インポートする対象を選択</h2>
+    <p class="desc">リポジトリ <strong class="mono">octocat/hello-world</strong> から取り込むデータを選んでください。</p>
+
+    <label class="import-option">
+      <input type="checkbox">
+      <div>
+        <div class="opt-title">📦 ソースコード &amp; Gitヒストリー</div>
+        <div class="opt-desc">全ブランチ・タグ・コミット履歴を保持して取り込みます（推定 124MB）</div>
+      </div>
+    </label>
+
+    <label class="import-option">
+      <input type="checkbox">
+      <div>
+        <div class="opt-title">🐛 Issues</div>
+        <div class="opt-desc">オープン/クローズ済みIssue、コメント、ラベル、マイルストーン（342件）</div>
+      </div>
+    </label>
+
+    <label class="import-option">
+      <input type="checkbox">
+      <div>
+        <div class="opt-title">🔀 Pull Requests</div>
+        <div class="opt-desc">PR、レビューコメント、マージ状態を含む（87件）</div>
+      </div>
+    </label>
+
+    <label class="import-option">
+      <input type="checkbox">
+      <div>
+        <div class="opt-title">📖 Wiki</div>
+        <div class="opt-desc">Wikiページとリビジョン履歴（14ページ）</div>
+      </div>
+    </label>
+
+    <label class="import-option">
+      <input type="checkbox">
+      <div>
+        <div class="opt-title">⭐ Releases &amp; Tags</div>
+        <div class="opt-desc">リリースノートと添付アセット（23リリース）</div>
+      </div>
+    </label>
+
+    <div class="form-group" style="margin-top: 24px;">
+      <label class="form-label">著者マッピング</label>
+      <select class="form-input">
+        <option>メールアドレスで自動マッピング</option>
+        <option>GitHubユーザー名で照合</option>
+        <option>マッピングしない（オリジナル保持）</option>
+      </select>
+      <div class="form-hint">既存ユーザーが見つからない場合、placeholder アカウントが作成されます。</div>
+    </div>
+  </div>
+
+  
+  <div class="wizard-actions">
+    <a href="15-importer.html" class="btn btn-ghost">← 戻る</a>
+    <div class="right">
+      <a href="04-dashboard.html" class="btn btn-outline">キャンセル</a>
+      <a href="15-importer.html" class="btn btn-primary">次へ：インポート開始 →</a>
+    </div>
+  </div>
+
+  
+  <div style="max-width: 600px; margin: 48px auto 0;">
+    <details>
+      <summary style="cursor: pointer; color: #59636e; font-size: 13px; padding: 8px;">▸ 次ステップのプレビュー: インポート進捗</summary>
+      <div class="wizard-card" style="margin-top: 12px;">
+        <h2>インポート中...</h2>
+        <p class="desc">処理が完了するまでこのページを開いたままにしてください。</p>
+
+        <div class="progress-row">
+          <div class="progress-label"><span>📦 ソースコード</span><span style="color:#1a7f37;">完了</span></div>
+          <div class="progress-bar"><div class="progress-fill done" style="width: 100%;"></div></div>
+        </div>
+        <div class="progress-row">
+          <div class="progress-label"><span>🐛 Issues (218 / 342)</span><span>64%</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width: 64%;"></div></div>
+        </div>
+        <div class="progress-row">
+          <div class="progress-label"><span>🔀 Pull Requests</span><span style="color:#59636e;">待機中</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width: 0%;"></div></div>
+        </div>
+
+        <div style="text-align: right; margin-top: 16px;">
+          <a href="07-repo-detail.html" class="btn btn-primary">完了 → リポジトリを表示</a>
+        </div>
+      </div>
+    </details>
+  </div>
+
+</div>
+
+
