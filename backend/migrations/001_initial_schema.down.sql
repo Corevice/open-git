@@ -1,0 +1,17 @@
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS secrets;
+DROP TABLE IF EXISTS workflow_runs;
+DROP TABLE IF EXISTS webhooks;
+DROP TABLE IF EXISTS branch_protections;
+DROP TABLE IF EXISTS reviews;
+DROP TABLE IF EXISTS milestones;
+DROP TABLE IF EXISTS labels;
+DROP TABLE IF EXISTS comments;
+DROP TABLE IF EXISTS pull_requests;
+DROP TABLE IF EXISTS issues;
+DROP TABLE IF EXISTS oauth_apps;
+DROP TABLE IF EXISTS access_tokens;
+DROP TABLE IF EXISTS repositories;
+DROP TABLE IF EXISTS memberships;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS organizations;
