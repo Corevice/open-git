@@ -5,7 +5,6 @@ import {
   createElement,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -22,15 +21,15 @@ export interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
+function readStoredToken(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return localStorage.getItem(AUTH_TOKEN_KEY);
+}
 
-  useEffect(() => {
-    const stored = localStorage.getItem(AUTH_TOKEN_KEY);
-    if (stored) {
-      setToken(stored);
-    }
-  }, []);
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [token, setToken] = useState<string | null>(readStoredToken);
 
   const login = useCallback((newToken: string) => {
     localStorage.setItem(AUTH_TOKEN_KEY, newToken);

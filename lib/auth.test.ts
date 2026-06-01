@@ -1,11 +1,11 @@
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { createElement, type ReactNode } from "react";
 
 import { AUTH_TOKEN_KEY, AuthProvider, useAuth } from "./auth";
 
 function wrapper({ children }: { children: ReactNode }) {
-  return createElement(AuthProvider, null, children);
+  return createElement(AuthProvider, { children });
 }
 
 describe("auth", () => {
@@ -38,13 +38,11 @@ describe("auth", () => {
     expect(result.current.isAuthenticated).toBe(false);
   });
 
-  it("reads token from localStorage on mount", async () => {
+  it("reads token from localStorage on mount", () => {
     localStorage.setItem(AUTH_TOKEN_KEY, "stored-token");
     const { result } = renderHook(() => useAuth(), { wrapper });
 
-    await waitFor(() => {
-      expect(result.current.token).toBe("stored-token");
-    });
+    expect(result.current.token).toBe("stored-token");
     expect(result.current.isAuthenticated).toBe(true);
   });
 });
