@@ -1,0 +1,42 @@
+replicaCount: 1
+
+image:
+  backend:
+    repository: ghcr.io/open-git/backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: ghcr.io/open-git/frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+
+db:
+  type: sqlite
+  postgres:
+    host: postgres
+    port: 5432
+    name: opengit
+    user: opengit
+    password: opengit
+
+redis:
+  addr: redis:6379
+
+minio:
+  enabled: true
+  endpoint: minio:9000
+
+ingress:
+  enabled: false
+  host: ""
+  tls: false
+  className: ""
+
+worker:
+  replicaCount: 1
+
+service:
+  backend:
+    port: 8080
+  frontend:
+    port: 3000

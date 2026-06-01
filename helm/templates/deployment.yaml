@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-backend
+  labels:
+    app: {{ .Release.Name }}
+    component: backend
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+        component: backend
+    spec:
+      containers:
+        - name: backend
+          image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
+          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: DB_TYPE
+              value: "{{ .Values.db.type }}"
+            {{- if eq .Values.db.type "postgres" }}
+            - name: DB_DSN
+              value: "postgres://{{ .Values.db.postgres.user }}:{{ .Values.db.postgres.password }}@{{ .Values.db.postgres.host }}:{{ .Values.db.postgres.port }}/{{ .Values.db.postgres.name }}?sslmode=disable"
+            {{- end }}
+            - name: REDIS_ADDR
+              value: "{{ .Values.redis.addr }}"
+            {{- if .Values.minio.enabled }}
+            - name: MINIO_ENDPOINT
+              value: "{{ .Values.minio.endpoint }}"
+            {{- end }}
+            - name: PORT
+              value: "8080"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-frontend
+  labels:
+    app: {{ .Release.Name }}
+    component: frontend
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+        component: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: "{{ .Values.image.frontend.repository }}:{{ .Values.image.frontend.tag }}"
+          imagePullPolicy: {{ .Values.image.frontend.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
