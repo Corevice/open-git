@@ -1,0 +1,10 @@
+{
+  "style": "default",
+  "rsc": true,
+  "tsx": true,
+  "tailwind.config": "tailwind.config.ts",
+  "aliases": {
+    "components": "@/components",
+    "utils": "@/lib/utils"
+  }
+}
