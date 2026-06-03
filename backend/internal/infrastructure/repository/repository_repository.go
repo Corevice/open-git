@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/Corevice/open-git/backend/internal/domain/entity"
 )
 
 type sqlxRepositoryRepository struct {

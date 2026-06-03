@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/open-git/backend/internal/domain"
-	"github.com/open-git/backend/internal/repository"
+	"github.com/Corevice/open-git/backend/internal/domain"
+	"github.com/Corevice/open-git/backend/internal/repository"
 )
 
 type IssuePATInput struct {

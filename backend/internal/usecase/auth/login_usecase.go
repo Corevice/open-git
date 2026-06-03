@@ -9,8 +9,8 @@ import (
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/open-git/backend/internal/domain"
-	"github.com/open-git/backend/internal/repository"
+	"github.com/Corevice/open-git/backend/internal/domain"
+	"github.com/Corevice/open-git/backend/internal/repository"
 )
 
 var ErrInvalidCredentials = errors.New("invalid credentials")

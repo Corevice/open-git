@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/open-git/backend/internal/infrastructure/queue"
-	"github.com/open-git/backend/internal/worker"
+	"github.com/Corevice/open-git/backend/internal/infrastructure/queue"
+	"github.com/Corevice/open-git/backend/internal/worker"
 )
 
 type Webhook struct {

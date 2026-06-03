@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/Corevice/open-git/backend/internal/domain/entity"
 )
 
 func TestRepositoryValidateName(t *testing.T) {

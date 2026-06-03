@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/open-git/backend/internal/domain"
-	"github.com/open-git/backend/internal/usecase/auth"
+	"github.com/Corevice/open-git/backend/internal/domain"
+	"github.com/Corevice/open-git/backend/internal/usecase/auth"
 )
 
 type mockTokenRepo struct {
@@ -22,6 +22,10 @@ func (m *mockTokenRepo) Create(_ context.Context, token *domain.AccessToken) err
 
 func (m *mockTokenRepo) ListByUserID(_ context.Context, _ int64) ([]*domain.AccessToken, error) {
 	return m.created, nil
+}
+
+func (m *mockTokenRepo) FindByTokenHash(_ context.Context, _ string) (*domain.AccessToken, error) {
+	return nil, nil
 }
 
 func (m *mockTokenRepo) Revoke(_ context.Context, _, _ int64) error {

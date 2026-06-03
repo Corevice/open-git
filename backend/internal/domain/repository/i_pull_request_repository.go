@@ -2,16 +2,23 @@ package repository
 
 import (
 	"context"
-	"time"
 
+	"github.com/Corevice/open-git/backend/internal/domain/entity"
 	"github.com/google/uuid"
-	"github.com/open-git/backend/internal/domain/entity"
 )
+
+type ListPullRequestsFilter struct {
+	OrganizationID uuid.UUID
+	RepositoryID   uuid.UUID
+	State          string
+	Page           int
+	PerPage        int
+}
 
 type IPullRequestRepository interface {
 	Create(ctx context.Context, pr *entity.PullRequest) error
 	GetByNumber(ctx context.Context, repoID uuid.UUID, number int) (*entity.PullRequest, error)
-	ListByRepo(ctx context.Context, repoID uuid.UUID, state string, page, perPage int) ([]*entity.PullRequest, error)
-	UpdateState(ctx context.Context, id uuid.UUID, state string) error
-	SetMerged(ctx context.Context, id uuid.UUID, mergedAt time.Time) error
+	ListByRepo(ctx context.Context, filter ListPullRequestsFilter) ([]*entity.PullRequest, int, error)
+	Update(ctx context.Context, pr *entity.PullRequest) error
+	NextNumber(ctx context.Context, repoID uuid.UUID) (int, error)
 }

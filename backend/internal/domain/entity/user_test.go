@@ -3,7 +3,7 @@ package entity_test
 import (
 	"testing"
 
-	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/Corevice/open-git/backend/internal/domain/entity"
 )
 
 func TestUserValidateLogin(t *testing.T) {

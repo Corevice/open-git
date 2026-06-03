@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-git/backend/internal/domain"
-	"github.com/open-git/backend/internal/usecase/auth"
+	"github.com/Corevice/open-git/backend/internal/domain"
+	"github.com/Corevice/open-git/backend/internal/usecase/auth"
 )
 
 type mockOAuthAppRepo struct {

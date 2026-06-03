@@ -7,9 +7,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/open-git/backend/internal/domain"
-	"github.com/open-git/backend/internal/repository"
-	"github.com/open-git/backend/internal/validator"
+	"github.com/Corevice/open-git/backend/internal/domain"
+	"github.com/Corevice/open-git/backend/internal/repository"
+	"github.com/Corevice/open-git/backend/internal/validator"
 )
 
 var ErrDuplicateLogin = errors.New("duplicate login")

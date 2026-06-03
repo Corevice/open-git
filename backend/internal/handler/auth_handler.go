@@ -6,7 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	authUC "github.com/open-git/backend/internal/usecase/auth"
+	authUC "github.com/Corevice/open-git/backend/internal/usecase/auth"
 )
 
 type AuthHandler struct {

@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
-	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/Corevice/open-git/backend/internal/domain/entity"
 )
 
 const issueNextNumberMaxRetries = 5

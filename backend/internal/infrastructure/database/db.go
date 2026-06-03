@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/open-git/backend/internal/config"
+	"github.com/Corevice/open-git/backend/internal/config"
 
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"

@@ -9,7 +9,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/open-git/backend/internal/repository"
+	"github.com/Corevice/open-git/backend/internal/repository"
 )
 
 const (
@@ -77,6 +77,11 @@ func SetAuthContext(c echo.Context, userID int64, scopes []string) {
 }
 
 func bearerToken(header string) (string, bool) {
+	return BearerToken(header)
+}
+
+// BearerToken extracts the bearer token from an Authorization header value.
+func BearerToken(header string) (string, bool) {
 	if header == "" {
 		return "", false
 	}
@@ -92,6 +97,11 @@ func bearerToken(header string) (string, bool) {
 }
 
 func hashToken(raw string) string {
+	return HashToken(raw)
+}
+
+// HashToken returns the SHA-256 hex digest of raw.
+func HashToken(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }

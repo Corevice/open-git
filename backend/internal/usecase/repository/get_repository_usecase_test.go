@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/open-git/backend/internal/domain"
-	"github.com/open-git/backend/internal/usecase/repository"
+	"github.com/Corevice/open-git/backend/internal/domain"
+	"github.com/Corevice/open-git/backend/internal/usecase/repository"
 )
 
 type getMockRepositoryRepo struct {

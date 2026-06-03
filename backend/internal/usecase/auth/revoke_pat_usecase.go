@@ -3,7 +3,7 @@ package auth
 import (
 	"context"
 
-	"github.com/open-git/backend/internal/repository"
+	"github.com/Corevice/open-git/backend/internal/repository"
 )
 
 type RevokePATUsecase struct {

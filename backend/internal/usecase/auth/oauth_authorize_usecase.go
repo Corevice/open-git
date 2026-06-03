@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-git/backend/internal/repository"
+	"github.com/Corevice/open-git/backend/internal/repository"
 )
 
 const oauthCodeTTL = 10 * time.Minute

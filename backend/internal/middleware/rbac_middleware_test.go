@@ -8,7 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/open-git/backend/internal/middleware"
+	"github.com/Corevice/open-git/backend/internal/middleware"
 )
 
 func TestMissingScope(t *testing.T) {

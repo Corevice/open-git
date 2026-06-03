@@ -7,8 +7,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/open-git/backend/internal/middleware"
-	authUC "github.com/open-git/backend/internal/usecase/auth"
+	"github.com/Corevice/open-git/backend/internal/middleware"
+	authUC "github.com/Corevice/open-git/backend/internal/usecase/auth"
 )
 
 type OAuthHandler struct {

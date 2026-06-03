@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"github.com/open-git/backend/internal/config"
-	"github.com/open-git/backend/internal/infrastructure/database"
+	"github.com/Corevice/open-git/backend/internal/config"
+	"github.com/Corevice/open-git/backend/internal/infrastructure/database"
 )
 
 func main() {

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/Corevice/open-git/backend/internal/domain/entity"
 )
 
 type IRepositoryRepository interface {

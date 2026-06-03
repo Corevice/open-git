@@ -9,8 +9,8 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/open-git/backend/internal/domain/entity"
-	"github.com/open-git/backend/internal/infrastructure/repository"
+	"github.com/Corevice/open-git/backend/internal/domain/entity"
+	"github.com/Corevice/open-git/backend/internal/infrastructure/repository"
 )
 
 func newUserMock(t *testing.T) (*sqlx.DB, sqlmock.Sqlmock, func()) {

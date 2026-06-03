@@ -12,7 +12,7 @@ import (
 
 	"github.com/hibiken/asynq"
 
-	"github.com/open-git/backend/internal/infrastructure/workflow"
+	"github.com/Corevice/open-git/backend/internal/infrastructure/workflow"
 )
 
 const (

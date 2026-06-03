@@ -6,10 +6,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/open-git/backend/internal/domain"
-	"github.com/open-git/backend/internal/middleware"
-	repo "github.com/open-git/backend/internal/repository"
-	repoUC "github.com/open-git/backend/internal/usecase/repository"
+	"github.com/Corevice/open-git/backend/internal/domain"
+	"github.com/Corevice/open-git/backend/internal/middleware"
+	repo "github.com/Corevice/open-git/backend/internal/repository"
+	repoUC "github.com/Corevice/open-git/backend/internal/usecase/repository"
 )
 
 type RepositoryHandler struct {

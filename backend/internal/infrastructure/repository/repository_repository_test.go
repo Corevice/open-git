@@ -9,7 +9,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/open-git/backend/internal/infrastructure/repository"
+	"github.com/Corevice/open-git/backend/internal/infrastructure/repository"
 )
 
 func TestListByOrgIncludesOrganizationFilter(t *testing.T) {

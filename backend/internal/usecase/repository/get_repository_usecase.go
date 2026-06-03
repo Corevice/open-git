@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/open-git/backend/internal/domain"
-	repo "github.com/open-git/backend/internal/repository"
+	"github.com/Corevice/open-git/backend/internal/domain"
+	repo "github.com/Corevice/open-git/backend/internal/repository"
 )
 
 var ErrNotFound = errors.New("not found")
