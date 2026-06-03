@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "open-git.fullname" . }}-worker
+  labels:
+    {{- include "open-git.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "open-git.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "open-git.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
+          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          args:
+            - "--worker-only"
+          env:
+            - name: DB_TYPE
+              value: {{ .Values.db.type | quote }}
+            {{- if eq .Values.db.type "postgres" }}
+            - name: POSTGRES_HOST
+              value: {{ .Values.db.postgres.host | quote }}
+            - name: POSTGRES_PORT
+              value: {{ .Values.db.postgres.port | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.db.postgres.name | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.db.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-git.fullname" . }}-db
+                  key: postgres-password
+            {{- else }}
+            - name: SQLITE_PATH
+              value: {{ .Values.db.sqlite.path | quote }}
+            {{- end }}
+            - name: REDIS_ADDR
+              value: {{ .Values.redis.addr | quote }}
+            {{- if .Values.minio.enabled }}
+            - name: MINIO_ENDPOINT
+              value: {{ .Values.minio.endpoint | quote }}
+            - name: MINIO_ACCESS_KEY
+              value: {{ .Values.minio.accessKey | quote }}
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-git.fullname" . }}-minio
+                  key: secret-key
+            - name: MINIO_BUCKET
+              value: {{ .Values.minio.bucket | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
