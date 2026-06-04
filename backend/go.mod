@@ -3,6 +3,7 @@ module github.com/open-git/backend
 go 1.24.0
 
 require (
+	github.com/go-git/go-git/v5 v5.13.2
 	github.com/golang-migrate/migrate/v4 v4.18.1
 	github.com/google/uuid v1.6.0
 	github.com/hibiken/asynq v0.26.0
