@@ -1,0 +1,75 @@
+version: '3'
+
+vars:
+  BACKEND_DIR: backend
+
+tasks:
+  default:
+    cmd: task --list
+
+  dev:
+    desc: Start full stack via Docker Compose
+    cmd: docker compose up -d
+
+  dev:frontend:
+    desc: Start Next.js dev server
+    cmd: npm run dev
+
+  dev:backend:
+    desc: Start Go server with live reload
+    cmd: cd {{.BACKEND_DIR}} && go run ./cmd/server
+
+  test:
+    desc: Run all tests
+    deps: [test:frontend, test:backend]
+
+  test:frontend:
+    desc: Run Vitest unit tests
+    cmd: npm run test
+
+  test:backend:
+    desc: Run Go tests with race detector
+    cmd: cd {{.BACKEND_DIR}} && go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+  lint:
+    desc: Lint frontend and backend
+    deps: [lint:frontend, lint:backend]
+
+  lint:frontend:
+    desc: ESLint + TypeScript type check
+    cmds:
+      - npm run lint
+      - npx tsc --noEmit
+
+  lint:backend:
+    desc: go vet + golangci-lint
+    cmds:
+      - cd {{.BACKEND_DIR}} && go vet ./...
+      - cd {{.BACKEND_DIR}} && golangci-lint run ./... --timeout=5m
+
+  build:frontend:
+    desc: Build Next.js production bundle
+    cmd: npm run build
+
+  build:backend:
+    desc: Build Go server binary
+    cmd: cd {{.BACKEND_DIR}} && go build -o dist/server ./cmd/server
+
+  format:
+    desc: Format all code
+    cmds:
+      - npm run format
+      - cd {{.BACKEND_DIR}} && gofmt -w .
+
+  migrate:up:
+    desc: Run database migrations up
+    cmd: cd {{.BACKEND_DIR}} && go run -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database "${DATABASE_URL}" up
+
+  migrate:down:
+    desc: Rollback last migration
+    cmd: cd {{.BACKEND_DIR}} && go run -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database "${DATABASE_URL}" down 1
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf .next/ backend/dist/ backend/coverage.out
