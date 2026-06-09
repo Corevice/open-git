@@ -1,0 +1,16 @@
+pre-commit:
+  jobs:
+    - name: prettier-check
+      glob: '*.{ts,tsx,js,json,yaml,yml}'
+      run: npx prettier --check {staged_files}
+    - name: eslint
+      glob: '*.{ts,tsx}'
+      run: npx eslint {staged_files} --max-warnings=0
+    - name: go-vet
+      glob: 'backend/**/*.go'
+      run: cd backend && go vet ./...
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: npx commitlint --edit {1}

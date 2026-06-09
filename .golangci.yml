@@ -1,0 +1,20 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - gofmt
+    - errcheck
+    - staticcheck
+    - revive
+    - gosimple
+    - ineffassign
+    - unused
+
+run:
+  timeout: 5m
+
+issues:
+  max-issues-per-linter: 0
+  exclude-dirs:
+    - vendor
