@@ -1,0 +1,8 @@
+.next/
+node_modules/
+backend/
+coverage/
+*.html
+public/
+*.min.js
+package-lock.json
