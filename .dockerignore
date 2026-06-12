@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+.next
+coverage
+backend
+deploy
+helm
+docs
+*.html
+.env*
+*.md
+Taskfile.yml
+docker-compose*.yml

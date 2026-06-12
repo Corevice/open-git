@@ -1,4 +1,8 @@
-node_modules
 .git
+node_modules
 *.md
 data/*.db
+coverage.out
+*.coverprofile
+dist/
+observability/
