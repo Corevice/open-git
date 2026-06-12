@@ -3,8 +3,8 @@ package issue
 import (
 	"context"
 
-	"github.com/Corevice/open-git/backend/internal/domain/entity"
-	"github.com/Corevice/open-git/backend/internal/domain/repository"
+	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/open-git/backend/internal/domain/repository"
 	"github.com/google/uuid"
 )
 

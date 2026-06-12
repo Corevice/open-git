@@ -7,9 +7,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/Corevice/open-git/backend/internal/apperror"
-	"github.com/Corevice/open-git/backend/internal/domain/entity"
-	"github.com/Corevice/open-git/backend/internal/domain/repository"
+	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/open-git/backend/internal/domain/repository"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
