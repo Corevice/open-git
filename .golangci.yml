@@ -10,6 +10,36 @@ linters:
     - gosimple
     - ineffassign
     - unused
+    - depguard
+  settings:
+    depguard:
+      rules:
+        domain-no-external:
+          files:
+            - '**/internal/domain/**'
+          deny:
+            - pkg: github.com/labstack/echo
+              desc: domain layer must not import infrastructure libraries
+            - pkg: database/sql
+              desc: domain layer must not import infrastructure libraries
+            - pkg: github.com/lib/pq
+              desc: domain layer must not import infrastructure libraries
+            - pkg: github.com/mattn/go-sqlite3
+              desc: domain layer must not import infrastructure libraries
+            - pkg: github.com/jmoiron/sqlx
+              desc: domain layer must not import infrastructure libraries
+        usecase-no-infra:
+          files:
+            - '**/internal/usecase/**'
+          deny:
+            - pkg: github.com/labstack/echo
+              desc: usecase layer must not import infrastructure libraries
+            - pkg: github.com/lib/pq
+              desc: usecase layer must not import infrastructure libraries
+            - pkg: github.com/mattn/go-sqlite3
+              desc: usecase layer must not import infrastructure libraries
+            - pkg: github.com/jmoiron/sqlx
+              desc: usecase layer must not import infrastructure libraries
 
 run:
   timeout: 5m
