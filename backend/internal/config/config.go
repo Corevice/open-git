@@ -1,6 +1,10 @@
 package config
 
-import "os"
+import (
+	"fmt"
+	"os"
+	"strconv"
+)
 
 type Config struct {
 	DBType        string
@@ -20,6 +24,23 @@ func Load() Config {
 		RedisAddr:     os.Getenv("REDIS_ADDR"),
 		MinioEndpoint: os.Getenv("MINIO_ENDPOINT"),
 	}
+}
+
+func (c Config) Validate() error {
+	port, err := strconv.Atoi(c.Port)
+	if err != nil {
+		return fmt.Errorf("port: invalid integer %q", c.Port)
+	}
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("port: out of range %d", port)
+	}
+	if c.DBType == "postgres" && c.DBDSN == "" {
+		return fmt.Errorf("DB_DSN is required when DB_TYPE is postgres")
+	}
+	if c.JWTSecret == "" {
+		return fmt.Errorf("JWT_SECRET is required")
+	}
+	return nil
 }
 
 func getenv(key, defaultVal string) string {
