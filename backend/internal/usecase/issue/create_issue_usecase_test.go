@@ -11,7 +11,6 @@ import (
 	"github.com/open-git/backend/internal/domain/repository"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 type mockIssueRepo struct {
@@ -158,7 +157,7 @@ func TestAuditLogCalled(t *testing.T) {
 func TestUniqueConflictRetry(t *testing.T) {
 	repoID := uuid.New()
 	issueRepo := &mockIssueRepo{
-		createErr: &pq.Error{Code: "23505"},
+		createErr: errors.New("unique constraint violation (23505)"),
 	}
 	uc := issueusecase.NewCreateIssueUsecase(issueRepo, &mockAuditLogRepo{}, mockTxManager{})
 

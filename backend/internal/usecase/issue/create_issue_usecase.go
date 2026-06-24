@@ -11,7 +11,6 @@ import (
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/domain/repository"
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 const maxNumberRetries = 5
@@ -105,9 +104,9 @@ func validateTitle(title string) error {
 }
 
 func isUniqueViolation(err error) bool {
-	var pqErr *pq.Error
-	if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+	if errors.Is(err, apperror.ErrConflict) {
 		return true
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "unique constraint")
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint") || strings.Contains(msg, "23505")
 }
