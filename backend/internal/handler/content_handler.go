@@ -29,6 +29,9 @@ func (h *ContentHandler) RegisterRoutes(g *echo.Group) {
 	g.GET("/repos/:owner/:repo/contents", h.GetContents, middleware.OptionalAuth())
 	g.GET("/repos/:owner/:repo/git/blobs/:sha", h.GetGitBlob, middleware.OptionalAuth())
 	g.GET("/repos/:owner/:repo/commits", h.GetCommits, middleware.OptionalAuth())
+	g.GET("/repos/:owner/:repo/branches", h.GetBranches, middleware.OptionalAuth())
+	g.GET("/repos/:owner/:repo/tags", h.GetTags, middleware.OptionalAuth())
+	g.GET("/repos/:owner/:repo/commits/:sha", h.GetCommitDetail, middleware.OptionalAuth())
 }
 
 type contentItemResponse struct {
@@ -69,6 +72,55 @@ type commitDetailResponse struct {
 	Author  commitAuthorResponse `json:"author"`
 }
 
+type branchCommitResponse struct {
+	SHA string `json:"sha"`
+}
+
+type branchResponse struct {
+	Name   string               `json:"name"`
+	Commit branchCommitResponse `json:"commit"`
+}
+
+type tagResponse struct {
+	Name   string               `json:"name"`
+	Commit branchCommitResponse `json:"commit"`
+}
+
+type filesResponse struct {
+	Filename  string  `json:"filename"`
+	Status    string  `json:"status"`
+	Additions int     `json:"additions"`
+	Deletions int     `json:"deletions"`
+	Patch     *string `json:"patch"`
+	TooLarge  bool    `json:"too_large,omitempty"`
+}
+
+type statsResponse struct {
+	Total     int `json:"total"`
+	Additions int `json:"additions"`
+	Deletions int `json:"deletions"`
+}
+
+type commitDetailFullResponse struct {
+	SHA    string               `json:"sha"`
+	Commit commitDetailResponse `json:"commit"`
+	Files  []filesResponse      `json:"files"`
+	Stats  statsResponse        `json:"stats"`
+}
+
+func isPathSafe(p string) bool {
+	if strings.Contains(p, "..") {
+		return false
+	}
+	if strings.Contains(p, "\x00") {
+		return false
+	}
+	if strings.HasPrefix(p, "/") {
+		return false
+	}
+	return true
+}
+
 func (h *ContentHandler) GetContents(c echo.Context) error {
 	resolved, err := h.resolver.Resolve(c.Request().Context(), c.Param("owner"), c.Param("repo"))
 	if err != nil {
@@ -80,9 +132,15 @@ func (h *ContentHandler) GetContents(c echo.Context) error {
 		ref = "HEAD"
 	}
 	path := c.QueryParam("path")
+	if !isPathSafe(path) {
+		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid path"})
+	}
 
 	entries, err := infragit.GetTree(resolved.DiskPath, ref, path)
 	if err != nil {
+		if errors.Is(err, infragit.ErrEmptyRepository) {
+			return c.JSON(http.StatusOK, []contentItemResponse{})
+		}
 		if errors.Is(err, infragit.ErrPathNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
 		}
@@ -194,6 +252,9 @@ func (h *ContentHandler) GetCommits(c echo.Context) error {
 
 	commits, total, err := infragit.GetCommits(resolved.DiskPath, branch, page, perPage)
 	if err != nil {
+		if errors.Is(err, infragit.ErrEmptyRepository) {
+			return c.JSON(http.StatusOK, []commitResponse{})
+		}
 		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": err.Error()})
 	}
 
@@ -237,6 +298,103 @@ func (h *ContentHandler) GetCommits(c echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusOK, out)
+}
+
+func (h *ContentHandler) GetBranches(c echo.Context) error {
+	resolved, err := h.resolver.Resolve(c.Request().Context(), c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+
+	branches, err := infragit.GetBranches(resolved.DiskPath)
+	if err != nil {
+		if errors.Is(err, infragit.ErrEmptyRepository) {
+			return c.JSON(http.StatusOK, []branchResponse{})
+		}
+		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": err.Error()})
+	}
+
+	out := make([]branchResponse, 0, len(branches))
+	for _, b := range branches {
+		out = append(out, branchResponse{
+			Name: b.Name,
+			Commit: branchCommitResponse{
+				SHA: b.SHA,
+			},
+		})
+	}
+	return c.JSON(http.StatusOK, out)
+}
+
+func (h *ContentHandler) GetTags(c echo.Context) error {
+	resolved, err := h.resolver.Resolve(c.Request().Context(), c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+
+	tags, err := infragit.GetTags(resolved.DiskPath)
+	if err != nil {
+		if errors.Is(err, infragit.ErrEmptyRepository) {
+			return c.JSON(http.StatusOK, []tagResponse{})
+		}
+		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": err.Error()})
+	}
+
+	out := make([]tagResponse, 0, len(tags))
+	for _, t := range tags {
+		out = append(out, tagResponse{
+			Name: t.Name,
+			Commit: branchCommitResponse{
+				SHA: t.SHA,
+			},
+		})
+	}
+	return c.JSON(http.StatusOK, out)
+}
+
+func (h *ContentHandler) GetCommitDetail(c echo.Context) error {
+	resolved, err := h.resolver.Resolve(c.Request().Context(), c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+
+	detail, err := infragit.GetCommitDetail(resolved.DiskPath, c.Param("sha"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+	}
+
+	files := make([]filesResponse, 0, len(detail.Files))
+	for _, f := range detail.Files {
+		file := filesResponse{
+			Filename:  f.Filename,
+			Status:    f.Status,
+			Additions: f.Additions,
+			Deletions: f.Deletions,
+			Patch:     f.Patch,
+		}
+		if f.Patch == nil {
+			file.TooLarge = true
+		}
+		files = append(files, file)
+	}
+
+	return c.JSON(http.StatusOK, commitDetailFullResponse{
+		SHA: detail.SHA,
+		Commit: commitDetailResponse{
+			Message: detail.Message,
+			Author: commitAuthorResponse{
+				Name:  detail.Author,
+				Email: detail.Email,
+				Date:  detail.Date.UTC().Format("2006-01-02T15:04:05Z"),
+			},
+		},
+		Files: files,
+		Stats: statsResponse{
+			Total:     detail.Stats.Total,
+			Additions: detail.Stats.Additions,
+			Deletions: detail.Stats.Deletions,
+		},
+	})
 }
 
 func encodeContent(data []byte) string {
