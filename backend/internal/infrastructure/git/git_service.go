@@ -1,12 +1,14 @@
 package git
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
+	formatpatch "github.com/go-git/go-git/v5/plumbing/format/patch"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/transport"
@@ -37,12 +40,54 @@ type CommitSummary struct {
 	Date    time.Time
 }
 
+// BranchInfo describes a repository branch reference.
+type BranchInfo struct {
+	Name string
+	SHA  string
+}
+
+// TagInfo describes a repository tag reference.
+type TagInfo struct {
+	Name string
+	SHA  string
+}
+
+// FileDiff describes a single file change within a commit.
+type FileDiff struct {
+	Filename  string
+	Status    string
+	Additions int
+	Deletions int
+	Patch     *string
+}
+
+// CommitStats aggregates line change counts for a commit.
+type CommitStats struct {
+	Total     int
+	Additions int
+	Deletions int
+}
+
+// CommitDetail is a commit with its file-level diff.
+type CommitDetail struct {
+	SHA     string
+	Message string
+	Author  string
+	Email   string
+	Date    time.Time
+	Files   []FileDiff
+	Stats   CommitStats
+}
+
 const (
 	TreeEntryTypeFile = "file"
 	TreeEntryTypeDir  = "dir"
 )
 
-var ErrPathNotFound = errors.New("path not found")
+var (
+	ErrPathNotFound    = errors.New("path not found")
+	ErrEmptyRepository = errors.New("empty repository")
+)
 
 // InitBare creates a new bare repository at path.
 func InitBare(path string) error {
@@ -342,4 +387,208 @@ func GetCommits(repoPath, branch string, page, perPage int) ([]CommitSummary, in
 		endIdx = total
 	}
 	return all[startIdx:endIdx], total, nil
+}
+
+const maxPatchBytes = 102400
+
+// GetBranches lists all branch references in the repository.
+func GetBranches(repoPath string) ([]BranchInfo, error) {
+	repo, err := gogit.PlainOpen(repoPath)
+	if err != nil {
+		if strings.Contains(err.Error(), "reference not found") {
+			return []BranchInfo{}, nil
+		}
+		return nil, err
+	}
+
+	head, err := repo.Head()
+	if err != nil {
+		if strings.Contains(err.Error(), "reference not found") || errors.Is(err, plumbing.ErrReferenceNotFound) {
+			return []BranchInfo{}, nil
+		}
+		return nil, err
+	}
+	if head.Hash().IsZero() {
+		return []BranchInfo{}, nil
+	}
+
+	iter, err := repo.Branches()
+	if err != nil {
+		return nil, err
+	}
+
+	branches := make([]BranchInfo, 0)
+	err = iter.ForEach(func(ref *plumbing.Reference) error {
+		branches = append(branches, BranchInfo{
+			Name: ref.Name().Short(),
+			SHA:  ref.Hash().String(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(branches, func(i, j int) bool {
+		return branches[i].Name < branches[j].Name
+	})
+	return branches, nil
+}
+
+// GetTags lists all tag references in the repository.
+func GetTags(repoPath string) ([]TagInfo, error) {
+	repo, err := gogit.PlainOpen(repoPath)
+	if err != nil {
+		if strings.Contains(err.Error(), "reference not found") {
+			return []TagInfo{}, nil
+		}
+		return nil, err
+	}
+
+	head, err := repo.Head()
+	if err != nil {
+		if strings.Contains(err.Error(), "reference not found") || errors.Is(err, plumbing.ErrReferenceNotFound) {
+			return []TagInfo{}, nil
+		}
+		return nil, err
+	}
+	if head.Hash().IsZero() {
+		return []TagInfo{}, nil
+	}
+
+	iter, err := repo.Tags()
+	if err != nil {
+		return nil, err
+	}
+
+	tags := make([]TagInfo, 0)
+	err = iter.ForEach(func(ref *plumbing.Reference) error {
+		hash := ref.Hash()
+		if tagObj, err := repo.TagObject(hash); err == nil {
+			hash = tagObj.Target
+		}
+		tags = append(tags, TagInfo{
+			Name: ref.Name().Short(),
+			SHA:  hash.String(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(tags, func(i, j int) bool {
+		return tags[i].Name < tags[j].Name
+	})
+	return tags, nil
+}
+
+// GetCommitDetail returns a commit and its file-level diff.
+func GetCommitDetail(repoPath, sha string) (*CommitDetail, error) {
+	repo, err := openRepository(repoPath)
+	if err != nil {
+		return nil, err
+	}
+
+	commit, err := resolveCommit(repo, sha)
+	if err != nil {
+		return nil, err
+	}
+
+	detail := &CommitDetail{
+		SHA:     commit.Hash.String(),
+		Message: strings.TrimSpace(commit.Message),
+		Author:  commit.Author.Name,
+		Email:   commit.Author.Email,
+		Date:    commit.Author.When,
+	}
+
+	var files []FileDiff
+	if commit.NumParents() > 0 {
+		parent, err := commit.Parent(0)
+		if err != nil {
+			return nil, err
+		}
+		patch, err := commit.Patch(parent)
+		if err != nil {
+			return nil, err
+		}
+		files, err = fileDiffsFromPatch(patch)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		tree, err := commit.Tree()
+		if err != nil {
+			return nil, err
+		}
+		emptyTree := &object.Tree{}
+		patch, err := emptyTree.Patch(tree)
+		if err != nil {
+			return nil, err
+		}
+		files, err = fileDiffsFromPatch(patch)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	detail.Files = files
+	detail.Stats = commitStatsFromFiles(files)
+	return detail, nil
+}
+
+func fileDiffsFromPatch(patch *object.Patch) ([]FileDiff, error) {
+	stats := patch.Stats()
+	files := make([]FileDiff, 0, len(stats))
+
+	for _, fp := range patch.FilePatches() {
+		from, to := fp.Files()
+		name, status := classifyFileChange(from, to)
+
+		stat := stats[name]
+		additions := stat.Additions
+		deletions := stat.Deletions
+
+		var patchPtr *string
+		var buf bytes.Buffer
+		if err := formatpatch.Encode(&buf, fp); err == nil {
+			patchText := buf.String()
+			if len(patchText) <= maxPatchBytes {
+				patchPtr = &patchText
+			}
+		}
+
+		files = append(files, FileDiff{
+			Filename:  name,
+			Status:    status,
+			Additions: additions,
+			Deletions: deletions,
+			Patch:     patchPtr,
+		})
+	}
+
+	return files, nil
+}
+
+func classifyFileChange(from, to object.File) (string, string) {
+	switch {
+	case from == nil && to != nil:
+		return to.Name(), "added"
+	case from != nil && to == nil:
+		return from.Name(), "deleted"
+	case to != nil:
+		return to.Name(), "modified"
+	default:
+		return from.Name(), "modified"
+	}
+}
+
+func commitStatsFromFiles(files []FileDiff) CommitStats {
+	stats := CommitStats{Total: len(files)}
+	for _, f := range files {
+		stats.Additions += f.Additions
+		stats.Deletions += f.Deletions
+	}
+	return stats
 }
