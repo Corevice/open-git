@@ -14,26 +14,38 @@ import (
 )
 
 type RepositoryHandler struct {
-	create *repoUC.CreateRepositoryUsecase
-	get    *repoUC.GetRepositoryUsecase
-	repos  repo.IRepositoryRepository
+	create   *repoUC.CreateRepositoryUsecase
+	get      *repoUC.GetRepositoryUsecase
+	listRepos *repoUC.ListRepositoriesUsecase
+	repos    repo.IRepositoryRepository
+	orgs     repo.IOrganizationRepository
+	auditLog repo.IAuditLogRepository
 }
 
 func NewRepositoryHandler(
 	create *repoUC.CreateRepositoryUsecase,
 	get *repoUC.GetRepositoryUsecase,
+	listRepos *repoUC.ListRepositoriesUsecase,
 	repos repo.IRepositoryRepository,
+	orgs repo.IOrganizationRepository,
+	auditLog repo.IAuditLogRepository,
 ) *RepositoryHandler {
 	return &RepositoryHandler{
-		create: create,
-		get:    get,
-		repos:  repos,
+		create:    create,
+		get:       get,
+		listRepos: listRepos,
+		repos:     repos,
+		orgs:      orgs,
+		auditLog:  auditLog,
 	}
 }
 
 func (h *RepositoryHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.MiddlewareFunc) {
 	repoScope := middleware.RequireScope("repo")
+	g.GET("/user/repos", h.List, authMiddleware)
 	g.POST("/user/repos", h.CreateRepository, authMiddleware, repoScope)
+	g.GET("/orgs/:org/repos", h.ListOrg, middleware.OptionalAuth())
+	g.POST("/orgs/:org/repos", h.CreateForOrg, authMiddleware, repoScope)
 	g.GET("/repos/:owner/:repo", h.GetRepository, middleware.OptionalAuth())
 	g.PATCH("/repos/:owner/:repo", h.UpdateVisibility, authMiddleware, repoScope)
 	g.DELETE("/repos/:owner/:repo", h.DeleteRepository, authMiddleware, repoScope)
@@ -64,6 +76,156 @@ type repositoryResponse struct {
 	Owner         repositoryOwnerResponse `json:"owner"`
 }
 
+func (h *RepositoryHandler) List(c echo.Context) error {
+	userID, err := middleware.GetUserUUID(c)
+	if err != nil {
+		return err
+	}
+
+	page, perPage, err := middleware.ParsePaginationParams(c)
+	if err != nil {
+		return err
+	}
+
+	ctx := c.Request().Context()
+	repositories, err := h.listRepos.Execute(ctx, repoUC.ListRepositoriesInput{
+		OwnerID:       userID,
+		RequestUserID: userID,
+		Page:          page,
+		PerPage:       perPage,
+	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to list repositories"})
+	}
+
+	total, err := h.repos.CountByOwner(ctx, userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to count repositories"})
+	}
+
+	if link := middleware.BuildLinkHeader(c.Request().URL.Path, page, perPage, total); link != "" {
+		c.Response().Header().Set("Link", link)
+	}
+
+	resp := make([]repositoryResponse, 0, len(repositories))
+	for _, r := range repositories {
+		resp = append(resp, toRepositoryResponse(r))
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *RepositoryHandler) ListOrg(c echo.Context) error {
+	userID := middleware.UserIDFromContext(c)
+	if userID == 0 {
+		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+	}
+
+	ctx := c.Request().Context()
+	org, err := h.orgs.GetByLogin(ctx, c.Param("org"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to get organization"})
+	}
+	if org == nil {
+		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+	}
+
+	role, err := h.orgs.GetMemberRole(ctx, org.ID, userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to check membership"})
+	}
+	if role == "" {
+		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+	}
+
+	page, perPage, err := middleware.ParsePaginationParams(c)
+	if err != nil {
+		return err
+	}
+
+	orgUUID := middleware.Int64ToUUID(org.ID)
+	repositories, err := h.listRepos.Execute(ctx, repoUC.ListRepositoriesInput{
+		OrganizationID: orgUUID,
+		RequestUserID:  middleware.Int64ToUUID(userID),
+		Page:           page,
+		PerPage:        perPage,
+	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to list repositories"})
+	}
+
+	total, err := h.repos.CountByOrg(ctx, orgUUID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to count repositories"})
+	}
+
+	if link := middleware.BuildLinkHeader(c.Request().URL.Path, page, perPage, total); link != "" {
+		c.Response().Header().Set("Link", link)
+	}
+
+	resp := make([]repositoryResponse, 0, len(repositories))
+	for _, r := range repositories {
+		resp = append(resp, toRepositoryResponse(r))
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *RepositoryHandler) CreateForOrg(c echo.Context) error {
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		return err
+	}
+	userUUID, err := middleware.GetUserUUID(c)
+	if err != nil {
+		return err
+	}
+
+	ctx := c.Request().Context()
+	org, err := h.orgs.GetByLogin(ctx, c.Param("org"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to get organization"})
+	}
+	if org == nil {
+		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+	}
+
+	role, err := h.orgs.GetMemberRole(ctx, org.ID, userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to check membership"})
+	}
+	if role != "admin" && role != "owner" {
+		return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "Forbidden"})
+	}
+
+	var req createRepositoryRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid request"})
+	}
+
+	orgUUID := middleware.Int64ToUUID(org.ID)
+	repository, err := h.create.Execute(ctx, repoUC.CreateRepositoryInput{
+		OwnerID:        userUUID,
+		OrganizationID: orgUUID,
+		Name:           req.Name,
+		Private:        req.Private,
+		Description:    req.Description,
+	})
+	if err != nil {
+		if errors.Is(err, repoUC.ErrDuplicateName) {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "Repository name already exists"})
+		}
+		if errors.Is(err, repoUC.ErrInvalidName) {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": err.Error()})
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to create repository"})
+	}
+
+	if h.auditLog != nil {
+		_ = h.auditLog.Record(ctx, repository.OrganizationID, userUUID, "repo.create", "Repository", repository.ID, map[string]any{"name": repository.Name})
+	}
+
+	return c.JSON(http.StatusCreated, toRepositoryResponse(repository))
+}
+
 func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 	userID, err := middleware.GetUserUUID(c)
 	if err != nil {
@@ -75,7 +237,8 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid request"})
 	}
 
-	repository, err := h.create.Execute(c.Request().Context(), repoUC.CreateRepositoryInput{
+	ctx := c.Request().Context()
+	repository, err := h.create.Execute(ctx, repoUC.CreateRepositoryInput{
 		OwnerID:        userID,
 		OrganizationID: userID,
 		Name:           req.Name,
@@ -90,6 +253,10 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": err.Error()})
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to create repository"})
+	}
+
+	if h.auditLog != nil {
+		_ = h.auditLog.Record(ctx, repository.OrganizationID, userID, "repo.create", "Repository", repository.ID, map[string]any{"name": repository.Name})
 	}
 
 	return c.JSON(http.StatusCreated, toRepositoryResponse(repository))
@@ -153,8 +320,13 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 		return err
 	}
 
-	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
+	ctx := c.Request().Context()
+	if err := h.repos.Delete(ctx, repository.ID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
+	}
+
+	if h.auditLog != nil {
+		_ = h.auditLog.Record(ctx, repository.OrganizationID, userID, "repo.delete", "Repository", repository.ID, nil)
 	}
 
 	return c.NoContent(http.StatusNoContent)

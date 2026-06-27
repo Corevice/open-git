@@ -27,8 +27,15 @@ type IRepositoryRepository interface {
 	GetByOwnerAndName(ctx context.Context, ownerID uuid.UUID, name string) (*entity.Repository, error)
 	GetByOwnerLoginAndName(ctx context.Context, ownerLogin, name string) (*entity.Repository, error)
 	ListByOrg(ctx context.Context, organizationID uuid.UUID, page, perPage int) ([]*entity.Repository, error)
+	CountByOrg(ctx context.Context, organizationID uuid.UUID) (int, error)
+	ListByOwner(ctx context.Context, ownerID uuid.UUID, page, perPage int) ([]*entity.Repository, error)
+	CountByOwner(ctx context.Context, ownerID uuid.UUID) (int, error)
 	UpdateVisibility(ctx context.Context, id uuid.UUID, visibility string) error
 	Delete(ctx context.Context, id uuid.UUID) error
+}
+
+type IAuditLogRepository interface {
+	Record(ctx context.Context, orgID, actorID uuid.UUID, action, targetType string, targetID uuid.UUID, metadata map[string]any) error
 }
 
 type IMembershipRepository interface {
