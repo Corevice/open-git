@@ -116,14 +116,16 @@ func (r *sqlxAccessTokenRepository) Revoke(ctx context.Context, tokenID, userID 
 }
 
 func (r *sqlxAccessTokenRepository) FindByTokenHash(ctx context.Context, tokenHash string) (*domain.AccessToken, error) {
+	now := time.Now().UTC()
 	query := `
 		SELECT id, user_id, token_hash, scopes, expires_at, revoked_at, created_at
 		FROM access_tokens
 		WHERE token_hash = ? AND revoked_at IS NULL
+			AND (expires_at IS NULL OR expires_at > ?)
 	`
 	query = r.DB.Rebind(query)
 
-	row := r.DB.QueryRowxContext(ctx, query, tokenHash)
+	row := r.DB.QueryRowxContext(ctx, query, tokenHash, now)
 	token, err := scanAccessToken(row, r.DriverName())
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

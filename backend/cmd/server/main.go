@@ -140,6 +140,7 @@ func (r *gitResolver) Resolve(ctx context.Context, ownerLogin, repoName string) 
 		OrganizationID: repository.OrganizationID,
 		OwnerID:        uuidToInt64(repository.OwnerID),
 		Name:           repository.Name,
+		Visibility:     repository.Visibility,
 		DiskPath:       filepath.Join(r.gitRoot, ownerLogin, repoName+".git"),
 	}, nil
 }
@@ -150,6 +151,17 @@ type gitMembershipAdapter struct {
 
 type membershipRoleLookup interface {
 	GetRole(ctx context.Context, orgID, userID uuid.UUID) (string, error)
+}
+
+func (a *gitMembershipAdapter) HasReadAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error) {
+	_, err := a.memberships.GetRole(ctx, organizationID, appmiddleware.Int64ToUUID(userID))
+	if errors.Is(err, domain.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (a *gitMembershipAdapter) HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error) {

@@ -34,6 +34,10 @@ type stubMembership struct {
 	write bool
 }
 
+func (s *stubMembership) HasReadAccess(_ context.Context, _ int64, _ uuid.UUID) (bool, error) {
+	return s.write, nil
+}
+
 func (s *stubMembership) HasWriteAccess(_ context.Context, _ int64, _ uuid.UUID) (bool, error) {
 	return s.write, nil
 }
