@@ -1,21 +1,22 @@
-package config
+package config_test
 
 import (
 	"strings"
 	"testing"
 
+	"github.com/open-git/backend/internal/config"
 	"github.com/open-git/backend/internal/infrastructure/database"
 )
 
 func TestValidate(t *testing.T) {
 	tests := []struct {
 		name    string
-		cfg     Config
+		cfg     config.Config
 		wantErr string
 	}{
 		{
 			name: "invalid DB_TYPE",
-			cfg: Config{
+			cfg: config.Config{
 				DBType:    "invalid",
 				Port:      "8080",
 				JWTSecret: "secret",
@@ -24,7 +25,7 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "postgres requires DSN",
-			cfg: Config{
+			cfg: config.Config{
 				DBType:    "postgres",
 				DBDSN:     "",
 				Port:      "8080",
@@ -34,7 +35,7 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "sqlite allows empty DSN",
-			cfg: Config{
+			cfg: config.Config{
 				DBType:    "sqlite",
 				DBDSN:     "",
 				Port:      "8080",
@@ -43,7 +44,7 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "port out of range",
-			cfg: Config{
+			cfg: config.Config{
 				DBType:    "sqlite",
 				Port:      "99999",
 				JWTSecret: "secret",
