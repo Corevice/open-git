@@ -26,6 +26,7 @@ export function ThemeToggle() {
   return (
     <button
       type="button"
+      data-testid="theme-toggle"
       onClick={cycleTheme}
       aria-label="Toggle theme"
       className="inline-flex size-9 items-center justify-center rounded-md text-[#c9d1d9] transition-colors hover:bg-[#30363d] hover:text-white"
