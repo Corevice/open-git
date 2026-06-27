@@ -1,4 +1,4 @@
-import type { SSHKey } from "./api-types";
+import type { OrgMember, OrgProfile, SSHKey, User } from "./api-types";
 
 export const API_TOKEN_KEY = "open-git-auth-token";
 
@@ -12,7 +12,7 @@ export class ApiError extends Error {
   }
 }
 
-type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
+type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 type RouterLike = {
   push: (path: string) => void;
@@ -106,9 +106,27 @@ export class ApiClient {
     return this.request<T>("PATCH", path, body);
   }
 
+  private put<T>(path: string, body?: unknown): Promise<T> {
+    return this.request<T>("PUT", path, body);
+  }
+
   del(path: string): Promise<void> {
     return this.request<void>("DELETE", path);
   }
+
+  users = {
+    getCurrent: () => this.get<User>("/api/v3/user"),
+    getByLogin: (login: string) => this.get<User>(`/api/v3/users/${login}`),
+    updateCurrent: (
+      data: Partial<Pick<User, "name" | "email" | "bio" | "avatar_url">>,
+    ) => this.patch<User>("/api/v3/user", data),
+  };
+
+  orgs = {
+    get: (login: string) => this.get<OrgProfile>(`/api/v3/orgs/${login}`),
+    listMembers: (org: string) =>
+      this.get<OrgMember[]>(`/api/v3/orgs/${org}/members`),
+  };
 
   sshKeys = {
     list: () => this.get<SSHKey[]>("/api/v3/user/keys"),
