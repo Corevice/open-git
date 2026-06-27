@@ -1,10 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import DOMPurify from "isomorphic-dompurify";
-import { marked } from "marked";
+import { RepoRefSelector } from "@/components/repo/BranchSelector";
+import CloneUrlCopy from "@/components/repo/CloneUrlCopy";
 import FileTree, { type TreeEntry } from "@/components/repo/FileTree";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+import {
+  apiClient,
+  decodeBase64Content,
+  isApiError,
+  resolveBranchRef,
+} from "@/lib/api-client";
+import { renderMarkdown } from "@/lib/markdown";
 
 interface RepoMetadata {
   name: string;
@@ -18,7 +23,6 @@ interface RepoMetadata {
   forks_count: number;
   open_issues_count?: number;
   owner: { login: string };
-  html_url?: string;
 }
 
 interface ContentItem {
@@ -27,20 +31,12 @@ interface ContentItem {
   type: "dir" | "file";
   sha: string;
   size?: number;
+  content?: string | null;
+  encoding?: string;
 }
 
 interface BranchItem {
   name: string;
-}
-
-async function apiGet<T>(path: string): Promise<T | null> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Accept: "application/vnd.github+json" },
-    cache: "no-store",
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
-  return res.json() as Promise<T>;
 }
 
 function visibilityLabel(repo: RepoMetadata): string {
@@ -66,24 +62,23 @@ function mapContents(items: ContentItem[]): TreeEntry[] {
   }));
 }
 
-function renderReadmeMarkdown(raw: string): string {
-  const html = marked.parse(raw, { async: false }) as string;
-  return DOMPurify.sanitize(html);
-}
-
 async function fetchReadme(
   owner: string,
   repo: string,
   branch: string,
 ): Promise<string | null> {
-  const data = await apiGet<{ content?: string; encoding?: string }>(
-    `/repos/${owner}/${repo}/contents/README.md?ref=${encodeURIComponent(branch)}`,
-  );
-  if (!data?.content || data.encoding !== "base64") return null;
   try {
-    return Buffer.from(data.content, "base64").toString("utf-8");
-  } catch {
-    return null;
+    const data = await apiClient.getContents<ContentItem>(
+      owner,
+      repo,
+      "README.md",
+      branch,
+    );
+    if (!data.content || data.encoding !== "base64") return null;
+    return decodeBase64Content(data.content);
+  } catch (err) {
+    if (isApiError(err) && err.status === 404) return null;
+    throw err;
   }
 }
 
@@ -97,29 +92,45 @@ export default async function RepoPage({
   const { owner, repo } = await params;
   const { ref: refParam } = await searchParams;
 
-  const metadata = await apiGet<RepoMetadata>(`/repos/${owner}/${repo}`);
-  if (!metadata) notFound();
+  let metadata: RepoMetadata;
+  try {
+    metadata = await apiClient.getRepo<RepoMetadata>(owner, repo);
+  } catch (err) {
+    if (isApiError(err) && err.status === 404) notFound();
+    throw err;
+  }
 
-  const branch = refParam ?? metadata.default_branch ?? "main";
+  let branchesRaw: BranchItem[];
+  try {
+    branchesRaw = await apiClient.getBranches<BranchItem[]>(owner, repo);
+  } catch {
+    branchesRaw = [{ name: metadata.default_branch ?? "main" }];
+  }
 
-  const [contentsRaw, branchesRaw, readmeRaw] = await Promise.all([
-    apiGet<ContentItem[] | ContentItem>(
-      `/repos/${owner}/${repo}/contents?ref=${encodeURIComponent(branch)}`,
-    ),
-    apiGet<BranchItem[]>(`/repos/${owner}/${repo}/branches?per_page=100`),
-    fetchReadme(owner, repo, branch),
-  ]);
+  const branches = branchesRaw.length > 0 ? branchesRaw : [{ name: metadata.default_branch ?? "main" }];
+  const branch = resolveBranchRef(refParam, branches, metadata.default_branch ?? "main");
+
+  let contentsRaw: ContentItem[] | ContentItem | null = null;
+  try {
+    contentsRaw = await apiClient.getContents<ContentItem[] | ContentItem>(
+      owner,
+      repo,
+      "",
+      branch,
+    );
+  } catch (err) {
+    if (!isApiError(err) || err.status !== 404) throw err;
+  }
+
+  const [readmeRaw] = await Promise.all([fetchReadme(owner, repo, branch)]);
 
   const contents: ContentItem[] = Array.isArray(contentsRaw)
     ? contentsRaw
     : contentsRaw
       ? [contentsRaw]
       : [];
-  const branches = branchesRaw ?? [{ name: branch }];
   const entries = mapContents(contents);
-  const readmeHtml = readmeRaw ? renderReadmeMarkdown(readmeRaw) : null;
-
-  const cloneUrl = `git@${API_BASE ? "open-git.local" : "github.com"}:${owner}/${repo}.git`;
+  const readmeHtml = readmeRaw ? renderMarkdown(readmeRaw) : null;
 
   return (
     <div className="min-h-screen bg-[#f6f8fa]">
@@ -177,6 +188,10 @@ export default async function RepoPage({
             </div>
           </div>
 
+          <div className="mt-3">
+            <CloneUrlCopy owner={owner} repo={repo} />
+          </div>
+
           <nav className="flex gap-1 mt-4">
             <Link
               href={`/${owner}/${repo}`}
@@ -222,38 +237,17 @@ export default async function RepoPage({
           <div>
             <div className="bg-white border border-[#d0d7de] rounded-lg overflow-hidden">
               <div className="p-3 border-b border-[#d0d7de] flex items-center gap-3 flex-wrap">
-                <details className="relative">
-                  <summary className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#f6f8fa] border border-[#d0d7de] rounded-md text-sm text-[#24292f] hover:bg-gray-100 cursor-pointer list-none">
-                    ⎇ <strong>{branch}</strong> ▾
-                  </summary>
-                  <ul className="absolute left-0 top-full mt-1 z-20 min-w-[160px] bg-white border border-[#d0d7de] rounded-md shadow-lg py-1 list-none m-0">
-                    {branches.map((b) => (
-                      <li key={b.name}>
-                        <Link
-                          href={`/${owner}/${repo}?ref=${encodeURIComponent(b.name)}`}
-                          className={`block px-3 py-2 text-sm no-underline hover:bg-[#f6f8fa] ${
-                            b.name === branch ? "font-semibold text-[#0969da]" : "text-[#24292f]"
-                          }`}
-                        >
-                          {b.name}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
+                <RepoRefSelector branches={branches} currentBranch={branch} />
                 <span className="text-[#57606a] text-[13px]">
                   {branches.length} branch{branches.length === 1 ? "" : "es"}
                 </span>
                 <div className="ml-auto flex items-center gap-2 flex-wrap">
                   <Link
-                    href={`/${owner}/${repo}/commits`}
+                    href={`/${owner}/${repo}/commits?ref=${encodeURIComponent(branch)}`}
                     className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-white hover:bg-gray-50"
                   >
                     ⟳ History
                   </Link>
-                  <span className="bg-[#f6f8fa] border border-[#d0d7de] px-2.5 py-1.5 rounded-md font-mono text-xs max-w-[280px] truncate">
-                    {cloneUrl}
-                  </span>
                 </div>
               </div>
 
