@@ -53,9 +53,12 @@ func (h *RepositoryHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.Mi
 }
 
 type createRepositoryRequest struct {
-	Name        string `json:"name"`
-	Private     bool   `json:"private"`
-	Description string `json:"description"`
+	Name              string `json:"name"`
+	Private           bool   `json:"private"`
+	Description       string `json:"description"`
+	AutoInit          bool   `json:"auto_init"`
+	GitIgnoreTemplate string `json:"gitignore_template"`
+	LicenseTemplate   string `json:"license_template"`
 }
 
 type updateRepositoryRequest struct {
@@ -205,11 +208,15 @@ func (h *RepositoryHandler) CreateForOrg(c echo.Context) error {
 
 	orgUUID := middleware.Int64ToUUID(org.ID)
 	repository, err := h.create.Execute(ctx, repoUC.CreateRepositoryInput{
-		OwnerID:        userUUID,
-		OrganizationID: orgUUID,
-		Name:           req.Name,
-		Private:        req.Private,
-		Description:    req.Description,
+		OwnerID:           userUUID,
+		OrganizationID:    orgUUID,
+		Name:              req.Name,
+		Private:           req.Private,
+		Description:       req.Description,
+		AutoInit:          req.AutoInit,
+		GitIgnoreTemplate: req.GitIgnoreTemplate,
+		LicenseTemplate:   req.LicenseTemplate,
+		OwnerLogin:        org.Login,
 	})
 	if err != nil {
 		if errors.Is(err, repoUC.ErrDuplicateName) {
@@ -241,11 +248,14 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 
 	ctx := c.Request().Context()
 	repository, err := h.create.Execute(ctx, repoUC.CreateRepositoryInput{
-		OwnerID:        userID,
-		OrganizationID: userID,
-		Name:           req.Name,
-		Private:        req.Private,
-		Description:    req.Description,
+		OwnerID:           userID,
+		OrganizationID:    userID,
+		Name:              req.Name,
+		Private:           req.Private,
+		Description:       req.Description,
+		AutoInit:          req.AutoInit,
+		GitIgnoreTemplate: req.GitIgnoreTemplate,
+		LicenseTemplate:   req.LicenseTemplate,
 	})
 	if err != nil {
 		if errors.Is(err, repoUC.ErrDuplicateName) {
