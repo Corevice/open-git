@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -43,6 +44,15 @@ func newAuthTestEcho(repo *mockAccessTokenRepo) *echo.Echo {
 	e.Use(middleware.AuthMiddleware(repo))
 	e.GET("/", func(c echo.Context) error {
 		return c.NoContent(http.StatusOK)
+	})
+	return e
+}
+
+func newOptionalAuthTestEcho(repo *mockAccessTokenRepo) *echo.Echo {
+	e := echo.New()
+	e.Use(middleware.OptionalAuth(repo))
+	e.GET("/", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]int64{"user_id": middleware.UserIDFromContext(c)})
 	})
 	return e
 }
@@ -131,5 +141,95 @@ func TestExpiredToken(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestOptionalAuthNoHeader(t *testing.T) {
+	e := newOptionalAuthTestEcho(&mockAccessTokenRepo{})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var body map[string]int64
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if body["user_id"] != 0 {
+		t.Fatalf("expected user_id=0, got %d", body["user_id"])
+	}
+}
+
+func TestOptionalAuthValidToken(t *testing.T) {
+	raw := "optional-valid-token"
+	repo := &mockAccessTokenRepo{
+		byHash: map[string]*domain.AccessToken{
+			tokenHash(raw): {
+				UserID: 42,
+				Scopes: []string{"read"},
+			},
+		},
+	}
+	e := newOptionalAuthTestEcho(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var body map[string]int64
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if body["user_id"] != 42 {
+		t.Fatalf("expected user_id=42, got %d", body["user_id"])
+	}
+}
+
+func TestOptionalAuthInvalidToken(t *testing.T) {
+	e := newOptionalAuthTestEcho(&mockAccessTokenRepo{})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer invalid-token")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var body map[string]int64
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if body["user_id"] != 0 {
+		t.Fatalf("expected user_id=0, got %d", body["user_id"])
+	}
+}
+
+func TestPATTokenFormat(t *testing.T) {
+	raw := "ghs_abc123"
+	repo := &mockAccessTokenRepo{
+		byHash: map[string]*domain.AccessToken{
+			tokenHash(raw): {
+				UserID: 42,
+				Scopes: []string{"repo"},
+			},
+		},
+	}
+	e := newAuthTestEcho(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "token "+raw)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 }

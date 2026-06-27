@@ -17,6 +17,37 @@ const (
 	scopesContextKey = "scopes"
 )
 
+func OptionalAuth(tokens repository.IAccessTokenRepository) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			raw, ok := bearerToken(c.Request().Header.Get("Authorization"))
+			if !ok {
+				c.Set(userIDContextKey, int64(0))
+				return next(c)
+			}
+
+			tokenHash := hashToken(raw)
+			record, err := tokens.FindByTokenHash(c.Request().Context(), tokenHash)
+			if err != nil || record == nil {
+				c.Set(userIDContextKey, int64(0))
+				return next(c)
+			}
+			if record.RevokedAt != nil {
+				c.Set(userIDContextKey, int64(0))
+				return next(c)
+			}
+			if record.ExpiresAt != nil && !record.ExpiresAt.After(time.Now().UTC()) {
+				c.Set(userIDContextKey, int64(0))
+				return next(c)
+			}
+
+			c.Set(userIDContextKey, record.UserID)
+			c.Set(scopesContextKey, record.Scopes)
+			return next(c)
+		}
+	}
+}
+
 func AuthMiddleware(tokens repository.IAccessTokenRepository) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -45,6 +76,18 @@ func AuthMiddleware(tokens repository.IAccessTokenRepository) echo.MiddlewareFun
 			return next(c)
 		}
 	}
+}
+
+func UserIDFromContext(c echo.Context) int64 {
+	v := c.Get(userIDContextKey)
+	if v == nil {
+		return 0
+	}
+	userID, ok := v.(int64)
+	if !ok {
+		return 0
+	}
+	return userID
 }
 
 func GetUserID(c echo.Context) (int64, error) {
@@ -80,15 +123,16 @@ func bearerToken(header string) (string, bool) {
 	if header == "" {
 		return "", false
 	}
-	const prefix = "Bearer "
-	if !strings.HasPrefix(header, prefix) {
-		return "", false
+	for _, prefix := range []string{"Bearer ", "token "} {
+		if strings.HasPrefix(header, prefix) {
+			token := strings.TrimSpace(header[len(prefix):])
+			if token == "" {
+				return "", false
+			}
+			return token, true
+		}
 	}
-	token := strings.TrimSpace(header[len(prefix):])
-	if token == "" {
-		return "", false
-	}
-	return token, true
+	return "", false
 }
 
 func hashToken(raw string) string {
