@@ -338,7 +338,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	loginUC := authUC.NewLoginUsecase(userRepo, cfg.JWTSecret)
 	authHandler := handler.NewAuthHandler(registerUC, loginUC)
 
-	createRepoUC := repoUC.NewCreateRepositoryUsecase(repoRepo)
+	createRepoUC := repoUC.NewCreateRepositoryUsecase(repoRepo, cfg.GitDataRoot, nil, entityUserRepo)
 	getRepoUC := repoUC.NewGetRepositoryUsecase(repoRepo, userRepo, legacyMembershipRepo)
 	listReposUC := repoUC.NewListRepositoriesUsecase(repoRepo, legacyMembershipRepo, userRepo)
 	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, listReposUC, repoRepo, orgRepo, auditLogRepo)

@@ -8,12 +8,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain/entity"
+	gitinfra "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/usecase/repository"
 )
 
 var (
-	testOwnerID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	testOrgID   = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	testOwnerID   = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	testOrgID     = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	testOwnerLogin = "testuser"
 )
 
 type mockRepositoryRepo struct {
@@ -61,12 +63,42 @@ func (m *mockRepositoryRepo) ListByOrg(context.Context, uuid.UUID, int, int) ([]
 	return nil, nil
 }
 
+func (m *mockRepositoryRepo) ListByOwner(context.Context, uuid.UUID, int, int) ([]*entity.Repository, error) {
+	return nil, nil
+}
+
+func (m *mockRepositoryRepo) CountByOwner(context.Context, uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *mockRepositoryRepo) CountByOrg(context.Context, uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 func (m *mockRepositoryRepo) UpdateVisibility(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
+func (m *mockRepositoryRepo) UpdateName(context.Context, uuid.UUID, string) error {
 	return nil
 }
 
 func (m *mockRepositoryRepo) Delete(context.Context, uuid.UUID) error {
 	return nil
+}
+
+type mockGitInitService struct {
+	called   bool
+	lastPath string
+	lastOpts gitinfra.AutoInitOpts
+	err      error
+}
+
+func (m *mockGitInitService) AutoInitRepository(bareRepoPath string, opts gitinfra.AutoInitOpts) error {
+	m.called = true
+	m.lastPath = bareRepoPath
+	m.lastOpts = opts
+	return m.err
 }
 
 func TestDuplicateName(t *testing.T) {
@@ -75,7 +107,7 @@ func TestDuplicateName(t *testing.T) {
 			repoKey(testOwnerID, "existing"): {OwnerID: testOwnerID, Name: "existing"},
 		},
 	}
-	uc := repository.NewCreateRepositoryUsecase(repos)
+	uc := repository.NewCreateRepositoryUsecase(repos, "/data/git", nil, nil)
 
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
@@ -89,7 +121,7 @@ func TestDuplicateName(t *testing.T) {
 
 func TestInvalidName(t *testing.T) {
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
-	uc := repository.NewCreateRepositoryUsecase(repos)
+	uc := repository.NewCreateRepositoryUsecase(repos, "/data/git", nil, nil)
 
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
@@ -103,7 +135,7 @@ func TestInvalidName(t *testing.T) {
 
 func TestValidCreate(t *testing.T) {
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
-	uc := repository.NewCreateRepositoryUsecase(repos)
+	uc := repository.NewCreateRepositoryUsecase(repos, "/data/git", nil, nil)
 
 	repo, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
@@ -132,5 +164,65 @@ func TestValidCreate(t *testing.T) {
 	}
 	if len(repos.created) != 1 {
 		t.Fatal("expected repository to be created")
+	}
+}
+
+func TestAutoInitCallsGitInitService(t *testing.T) {
+	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
+	gitInit := &mockGitInitService{}
+	uc := repository.NewCreateRepositoryUsecase(repos, "/data/git", gitInit, nil)
+
+	repo, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
+		OwnerID:           testOwnerID,
+		OrganizationID:    testOrgID,
+		Name:              "my-repo",
+		AutoInit:          true,
+		GitIgnoreTemplate: "Go",
+		LicenseTemplate:   "mit",
+		OwnerLogin:        testOwnerLogin,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !gitInit.called {
+		t.Fatal("expected git init service to be called")
+	}
+	if gitInit.lastPath != "/data/git/testuser/my-repo.git" {
+		t.Fatalf("expected git path /data/git/testuser/my-repo.git, got %q", gitInit.lastPath)
+	}
+	if gitInit.lastOpts.Readme != "my-repo" {
+		t.Fatalf("expected readme option my-repo, got %q", gitInit.lastOpts.Readme)
+	}
+	if gitInit.lastOpts.GitIgnoreTemplate != "Go" {
+		t.Fatalf("expected gitignore template Go, got %q", gitInit.lastOpts.GitIgnoreTemplate)
+	}
+	if gitInit.lastOpts.LicenseTemplate != "mit" {
+		t.Fatalf("expected license template mit, got %q", gitInit.lastOpts.LicenseTemplate)
+	}
+	if repo.GitPath != "/data/git/testuser/my-repo.git" {
+		t.Fatalf("expected git path on repository, got %q", repo.GitPath)
+	}
+}
+
+func TestAutoInitFalseDoesNotCallGitInitService(t *testing.T) {
+	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
+	gitInit := &mockGitInitService{}
+	uc := repository.NewCreateRepositoryUsecase(repos, "/data/git", gitInit, nil)
+
+	repo, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
+		OwnerID:        testOwnerID,
+		OrganizationID: testOrgID,
+		Name:           "my-repo",
+		AutoInit:       false,
+		OwnerLogin:     testOwnerLogin,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gitInit.called {
+		t.Fatal("expected git init service not to be called")
+	}
+	if repo.GitPath != "" {
+		t.Fatalf("expected empty git path, got %q", repo.GitPath)
 	}
 }
