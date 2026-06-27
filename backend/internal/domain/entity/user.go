@@ -15,7 +15,11 @@ type User struct {
 	Login        string
 	Email        string
 	PasswordHash string
+	Name         string
+	Bio          string
+	AvatarURL    string
 	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 func (u *User) ValidateLogin() error {
