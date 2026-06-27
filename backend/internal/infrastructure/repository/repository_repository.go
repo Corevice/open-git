@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 )
 
@@ -17,6 +18,53 @@ type sqlxRepositoryRepository struct {
 
 func NewRepositoryRepository(db *sqlx.DB) *sqlxRepositoryRepository {
 	return &sqlxRepositoryRepository{DB: db}
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanRepository(scanner rowScanner, includeDiskPath bool) (*entity.Repository, error) {
+	var repo entity.Repository
+	var isEmpty int
+	dest := []any{
+		&repo.ID,
+		&repo.OrganizationID,
+		&repo.OwnerID,
+		&repo.Name,
+		&repo.Visibility,
+		&repo.DefaultBranch,
+		&repo.Description,
+	}
+	if includeDiskPath {
+		dest = append(dest, &repo.DiskPath)
+	}
+	dest = append(dest, &isEmpty, &repo.CreatedAt)
+
+	err := scanner.Scan(dest...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	repo.IsEmpty = isEmpty != 0
+	return &repo, nil
+}
+
+func execUpdateOne(ctx context.Context, db *sqlx.DB, query string, args ...any) error {
+	result, err := db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (r *sqlxRepositoryRepository) Create(ctx context.Context, repo *entity.Repository) error {
@@ -60,63 +108,22 @@ func (r *sqlxRepositoryRepository) GetByOwnerAndName(ctx context.Context, ownerI
 	`
 
 	row := r.DB.QueryRowxContext(ctx, query, ownerID, name)
-
-	var repo entity.Repository
-	var isEmpty int
-	err := row.Scan(
-		&repo.ID,
-		&repo.OrganizationID,
-		&repo.OwnerID,
-		&repo.Name,
-		&repo.Visibility,
-		&repo.DefaultBranch,
-		&repo.Description,
-		&repo.DiskPath,
-		&isEmpty,
-		&repo.CreatedAt,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	repo.IsEmpty = isEmpty != 0
-	return &repo, nil
+	return scanRepository(row, true)
 }
 
+// GetByOwnerLoginAndName resolves a repository by owner login and name.
+// disk_path is intentionally omitted; callers must enforce visibility authorization
+// before using the returned metadata.
 func (r *sqlxRepositoryRepository) GetByOwnerLoginAndName(ctx context.Context, ownerLogin, name string) (*entity.Repository, error) {
 	const query = `
-		SELECT r.id, r.organization_id, r.owner_id, r.name, r.visibility, r.default_branch, r.description, r.disk_path, r.is_empty, r.created_at
+		SELECT r.id, r.organization_id, r.owner_id, r.name, r.visibility, r.default_branch, r.description, r.is_empty, r.created_at
 		FROM repositories r
 		JOIN users u ON r.owner_id = u.id
 		WHERE u.login = $1 AND r.name = $2
 	`
 
 	row := r.DB.QueryRowxContext(ctx, query, ownerLogin, name)
-
-	var repo entity.Repository
-	var isEmpty int
-	err := row.Scan(
-		&repo.ID,
-		&repo.OrganizationID,
-		&repo.OwnerID,
-		&repo.Name,
-		&repo.Visibility,
-		&repo.DefaultBranch,
-		&repo.Description,
-		&repo.DiskPath,
-		&isEmpty,
-		&repo.CreatedAt,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	repo.IsEmpty = isEmpty != 0
-	return &repo, nil
+	return scanRepository(row, false)
 }
 
 func (r *sqlxRepositoryRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, page, perPage int) ([]*entity.Repository, error) {
@@ -144,24 +151,11 @@ func (r *sqlxRepositoryRepository) ListByOrg(ctx context.Context, orgID uuid.UUI
 
 	var repos []*entity.Repository
 	for rows.Next() {
-		var repo entity.Repository
-		var isEmpty int
-		if err := rows.Scan(
-			&repo.ID,
-			&repo.OrganizationID,
-			&repo.OwnerID,
-			&repo.Name,
-			&repo.Visibility,
-			&repo.DefaultBranch,
-			&repo.Description,
-			&repo.DiskPath,
-			&isEmpty,
-			&repo.CreatedAt,
-		); err != nil {
+		repo, err := scanRepository(rows, true)
+		if err != nil {
 			return nil, err
 		}
-		repo.IsEmpty = isEmpty != 0
-		repos = append(repos, &repo)
+		repos = append(repos, repo)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -177,8 +171,7 @@ func (r *sqlxRepositoryRepository) UpdateVisibility(ctx context.Context, id uuid
 
 func (r *sqlxRepositoryRepository) UpdateDiskPath(ctx context.Context, id uuid.UUID, diskPath string) error {
 	const query = `UPDATE repositories SET disk_path = $1 WHERE id = $2`
-	_, err := r.DB.ExecContext(ctx, query, diskPath, id)
-	return err
+	return execUpdateOne(ctx, r.DB, query, diskPath, id)
 }
 
 func (r *sqlxRepositoryRepository) SetIsEmpty(ctx context.Context, id uuid.UUID, isEmpty bool) error {
@@ -187,8 +180,7 @@ func (r *sqlxRepositoryRepository) SetIsEmpty(ctx context.Context, id uuid.UUID,
 		isEmptyInt = 1
 	}
 	const query = `UPDATE repositories SET is_empty = $1 WHERE id = $2`
-	_, err := r.DB.ExecContext(ctx, query, isEmptyInt, id)
-	return err
+	return execUpdateOne(ctx, r.DB, query, isEmptyInt, id)
 }
 
 func (r *sqlxRepositoryRepository) Delete(ctx context.Context, id uuid.UUID) error {

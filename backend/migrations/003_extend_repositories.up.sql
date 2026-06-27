@@ -4,7 +4,7 @@ ALTER TABLE repositories ADD COLUMN is_empty INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE ssh_keys (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id),
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     fingerprint TEXT NOT NULL UNIQUE,
     public_key TEXT NOT NULL,
@@ -14,8 +14,8 @@ CREATE TABLE ssh_keys (
 CREATE INDEX idx_ssh_keys_user_id ON ssh_keys(user_id);
 
 CREATE TABLE repository_collaborators (
-    repository_id TEXT NOT NULL REFERENCES repositories(id),
-    user_id TEXT NOT NULL REFERENCES users(id),
+    repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     permission TEXT NOT NULL CHECK (permission IN ('read', 'write', 'admin')),
     PRIMARY KEY (repository_id, user_id)
 );

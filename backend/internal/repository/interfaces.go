@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
 )
 
@@ -27,8 +26,8 @@ type IRepositoryRepository interface {
 	NextNumber(ctx context.Context, ownerID int64) (int64, error)
 	ListByOrg(ctx context.Context, organizationID int64) ([]*domain.Repository, error)
 	UpdateVisibility(ctx context.Context, id int64, visibility domain.Visibility) error
-	UpdateDiskPath(ctx context.Context, id uuid.UUID, diskPath string) error
-	SetIsEmpty(ctx context.Context, id uuid.UUID, isEmpty bool) error
+	UpdateDiskPath(ctx context.Context, id int64, diskPath string) error
+	SetIsEmpty(ctx context.Context, id int64, isEmpty bool) error
 	Delete(ctx context.Context, id int64) error
 }
 

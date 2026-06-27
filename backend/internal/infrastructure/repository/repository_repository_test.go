@@ -3,6 +3,7 @@ package repository_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/infrastructure/repository"
 )
@@ -89,6 +91,7 @@ func seedRepositoryFixtures(t *testing.T, db *sqlx.DB, orgID, ownerID, repoID uu
 }
 
 func TestListByOrgIncludesOrganizationFilter(t *testing.T) {
+	// Ensures ListByOrg scopes results to the requested organization_id.
 	mockDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -190,6 +193,9 @@ func TestGetByOwnerLoginAndName_Found(t *testing.T) {
 	if !found.IsEmpty {
 		t.Fatal("expected repository to be empty")
 	}
+	if found.DiskPath != "" {
+		t.Fatalf("expected disk_path to be omitted, got %q", found.DiskPath)
+	}
 }
 
 func TestUpdateDiskPath(t *testing.T) {
@@ -215,6 +221,16 @@ func TestUpdateDiskPath(t *testing.T) {
 	}
 }
 
+func TestUpdateDiskPath_NotFound(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	repo := repository.NewRepositoryRepository(db)
+
+	err := repo.UpdateDiskPath(context.Background(), uuid.New(), "/data/missing.git")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
 func TestSetIsEmpty(t *testing.T) {
 	db := newRepositoryTestDB(t)
 	repo := repository.NewRepositoryRepository(db)
@@ -234,5 +250,15 @@ func TestSetIsEmpty(t *testing.T) {
 	}
 	if isEmpty != 0 {
 		t.Fatalf("expected is_empty 0, got %d", isEmpty)
+	}
+}
+
+func TestSetIsEmpty_NotFound(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	repo := repository.NewRepositoryRepository(db)
+
+	err := repo.SetIsEmpty(context.Background(), uuid.New(), false)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
