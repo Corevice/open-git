@@ -1,4 +1,5 @@
 import Link from "next/link";
+import CloneUrlToggle from "@/components/repo/CloneUrlToggle";
 
 const files = [
   { icon: "📁", name: ".github", msg: "Update workflow permissions", age: "3 days ago" },
@@ -76,8 +77,7 @@ export default function RepoDetailPage() {
                 <span className="text-[#57606a] text-[13px]">12 branches · 8 tags</span>
                 <div className="ml-auto flex items-center gap-2">
                   <Link href="/09-commit-history" className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-white hover:bg-gray-50">⟳ History</Link>
-                  <span className="bg-[#f6f8fa] border border-[#d0d7de] px-2.5 py-1.5 rounded-md font-mono text-xs min-w-[280px]">git@github.com:octocat/awesome-project.git</span>
-                  <Link href="/07-repo-detail" className="px-3 py-1.5 text-sm bg-[color:var(--primary)] text-white rounded-md hover:bg-[color:var(--primary-hover)]">📋 Copy</Link>
+                  <CloneUrlToggle cloneUrl="https://example.com/octocat/awesome-project.git" sshUrl="git@example.com:octocat/awesome-project.git" />
                 </div>
               </div>
 
