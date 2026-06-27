@@ -9,7 +9,8 @@
     "lint": "eslint . --max-warnings=0",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,json,yaml,yml}\"",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,yaml,yml}\"",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "dompurify": "^3.2.0",
@@ -28,6 +29,7 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.45.0",
     "@commitlint/cli": "^19.0.0",
     "@commitlint/config-conventional": "^19.0.0",
     "@eslint/js": "^9.0.0",
