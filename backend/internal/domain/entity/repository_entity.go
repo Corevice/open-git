@@ -22,7 +22,10 @@ type Repository struct {
 	OwnerID        uuid.UUID
 	Name           string
 	Visibility     string
+	Description    string
 	DefaultBranch  string
+	DiskPath       string
+	IsEmpty        bool
 	CreatedAt      time.Time
 }
 
