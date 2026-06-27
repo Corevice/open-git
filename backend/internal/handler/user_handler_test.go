@@ -48,6 +48,7 @@ func newUserHandlerEcho(t *testing.T, users *mockUserRepo, auth echo.MiddlewareF
 	h := handler.NewUserHandler(
 		userUC.NewGetCurrentUserUsecase(users),
 		userUC.NewGetUserByLoginUsecase(users),
+		userUC.NewUpdateUserUsecase(nil),
 	)
 
 	g := e.Group("")
