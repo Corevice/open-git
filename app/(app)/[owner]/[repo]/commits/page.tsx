@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { apiClient, type ApiError } from "@/lib/api-client";
+import {
+  apiClient,
+  isApiError,
+  pageFromLinkUrl,
+  resolveBranchRef,
+} from "@/lib/api-client";
 
 interface CommitAuthor {
   name: string;
@@ -20,20 +25,6 @@ interface CommitListItem {
   } | null;
 }
 
-type RepoApiClient = typeof apiClient & {
-  getRepo(owner: string, repo: string): Promise<{ default_branch: string }>;
-  getCommits(
-    owner: string,
-    repo: string,
-    branch: string,
-    page: number,
-  ): Promise<CommitListItem[]>;
-};
-
-const client = apiClient as RepoApiClient;
-
-const PER_PAGE = 30;
-
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
   if (Number.isNaN(date.getTime())) return dateStr;
@@ -46,8 +37,18 @@ function formatDate(dateStr: string): string {
   });
 }
 
-function isNotFound(err: unknown): boolean {
-  return (err as ApiError).status === 404;
+function buildPageHref(
+  owner: string,
+  repo: string,
+  targetPage: number,
+  refParam?: string,
+): string {
+  const params = new URLSearchParams();
+  params.set("page", String(targetPage));
+  if (refParam) {
+    params.set("ref", refParam);
+  }
+  return `/${owner}/${repo}/commits?${params.toString()}`;
 }
 
 export default async function CommitsPage({
@@ -63,36 +64,47 @@ export default async function CommitsPage({
 
   let repoData: { default_branch: string };
   try {
-    repoData = await client.getRepo(owner, repo);
+    repoData = await apiClient.getRepo<{ default_branch: string }>(owner, repo);
   } catch (err) {
-    if (isNotFound(err)) notFound();
+    if (isApiError(err) && err.status === 404) notFound();
     throw err;
   }
 
-  const branch = refParam ?? repoData.default_branch ?? "main";
+  let branches: { name: string }[];
+  try {
+    branches = await apiClient.getBranches<{ name: string }[]>(owner, repo);
+  } catch {
+    branches = [{ name: repoData.default_branch ?? "main" }];
+  }
+
+  const branch = resolveBranchRef(
+    refParam,
+    branches,
+    repoData.default_branch ?? "main",
+  );
 
   let commits: CommitListItem[];
+  let links: Record<string, string>;
   try {
-    commits = await client.getCommits(owner, repo, branch, page);
+    const result = await apiClient.getCommits<CommitListItem[]>(
+      owner,
+      repo,
+      branch,
+      page,
+    );
+    commits = result.commits;
+    links = result.links;
   } catch (err) {
-    if (isNotFound(err)) {
+    if (isApiError(err) && err.status === 404) {
       commits = [];
+      links = {};
     } else {
       throw err;
     }
   }
 
-  const hasPrev = page > 1;
-  const hasNext = commits.length === PER_PAGE;
-
-  const buildPageHref = (targetPage: number) => {
-    const params = new URLSearchParams();
-    params.set("page", String(targetPage));
-    if (refParam) {
-      params.set("ref", branch);
-    }
-    return `/${owner}/${repo}/commits?${params.toString()}`;
-  };
+  const prevPage = links.prev ? pageFromLinkUrl(links.prev) : null;
+  const nextPage = links.next ? pageFromLinkUrl(links.next) : null;
 
   return (
     <div className="min-h-screen bg-[#f6f8fa]">
@@ -133,7 +145,7 @@ export default async function CommitsPage({
               Code
             </Link>
             <Link
-              href={`/${owner}/${repo}/commits${refParam ? `?ref=${encodeURIComponent(branch)}` : ""}`}
+              href={`/${owner}/${repo}/commits${refParam ? `?ref=${encodeURIComponent(refParam)}` : ""}`}
               className="px-4 py-2 text-sm text-[#24292f] rounded-t-md border-b-2 border-[#fd8c73] font-semibold"
             >
               Commits
@@ -179,11 +191,11 @@ export default async function CommitsPage({
             </ul>
           )}
 
-          {(hasPrev || hasNext) && (
+          {(links.prev || links.next) && (
             <div className="px-4 py-3 border-t border-[#d0d7de] flex justify-between">
-              {hasPrev ? (
+              {links.prev && prevPage ? (
                 <Link
-                  href={buildPageHref(page - 1)}
+                  href={buildPageHref(owner, repo, prevPage, refParam)}
                   className="text-sm text-[#0969da] no-underline hover:underline"
                 >
                   ← Previous
@@ -191,9 +203,9 @@ export default async function CommitsPage({
               ) : (
                 <span />
               )}
-              {hasNext ? (
+              {links.next && nextPage ? (
                 <Link
-                  href={buildPageHref(page + 1)}
+                  href={buildPageHref(owner, repo, nextPage, refParam)}
                   className="text-sm text-[#0969da] no-underline hover:underline"
                 >
                   Next →

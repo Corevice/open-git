@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import BlobViewer from "@/components/repo/BlobViewer";
-import { apiClient, type ApiError } from "@/lib/api-client";
+import {
+  apiClient,
+  decodeBase64Content,
+  decodePathSegments,
+  isApiError,
+} from "@/lib/api-client";
 
 interface ContentResponse {
   name: string;
@@ -15,32 +20,8 @@ interface ContentResponse {
   truncated?: boolean;
 }
 
-type RepoApiClient = typeof apiClient & {
-  getContents(
-    owner: string,
-    repo: string,
-    path: string,
-    ref: string,
-  ): Promise<ContentResponse>;
-};
-
-const client = apiClient as RepoApiClient;
-
 function isBinaryContent(data: ContentResponse): boolean {
   return data.content == null;
-}
-
-function decodeContent(data: ContentResponse): string {
-  if (!data.content || data.encoding !== "base64") return "";
-  try {
-    return Buffer.from(data.content.replace(/\n/g, ""), "base64").toString("utf-8");
-  } catch {
-    return "";
-  }
-}
-
-function isNotFound(err: unknown): boolean {
-  return (err as ApiError).status === 404;
 }
 
 export default async function BlobPage({
@@ -48,21 +29,26 @@ export default async function BlobPage({
 }: {
   params: Promise<{ owner: string; repo: string; branch: string; path: string[] }>;
 }) {
-  const { owner, repo, branch, path: pathSegments } = await params;
-  const decodedPath = pathSegments.join("/");
+  const { owner, repo, branch: rawBranch, path: rawPathSegments } = await params;
+  const branch = decodeURIComponent(rawBranch);
+  const decodedPath = decodePathSegments(rawPathSegments ?? []).join("/");
 
   let contentData: ContentResponse;
   try {
-    contentData = await client.getContents(owner, repo, decodedPath, branch);
+    contentData = await apiClient.getContents<ContentResponse>(
+      owner,
+      repo,
+      decodedPath,
+      branch,
+    );
   } catch (err) {
-    if (isNotFound(err)) notFound();
+    if (isApiError(err) && err.status === 404) notFound();
     throw err;
   }
 
   if (contentData.type !== "file") notFound();
 
-  const rawUrl = contentData.download_url ?? "";
-  const downloadUrl = contentData.download_url ?? rawUrl;
+  const downloadUrl = contentData.download_url ?? "";
   const pathParts = decodedPath.split("/");
   const binary = isBinaryContent(contentData);
   const truncated = contentData.truncated === true;
@@ -92,7 +78,7 @@ export default async function BlobPage({
               </Link>
               <span className="text-[#57606a]">/</span>
               <Link
-                href={`/${owner}/${repo}/tree/${branch}`}
+                href={`/${owner}/${repo}/tree/${encodeURIComponent(branch)}`}
                 className="text-[#0969da] hover:underline no-underline font-mono"
               >
                 {branch}
@@ -107,7 +93,10 @@ export default async function BlobPage({
                       <span className="font-mono text-[#24292f] font-semibold">{part}</span>
                     ) : (
                       <Link
-                        href={`/${owner}/${repo}/tree/${branch}/${sub}`}
+                        href={`/${owner}/${repo}/tree/${encodeURIComponent(branch)}/${sub
+                          .split("/")
+                          .map(encodeURIComponent)
+                          .join("/")}`}
                         className="text-[#0969da] hover:underline no-underline font-mono"
                       >
                         {part}
@@ -170,7 +159,11 @@ export default async function BlobPage({
             </div>
           ) : (
             <BlobViewer
-              content={decodeContent(contentData)}
+              content={
+                contentData.content && contentData.encoding === "base64"
+                  ? decodeBase64Content(contentData.content)
+                  : ""
+              }
               filename={contentData.name}
               binary={false}
               truncated={false}
