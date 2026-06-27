@@ -3,6 +3,7 @@ module github.com/open-git/backend
 go 1.24.0
 
 require (
+	github.com/gliderlabs/ssh v0.3.7
 	github.com/go-git/go-git/v5 v5.13.2
 	github.com/golang-migrate/migrate/v4 v4.18.1
 	github.com/google/uuid v1.6.0
@@ -15,6 +16,7 @@ require (
 )
 
 require (
+	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b78a0316 // indirect
 	github.com/DATA-DOG/go-sqlmock v1.5.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
