@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
-
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
@@ -23,10 +21,8 @@ type RepositoryHandler struct {
 	get       *repoUC.GetRepositoryUsecase
 	repos     repo.IRepositoryRepository
 	users     repo.IUserRepository
-	reposRoot string
+	gitRoot string
 }
-
-const maxRepositoryPerPage = 100
 
 func NewRepositoryHandler(
 	create *repoUC.CreateRepositoryUsecase,
@@ -34,7 +30,7 @@ func NewRepositoryHandler(
 	get *repoUC.GetRepositoryUsecase,
 	repos repo.IRepositoryRepository,
 	users repo.IUserRepository,
-	reposRoot string,
+	gitRoot string,
 ) *RepositoryHandler {
 	return &RepositoryHandler{
 		create:    create,
@@ -42,7 +38,7 @@ func NewRepositoryHandler(
 		get:       get,
 		repos:     repos,
 		users:     users,
-		reposRoot: reposRoot,
+		gitRoot:   gitRoot,
 	}
 }
 
@@ -225,14 +221,14 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 	diskPath := repository.DiskPath
 	ownerLogin := c.Param("owner")
 
-	if diskPath != "" && isSafeRepositoryDiskPath(h.reposRoot, ownerLogin, repository.Name, diskPath) {
+	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
+	}
+
+	if diskPath != "" && isSafeRepositoryDiskPath(h.gitRoot, ownerLogin, repository.Name, diskPath) {
 		if err := os.RemoveAll(diskPath); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository files"})
 		}
-	}
-
-	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -265,35 +261,19 @@ func normalizeRepositoryPagination(c echo.Context) (int, int) {
 	if perPage < 1 {
 		perPage = 30
 	}
-	if perPage > maxRepositoryPerPage {
-		perPage = maxRepositoryPerPage
+	if perPage > repoUC.MaxRepositoryPerPage {
+		perPage = repoUC.MaxRepositoryPerPage
 	}
 	return page, perPage
 }
 
-func isSafeRepositoryDiskPath(reposRoot, ownerLogin, repoName, diskPath string) bool {
+func isSafeRepositoryDiskPath(gitRoot, ownerLogin, repoName, diskPath string) bool {
 	if diskPath == "" {
 		return false
 	}
 
-	cleanReposRoot := filepath.Clean(reposRoot)
-	expectedPath := filepath.Join(cleanReposRoot, ownerLogin, repoName+".git")
-	cleanExpected := filepath.Clean(expectedPath)
-	cleanDiskPath := filepath.Clean(diskPath)
-
-	if cleanDiskPath != cleanExpected {
-		return false
-	}
-
-	rel, err := filepath.Rel(cleanReposRoot, cleanDiskPath)
-	if err != nil {
-		return false
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return false
-	}
-
-	return true
+	expectedPath := filepath.Join(filepath.Clean(gitRoot), ownerLogin, repoName+".git")
+	return filepath.Clean(diskPath) == filepath.Clean(expectedPath)
 }
 
 func (h *RepositoryHandler) resolveAuthenticatedOwner(c echo.Context) (uuid.UUID, string, error) {
@@ -308,8 +288,11 @@ func (h *RepositoryHandler) resolveAuthenticatedOwner(c echo.Context) (uuid.UUID
 	}
 
 	user, err := h.users.GetByID(c.Request().Context(), userIDInt)
-	if err != nil || user == nil || user.Login == "" {
-		return userID, "", nil
+	if err != nil {
+		return uuid.Nil, "", echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to resolve owner"})
+	}
+	if user == nil || user.Login == "" {
+		return uuid.Nil, "", echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to resolve owner"})
 	}
 
 	return userID, user.Login, nil

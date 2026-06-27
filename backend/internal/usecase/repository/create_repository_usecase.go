@@ -84,11 +84,11 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 
 	diskPath := filepath.Join(u.gitRoot, ownerLogin, repository.Name+".git")
 	if err := infragit.InitBare(diskPath); err != nil {
-		return nil, errors.Join(err, u.rollbackCreate(ctx, repository.ID, diskPath))
+		return nil, u.joinWithRollback(err, "init bare repository", u.rollbackCreate(ctx, repository.ID, diskPath))
 	}
 
 	if err := u.repos.UpdateDiskPath(ctx, repository.ID, diskPath); err != nil {
-		return nil, errors.Join(err, u.rollbackCreate(ctx, repository.ID, diskPath))
+		return nil, u.joinWithRollback(err, "update disk path", u.rollbackCreate(ctx, repository.ID, diskPath))
 	}
 
 	repository.DiskPath = diskPath
@@ -124,4 +124,11 @@ func (u *CreateRepositoryUsecase) rollbackCreate(ctx context.Context, repository
 		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("delete repository record: %w", err))
 	}
 	return rollbackErr
+}
+
+func (u *CreateRepositoryUsecase) joinWithRollback(err error, step string, rollbackErr error) error {
+	if rollbackErr != nil {
+		return fmt.Errorf("%s: %w; rollback failed: %v", step, err, rollbackErr)
+	}
+	return fmt.Errorf("%s: %w", step, err)
 }

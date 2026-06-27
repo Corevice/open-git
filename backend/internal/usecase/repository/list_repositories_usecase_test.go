@@ -3,6 +3,7 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -27,8 +28,22 @@ func (m *listMockRepositoryRepo) GetByOwnerLoginAndName(context.Context, string,
 	return nil, errors.New("not found")
 }
 
-func (m *listMockRepositoryRepo) ListByOrg(_ context.Context, _ uuid.UUID, _, _ int) ([]*entity.Repository, error) {
-	return m.repos, nil
+func (m *listMockRepositoryRepo) ListByOrg(_ context.Context, _ uuid.UUID, page, perPage int) ([]*entity.Repository, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 30
+	}
+	start := (page - 1) * perPage
+	if start >= len(m.repos) {
+		return []*entity.Repository{}, nil
+	}
+	end := start + perPage
+	if end > len(m.repos) {
+		end = len(m.repos)
+	}
+	return m.repos[start:end], nil
 }
 
 func (m *listMockRepositoryRepo) UpdateVisibility(context.Context, uuid.UUID, string) error {
@@ -140,4 +155,101 @@ func TestListRepositoriesUsecase_FiltersPrivate(t *testing.T) {
 	if len(resultAsOwner.Repositories) != 2 {
 		t.Fatalf("expected 2 visible repositories for owner, got %d", len(resultAsOwner.Repositories))
 	}
+}
+
+func TestListRepositoriesUsecase_PaginationBoundaries(t *testing.T) {
+	ownerID := testOwnerID
+	reposList := make([]*entity.Repository, 0, 5)
+	for i := 1; i <= 5; i++ {
+		reposList = append(reposList, &entity.Repository{
+			ID:             uuid.MustParse("00000000-0000-0000-0000-00000000000" + strconv.Itoa(i)),
+			OrganizationID: testOrgID,
+			OwnerID:        ownerID,
+			Name:           "repo-" + strconv.Itoa(i),
+			Visibility:     entity.VisibilityPublic,
+		})
+	}
+
+	repos := &listMockRepositoryRepo{repos: reposList}
+	users := &listMockUserRepo{
+		users: map[string]*domain.User{
+			"alice": {ID: 1, Login: "alice"},
+		},
+	}
+	uc := repository.NewListRepositoriesUsecase(repos, users, &listMockMembershipRepo{})
+
+	t.Run("first page", func(t *testing.T) {
+		result, err := uc.Execute(context.Background(), repository.ListRepositoriesInput{
+			RequestUserID: uuid.Nil,
+			OwnerLogin:    "alice",
+			Page:          1,
+			PerPage:       2,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Total != 5 {
+			t.Fatalf("expected total 5, got %d", result.Total)
+		}
+		if len(result.Repositories) != 2 {
+			t.Fatalf("expected 2 repositories, got %d", len(result.Repositories))
+		}
+		if result.Repositories[0].Name != "repo-1" || result.Repositories[1].Name != "repo-2" {
+			t.Fatalf("unexpected repositories on page 1: %s, %s", result.Repositories[0].Name, result.Repositories[1].Name)
+		}
+	})
+
+	t.Run("second page", func(t *testing.T) {
+		result, err := uc.Execute(context.Background(), repository.ListRepositoriesInput{
+			RequestUserID: uuid.Nil,
+			OwnerLogin:    "alice",
+			Page:          2,
+			PerPage:       2,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Total != 5 {
+			t.Fatalf("expected total 5, got %d", result.Total)
+		}
+		if len(result.Repositories) != 2 {
+			t.Fatalf("expected 2 repositories, got %d", len(result.Repositories))
+		}
+		if result.Repositories[0].Name != "repo-3" || result.Repositories[1].Name != "repo-4" {
+			t.Fatalf("unexpected repositories on page 2: %s, %s", result.Repositories[0].Name, result.Repositories[1].Name)
+		}
+	})
+
+	t.Run("page beyond total", func(t *testing.T) {
+		result, err := uc.Execute(context.Background(), repository.ListRepositoriesInput{
+			RequestUserID: uuid.Nil,
+			OwnerLogin:    "alice",
+			Page:          10,
+			PerPage:       2,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.Total != 5 {
+			t.Fatalf("expected total 5, got %d", result.Total)
+		}
+		if len(result.Repositories) != 0 {
+			t.Fatalf("expected empty page, got %d repositories", len(result.Repositories))
+		}
+	})
+
+	t.Run("caps per page at max", func(t *testing.T) {
+		result, err := uc.Execute(context.Background(), repository.ListRepositoriesInput{
+			RequestUserID: uuid.Nil,
+			OwnerLogin:    "alice",
+			Page:          1,
+			PerPage:       500,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(result.Repositories) != 5 {
+			t.Fatalf("expected all 5 repositories, got %d", len(result.Repositories))
+		}
+	})
 }

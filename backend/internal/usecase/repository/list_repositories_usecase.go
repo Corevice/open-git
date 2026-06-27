@@ -13,7 +13,11 @@ import (
 
 const userUUIDPrefixLen = 8
 
-const maxRepositoriesPerOrg = 1000
+const (
+	MaxRepositoryPerPage  = 100
+	maxRepositoriesPerOrg   = 1000
+	listRepositoriesBatch = 100
+)
 
 var ErrOwnerNotFound = errors.New("owner not found")
 
@@ -68,35 +72,43 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 	if perPage < 1 {
 		perPage = 30
 	}
-
-	allRepos, err := u.repos.ListByOrg(ctx, orgID, 1, maxRepositoriesPerOrg)
-	if err != nil {
-		return nil, err
+	if perPage > MaxRepositoryPerPage {
+		perPage = MaxRepositoryPerPage
 	}
 
-	visible := make([]*entity.Repository, 0, len(allRepos))
-	for _, r := range allRepos {
-		if u.canViewRepository(ctx, input.RequestUserID, r) {
-			visible = append(visible, r)
+	targetStart := (page - 1) * perPage
+	targetEnd := targetStart + perPage
+	pageRepos := make([]*entity.Repository, 0, perPage)
+	total := 0
+	dbPage := 1
+
+	for dbPage <= (maxRepositoriesPerOrg+listRepositoriesBatch-1)/listRepositoriesBatch {
+		batch, err := u.repos.ListByOrg(ctx, orgID, dbPage, listRepositoriesBatch)
+		if err != nil {
+			return nil, err
 		}
-	}
+		if len(batch) == 0 {
+			break
+		}
 
-	total := len(visible)
-	start := (page - 1) * perPage
-	if start >= total {
-		return &ListRepositoriesResult{
-			Repositories: []*entity.Repository{},
-			Total:        total,
-			OwnerLogin:   ownerLogin,
-		}, nil
-	}
-	end := start + perPage
-	if end > total {
-		end = total
+		for _, r := range batch {
+			if !u.canViewRepository(ctx, input.RequestUserID, r) {
+				continue
+			}
+			if total >= targetStart && total < targetEnd {
+				pageRepos = append(pageRepos, r)
+			}
+			total++
+		}
+
+		if len(batch) < listRepositoriesBatch {
+			break
+		}
+		dbPage++
 	}
 
 	return &ListRepositoriesResult{
-		Repositories: visible[start:end],
+		Repositories: pageRepos,
 		Total:        total,
 		OwnerLogin:   ownerLogin,
 	}, nil
