@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
+	"github.com/open-git/backend/internal/domain/entity"
 )
 
 type IUserRepository interface {
@@ -35,4 +37,11 @@ type IMembershipRepository interface {
 
 type IOAuthAppRepository interface {
 	GetByClientID(ctx context.Context, clientID string) (*domain.OAuthApp, error)
+}
+
+type ISSHKeyStore interface {
+	FindByFingerprint(ctx context.Context, fingerprint string) (*entity.SSHKey, error)
+	ListByUserID(ctx context.Context, userID uuid.UUID) ([]*entity.SSHKey, error)
+	Create(ctx context.Context, key *entity.SSHKey) error
+	Delete(ctx context.Context, id, userID uuid.UUID) error
 }

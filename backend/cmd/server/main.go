@@ -16,10 +16,12 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/open-git/backend/internal/config"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/handler"
 	"github.com/open-git/backend/internal/infrastructure/database"
+	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
 )
 
 var (
@@ -78,7 +80,7 @@ func main() {
 	e.GET("/readyz", readyzHandler(db))
 	e.GET("/version", versionHandler)
 
-	registerHandlers(e, cfg)
+	registerHandlers(e, cfg, sqlx.NewDb(db, cfg.DBType))
 
 	go func() {
 		if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
@@ -219,7 +221,7 @@ func versionHandler(c echo.Context) error {
 	})
 }
 
-func registerHandlers(e *echo.Echo, _ config.Config) {
+func registerHandlers(e *echo.Echo, _ config.Config, sqlxDB *sqlx.DB) {
 	// TODO: wire infrastructure repositories and usecases before serving production traffic.
 	authHandler := handler.NewAuthHandler(nil, nil)
 	repositoryHandler := handler.NewRepositoryHandler(nil, nil, nil)
@@ -229,6 +231,8 @@ func registerHandlers(e *echo.Echo, _ config.Config) {
 	pullRequestHandler := handler.NewPullRequestHandler(nil, nil, nil, nil)
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 	gitHTTPHandler := handler.NewGitHTTPHandler("", nil, nil, nil, nil)
+	sshKeyRepo := infrarepo.NewSSHKeyRepository(sqlxDB)
+	sshKeyHandler := handler.NewSSHKeyHandler(sshKeyRepo)
 
 	// TODO: replace stub auth middleware with appMiddleware.AuthMiddleware once token repository is wired.
 	authMiddleware := func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -245,6 +249,11 @@ func registerHandlers(e *echo.Echo, _ config.Config) {
 	tokens.GET("", tokenHandler.List)
 	tokens.POST("", tokenHandler.Create)
 	tokens.DELETE("/:id", tokenHandler.Revoke)
+
+	keys := api.Group("/user/keys", authMiddleware)
+	keys.GET("", sshKeyHandler.List)
+	keys.POST("", sshKeyHandler.Add)
+	keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	repositoryHandler.RegisterRoutes(api, authMiddleware)
 	contentHandler.RegisterRoutes(api)
