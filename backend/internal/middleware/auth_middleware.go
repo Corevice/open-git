@@ -7,14 +7,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/repository"
 )
 
 const (
-	userIDContextKey = "user_id"
-	scopesContextKey = "scopes"
+	userIDContextKey     = "user_id"
+	userUUIDContextKey   = "user_uuid"
+	scopesContextKey     = "scopes"
 )
 
 func AuthMiddleware(tokens repository.IAccessTokenRepository) echo.MiddlewareFunc {
@@ -74,6 +76,22 @@ func GetScopes(c echo.Context) []string {
 func SetAuthContext(c echo.Context, userID int64, scopes []string) {
 	c.Set(userIDContextKey, userID)
 	c.Set(scopesContextKey, scopes)
+}
+
+func SetUserUUID(c echo.Context, id uuid.UUID) {
+	c.Set(userUUIDContextKey, id)
+}
+
+func GetUserUUID(c echo.Context) (uuid.UUID, error) {
+	v := c.Get(userUUIDContextKey)
+	if v == nil {
+		return uuid.Nil, echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
+	}
+	userUUID, ok := v.(uuid.UUID)
+	if !ok {
+		return uuid.Nil, echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
+	}
+	return userUUID, nil
 }
 
 func bearerToken(header string) (string, bool) {
