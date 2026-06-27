@@ -345,7 +345,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	getCurrentUserUC := userUC.NewGetCurrentUserUsecase(userRepo)
 	getUserByLoginUC := userUC.NewGetUserByLoginUsecase(userRepo)
-	userHandler := handler.NewUserHandler(getCurrentUserUC, getUserByLoginUC)
+	updateUserUC := userUC.NewUpdateUserUsecase(entityUserRepo)
+	userHandler := handler.NewUserHandler(getCurrentUserUC, getUserByLoginUC, updateUserUC)
 
 	getOrgUC := orgUC.NewGetOrgUsecase(orgRepo)
 	listUserOrgsUC := orgUC.NewListUserOrgsUsecase(orgRepo)
