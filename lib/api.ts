@@ -1,3 +1,5 @@
+import type { SSHKey } from "./api-types";
+
 export const API_TOKEN_KEY = "open-git-auth-token";
 
 export class ApiError extends Error {
@@ -107,4 +109,11 @@ export class ApiClient {
   del(path: string): Promise<void> {
     return this.request<void>("DELETE", path);
   }
+
+  sshKeys = {
+    list: () => this.get<SSHKey[]>("/api/v3/user/keys"),
+    create: (title: string, key: string) =>
+      this.post<SSHKey>("/api/v3/user/keys", { title, key }),
+    remove: (id: string) => this.del("/api/v3/user/keys/" + id),
+  };
 }
