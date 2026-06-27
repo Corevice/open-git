@@ -8,7 +8,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
+	dbErrors "github.com/open-git/backend/internal/infrastructure/database"
 )
 
 type sqlxUserRepository struct {
@@ -39,31 +41,32 @@ func (r *sqlxUserRepository) Create(ctx context.Context, user *entity.User) erro
 		"password_hash": user.PasswordHash,
 		"created_at":    user.CreatedAt,
 	})
-	return err
+	return dbErrors.MapDBError(err)
 }
 
 func (r *sqlxUserRepository) GetByID(ctx context.Context, id uuid.UUID) (*entity.User, error) {
-	return r.getOne(ctx, `SELECT id, login, email, password_hash, created_at FROM users WHERE id = $1`, id)
+	return r.getOne(ctx, `SELECT id, login, email, password_hash, created_at FROM users WHERE id = ?`, id)
 }
 
 func (r *sqlxUserRepository) GetByLogin(ctx context.Context, login string) (*entity.User, error) {
-	return r.getOne(ctx, `SELECT id, login, email, password_hash, created_at FROM users WHERE login = $1`, login)
+	return r.getOne(ctx, `SELECT id, login, email, password_hash, created_at FROM users WHERE login = ?`, login)
 }
 
 func (r *sqlxUserRepository) GetByEmail(ctx context.Context, email string) (*entity.User, error) {
-	return r.getOne(ctx, `SELECT id, login, email, password_hash, created_at FROM users WHERE email = $1`, email)
+	return r.getOne(ctx, `SELECT id, login, email, password_hash, created_at FROM users WHERE email = ?`, email)
 }
 
 func (r *sqlxUserRepository) getOne(ctx context.Context, query string, arg any) (*entity.User, error) {
+	query = r.DB.Rebind(query)
 	row := r.DB.QueryRowxContext(ctx, query, arg)
 
 	var u entity.User
 	err := row.Scan(&u.ID, &u.Login, &u.Email, &u.PasswordHash, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, dbErrors.MapDBError(err)
 	}
 	return &u, nil
 }
