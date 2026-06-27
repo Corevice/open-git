@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -244,7 +244,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
 	issuePATUC := authUC.NewIssuePATUsecase(tokenRepo)
 	revokePATUC := authUC.NewRevokePATUsecase(tokenRepo)
 
-	oauthCodes := &memoryOAuthCodeStore{data: make(map[string]string)}
+	oauthCodes := &memoryOAuthCodeStore{data: make(map[string]oauthCodeEntry)}
 	oauthAuthorizeUC := authUC.NewOAuthAuthorizeUsecase(&noopOAuthAppRepo{}, oauthCodes)
 	oauthTokenUC := authUC.NewOAuthTokenUsecase(oauthCodes, issuePATUC)
 
@@ -257,7 +257,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
 
 	createIssueUC := issueUC.NewCreateIssueUsecase(issueRepo, auditLogRepo, txManager)
 	listIssuesUC := issueUC.NewListIssuesUsecase(issueRepo)
-	createCommentUC := issueUC.NewCreateCommentUsecase(issueRepo, &noopCommentRepo{}, auditLogRepo)
+	createCommentUC := issueUC.NewCreateCommentUsecase(issueRepo, &memoryCommentRepo{}, auditLogRepo)
 
 	prRepo := &stubPullRequestRepo{}
 	gitService := &stubGitService{}
@@ -351,6 +351,8 @@ func (a *gitMembershipAdapter) HasWriteAccess(ctx context.Context, userID int64,
 	return a.memberships.HasWriteAccess(ctx, appmw.Int64ToUUID(userID), organizationID)
 }
 
+type txContextKey struct{}
+
 type sqlxTxManager struct {
 	db *sqlx.DB
 }
@@ -360,41 +362,67 @@ func (m *sqlxTxManager) RunInTransaction(ctx context.Context, fn func(context.Co
 	if err != nil {
 		return err
 	}
-	if err := fn(ctx); err != nil {
-		_ = tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
+
+	txCtx := context.WithValue(ctx, txContextKey{}, tx)
+	if err := fn(txCtx); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-type memoryOAuthCodeStore struct {
-	data map[string]string
+type oauthCodeEntry struct {
+	value   string
+	expires time.Time
 }
 
-func (s *memoryOAuthCodeStore) Set(_ context.Context, key, value string, _ time.Duration) error {
-	s.data[key] = value
+type memoryOAuthCodeStore struct {
+	mu   sync.Mutex
+	data map[string]oauthCodeEntry
+}
+
+func (s *memoryOAuthCodeStore) Set(_ context.Context, key, value string, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data[key] = oauthCodeEntry{
+		value:   value,
+		expires: time.Now().Add(ttl),
+	}
 	return nil
 }
 
 func (s *memoryOAuthCodeStore) GetDel(_ context.Context, key string) (string, error) {
-	value, ok := s.data[key]
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.data[key]
 	if !ok {
 		return "", nil
 	}
 	delete(s.data, key)
-	return value, nil
+	if time.Now().After(entry.expires) {
+		return "", nil
+	}
+	return entry.value, nil
 }
+
+type memoryCommentRepo struct {
+	mu       sync.Mutex
+	comments []*entity.Comment
+}
+
+func (r *memoryCommentRepo) Create(_ context.Context, comment *entity.Comment) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.comments = append(r.comments, comment)
+	return nil
+}
+
+// Stub implementations for features not yet backed by infrastructure repositories.
 
 type noopOAuthAppRepo struct{}
 
 func (noopOAuthAppRepo) GetByClientID(_ context.Context, _ string) (*domain.OAuthApp, error) {
 	return nil, errors.New("not found")
-}
-
-type noopCommentRepo struct{}
-
-func (noopCommentRepo) Create(_ context.Context, _ *entity.Comment) error {
-	return errors.New("comment repository not configured")
 }
 
 type stubPullRequestRepo struct{}
@@ -461,6 +489,18 @@ func (stubGitBranchProtectionStore) IsBranchProtected(_ context.Context, _ uuid.
 	return false, nil
 }
 
+// uuidToInt64 extracts the int64 user ID only when the UUID uses the
+// Int64ToUUID encoding (first 8 bytes zero). Full UUIDs return 0 to avoid
+// collision-based privilege escalation in permission checks.
 func uuidToInt64(id uuid.UUID) int64 {
-	return int64(binary.BigEndian.Uint64(id[8:]))
+	for i := 0; i < 8; i++ {
+		if id[i] != 0 {
+			return 0
+		}
+	}
+	var n int64
+	for i := 8; i < 16; i++ {
+		n = n<<8 | int64(id[i])
+	}
+	return n
 }
