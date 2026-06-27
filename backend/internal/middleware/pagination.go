@@ -1,10 +1,52 @@
 package middleware
 
 import (
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/labstack/echo/v4"
 )
+
+const (
+	defaultPage    = 1
+	defaultPerPage = 30
+	maxPerPage     = 100
+)
+
+// ParsePaginationParams reads GitHub-style ?page and ?per_page query params.
+func ParsePaginationParams(c echo.Context) (page, perPage int, err error) {
+	page = defaultPage
+	perPage = defaultPerPage
+
+	if pageStr := c.QueryParam("page"); pageStr != "" {
+		parsedPage, parseErr := strconv.Atoi(pageStr)
+		if parseErr != nil {
+			return 0, 0, echo.NewHTTPError(http.StatusUnprocessableEntity, "page must be a numeric value")
+		}
+		if parsedPage < 1 {
+			return 0, 0, echo.NewHTTPError(http.StatusUnprocessableEntity, "page must be at least 1")
+		}
+		page = parsedPage
+	}
+
+	if perPageStr := c.QueryParam("per_page"); perPageStr != "" {
+		parsedPerPage, parseErr := strconv.Atoi(perPageStr)
+		if parseErr != nil {
+			return 0, 0, echo.NewHTTPError(http.StatusUnprocessableEntity, "per_page must be a numeric value")
+		}
+		if parsedPerPage < 0 {
+			return 0, 0, echo.NewHTTPError(http.StatusUnprocessableEntity, "per_page must be non-negative")
+		}
+		if parsedPerPage > maxPerPage {
+			parsedPerPage = maxPerPage
+		}
+		perPage = parsedPerPage
+	}
+
+	return page, perPage, nil
+}
 
 // BuildLinkHeader builds a GitHub-style Link header (rel=next/prev/last).
 func BuildLinkHeader(base string, page, perPage, total int) string {
