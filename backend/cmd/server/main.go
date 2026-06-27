@@ -42,8 +42,15 @@ func main() {
 	}
 	defer db.Close()
 
-	if err := database.RunMigrations(db, cfg.DBType, "./migrations"); err != nil {
-		log.Fatalf("run migrations: %v", err)
+	if err := database.Ping(context.Background(), db); err != nil {
+		log.Fatalf("ping database: %v", err)
+	}
+	log.Printf("database connected (%s): %s", cfg.DBType, database.MaskDSN(cfg.DBDSN))
+
+	if cfg.DBAutoMigrate {
+		if err := database.RunMigrations(db, cfg.DBType, "./migrations"); err != nil {
+			log.Fatalf("run migrations: %v", err)
+		}
 	}
 
 	e := echo.New()
