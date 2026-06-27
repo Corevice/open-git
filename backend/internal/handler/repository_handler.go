@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -14,12 +15,12 @@ import (
 )
 
 type RepositoryHandler struct {
-	create   *repoUC.CreateRepositoryUsecase
-	get      *repoUC.GetRepositoryUsecase
+	create    *repoUC.CreateRepositoryUsecase
+	get       *repoUC.GetRepositoryUsecase
 	listRepos *repoUC.ListRepositoriesUsecase
-	repos    repo.IRepositoryRepository
-	orgs     repo.IOrganizationRepository
-	auditLog repo.IAuditLogRepository
+	repos     repo.IRepositoryRepository
+	orgs      repo.IOrganizationRepository
+	auditLog  repo.IAuditLogRepository
 }
 
 func NewRepositoryHandler(
@@ -44,7 +45,7 @@ func (h *RepositoryHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.Mi
 	repoScope := middleware.RequireScope("repo")
 	g.GET("/user/repos", h.List, authMiddleware)
 	g.POST("/user/repos", h.CreateRepository, authMiddleware, repoScope)
-	g.GET("/orgs/:org/repos", h.ListOrg, middleware.OptionalAuth())
+	g.GET("/orgs/:org/repos", h.ListOrg, authMiddleware)
 	g.POST("/orgs/:org/repos", h.CreateForOrg, authMiddleware, repoScope)
 	g.GET("/repos/:owner/:repo", h.GetRepository, middleware.OptionalAuth())
 	g.PATCH("/repos/:owner/:repo", h.UpdateVisibility, authMiddleware, repoScope)
@@ -115,9 +116,9 @@ func (h *RepositoryHandler) List(c echo.Context) error {
 }
 
 func (h *RepositoryHandler) ListOrg(c echo.Context) error {
-	userID := middleware.UserIDFromContext(c)
-	if userID == 0 {
-		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		return err
 	}
 
 	ctx := c.Request().Context()
@@ -219,8 +220,8 @@ func (h *RepositoryHandler) CreateForOrg(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to create repository"})
 	}
 
-	if h.auditLog != nil {
-		_ = h.auditLog.Record(ctx, repository.OrganizationID, userUUID, "repo.create", "Repository", repository.ID, map[string]any{"name": repository.Name})
+	if err := h.recordAudit(ctx, repository.OrganizationID, userUUID, "repo.create", "Repository", repository.ID, map[string]any{"name": repository.Name}); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to record audit log"})
 	}
 
 	return c.JSON(http.StatusCreated, toRepositoryResponse(repository))
@@ -255,8 +256,8 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to create repository"})
 	}
 
-	if h.auditLog != nil {
-		_ = h.auditLog.Record(ctx, repository.OrganizationID, userID, "repo.create", "Repository", repository.ID, map[string]any{"name": repository.Name})
+	if err := h.recordAudit(ctx, repository.OrganizationID, userID, "repo.create", "Repository", repository.ID, map[string]any{"name": repository.Name}); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to record audit log"})
 	}
 
 	return c.JSON(http.StatusCreated, toRepositoryResponse(repository))
@@ -325,11 +326,24 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
 	}
 
-	if h.auditLog != nil {
-		_ = h.auditLog.Record(ctx, repository.OrganizationID, userID, "repo.delete", "Repository", repository.ID, nil)
+	if err := h.recordAudit(ctx, repository.OrganizationID, userID, "repo.delete", "Repository", repository.ID, nil); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to record audit log"})
 	}
 
 	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *RepositoryHandler) recordAudit(
+	ctx context.Context,
+	orgID, actorID uuid.UUID,
+	action, targetType string,
+	targetID uuid.UUID,
+	metadata map[string]any,
+) error {
+	if h.auditLog == nil {
+		return errors.New("audit log repository is not configured")
+	}
+	return h.auditLog.Record(ctx, orgID, actorID, action, targetType, targetID, metadata)
 }
 
 func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID uuid.UUID) (*entity.Repository, error) {

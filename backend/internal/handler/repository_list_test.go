@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -58,7 +57,7 @@ func (m *listMockRepositoryRepo) GetByOwnerAndName(_ context.Context, ownerID uu
 			return r, nil
 		}
 	}
-	return nil, errors.New("not found")
+	return nil, nil
 }
 
 func (m *listMockRepositoryRepo) GetByOwnerLoginAndName(_ context.Context, ownerLogin, name string) (*entity.Repository, error) {

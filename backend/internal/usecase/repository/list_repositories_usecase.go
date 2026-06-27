@@ -2,10 +2,10 @@ package repository
 
 import (
 	"context"
-	"encoding/binary"
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
@@ -30,15 +30,6 @@ func NewListRepositoriesUsecase(
 	users repo.IUserRepository,
 ) *ListRepositoriesUsecase {
 	return &ListRepositoriesUsecase{repos: repos, memberships: memberships, users: users}
-}
-
-func int64ToUUID(id int64) uuid.UUID {
-	if id == 0 {
-		return uuid.Nil
-	}
-	var u uuid.UUID
-	binary.BigEndian.PutUint64(u[8:], uint64(id))
-	return u
 }
 
 func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListRepositoriesInput) ([]*entity.Repository, error) {
@@ -67,7 +58,7 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 		if user == nil {
 			return []*entity.Repository{}, nil
 		}
-		repositories, err = u.repos.ListByOwner(ctx, int64ToUUID(user.ID), page, perPage)
+		repositories, err = u.repos.ListByOwner(ctx, middleware.Int64ToUUID(user.ID), page, perPage)
 	default:
 		repositories, err = u.repos.ListByOrg(ctx, input.OrganizationID, page, perPage)
 	}
