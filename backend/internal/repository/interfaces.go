@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
+	"github.com/open-git/backend/internal/domain/entity"
 )
 
 type IUserRepository interface {
@@ -21,18 +23,26 @@ type IAccessTokenRepository interface {
 }
 
 type IRepositoryRepository interface {
-	Create(ctx context.Context, repo *domain.Repository) error
-	GetByOwnerAndName(ctx context.Context, ownerID int64, name string) (*domain.Repository, error)
-	NextNumber(ctx context.Context, ownerID int64) (int64, error)
-	ListByOrg(ctx context.Context, organizationID int64) ([]*domain.Repository, error)
-	UpdateVisibility(ctx context.Context, id int64, visibility domain.Visibility) error
-	Delete(ctx context.Context, id int64) error
+	Create(ctx context.Context, repo *entity.Repository) error
+	GetByOwnerAndName(ctx context.Context, ownerID uuid.UUID, name string) (*entity.Repository, error)
+	GetByOwnerLoginAndName(ctx context.Context, ownerLogin, name string) (*entity.Repository, error)
+	ListByOrg(ctx context.Context, organizationID uuid.UUID, page, perPage int) ([]*entity.Repository, error)
+	UpdateVisibility(ctx context.Context, id uuid.UUID, visibility string) error
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 type IMembershipRepository interface {
-	HasReadAccess(ctx context.Context, userID, organizationID int64) (bool, error)
+	HasReadAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error)
+	HasWriteAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error)
 }
 
 type IOAuthAppRepository interface {
 	GetByClientID(ctx context.Context, clientID string) (*domain.OAuthApp, error)
+}
+
+type ISSHKeyStore interface {
+	FindByFingerprint(ctx context.Context, fingerprint string) (*entity.SSHKey, error)
+	ListByUserID(ctx context.Context, userID uuid.UUID) ([]*entity.SSHKey, error)
+	Create(ctx context.Context, key *entity.SSHKey) error
+	Delete(ctx context.Context, id, userID uuid.UUID) error
 }
