@@ -28,6 +28,7 @@ type IRepositoryRepository interface {
 	GetByOwnerLoginAndName(ctx context.Context, ownerLogin, name string) (*entity.Repository, error)
 	ListByOrg(ctx context.Context, organizationID uuid.UUID, page, perPage int) ([]*entity.Repository, error)
 	UpdateVisibility(ctx context.Context, id uuid.UUID, visibility string) error
+	UpdateDiskPath(ctx context.Context, id uuid.UUID, diskPath string) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 

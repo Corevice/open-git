@@ -23,6 +23,7 @@ type Repository struct {
 	Name           string
 	Visibility     string
 	DefaultBranch  string
+	DiskPath       string
 	CreatedAt      time.Time
 }
 

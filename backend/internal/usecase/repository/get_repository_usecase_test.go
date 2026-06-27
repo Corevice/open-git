@@ -46,6 +46,10 @@ func (m *getMockRepositoryRepo) UpdateVisibility(context.Context, uuid.UUID, str
 	return nil
 }
 
+func (m *getMockRepositoryRepo) UpdateDiskPath(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
 func (m *getMockRepositoryRepo) Delete(context.Context, uuid.UUID) error {
 	return nil
 }
