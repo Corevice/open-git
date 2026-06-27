@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import BlobViewer from "@/components/repo/BlobViewer";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+import { apiClient, type ApiError } from "@/lib/api-client";
 
 interface ContentResponse {
   name: string;
@@ -10,21 +9,25 @@ interface ContentResponse {
   sha: string;
   size: number;
   type: "file";
-  content?: string;
+  content?: string | null;
   encoding?: string;
   download_url?: string;
   truncated?: boolean;
-  binary?: boolean;
 }
 
-async function apiGet<T>(path: string): Promise<T | null> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Accept: "application/vnd.github+json" },
-    cache: "no-store",
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
-  return res.json() as Promise<T>;
+type RepoApiClient = typeof apiClient & {
+  getContents(
+    owner: string,
+    repo: string,
+    path: string,
+    ref: string,
+  ): Promise<ContentResponse>;
+};
+
+const client = apiClient as RepoApiClient;
+
+function isBinaryContent(data: ContentResponse): boolean {
+  return data.content == null;
 }
 
 function decodeContent(data: ContentResponse): string {
@@ -36,26 +39,33 @@ function decodeContent(data: ContentResponse): string {
   }
 }
 
+function isNotFound(err: unknown): boolean {
+  return (err as ApiError).status === 404;
+}
+
 export default async function BlobPage({
   params,
 }: {
   params: Promise<{ owner: string; repo: string; branch: string; path: string[] }>;
 }) {
   const { owner, repo, branch, path: pathSegments } = await params;
-  const filePath = pathSegments.join("/");
+  const decodedPath = pathSegments.join("/");
 
-  const metadata = await apiGet<{ default_branch: string }>(`/repos/${owner}/${repo}`);
-  if (!metadata) notFound();
+  let contentData: ContentResponse;
+  try {
+    contentData = await client.getContents(owner, repo, decodedPath, branch);
+  } catch (err) {
+    if (isNotFound(err)) notFound();
+    throw err;
+  }
 
-  const contentData = await apiGet<ContentResponse>(
-    `/repos/${owner}/${repo}/contents/${filePath}?ref=${encodeURIComponent(branch)}`,
-  );
-  if (!contentData || contentData.type !== "file") notFound();
+  if (contentData.type !== "file") notFound();
 
-  const content = decodeContent(contentData);
-  const rawUrl = `${API_BASE}/repos/${owner}/${repo}/contents/${filePath}?ref=${encodeURIComponent(branch)}`;
+  const rawUrl = contentData.download_url ?? "";
   const downloadUrl = contentData.download_url ?? rawUrl;
-  const pathParts = filePath.split("/");
+  const pathParts = decodedPath.split("/");
+  const binary = isBinaryContent(contentData);
+  const truncated = contentData.truncated === true;
 
   return (
     <div className="min-h-screen bg-[#f6f8fa]">
@@ -108,32 +118,65 @@ export default async function BlobPage({
               })}
             </nav>
 
-            <div className="flex gap-2 shrink-0">
-              <a
-                href={rawUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-[#f6f8fa] text-[#24292f] no-underline hover:bg-[#eaeef2]"
-              >
-                Raw
-              </a>
-              <a
-                href={downloadUrl}
-                download={contentData.name}
-                className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-[#f6f8fa] text-[#24292f] no-underline hover:bg-[#eaeef2]"
-              >
-                Download
-              </a>
-            </div>
+            {downloadUrl && (
+              <div className="flex gap-2 shrink-0">
+                <a
+                  href={downloadUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-[#f6f8fa] text-[#24292f] no-underline hover:bg-[#eaeef2]"
+                >
+                  Raw
+                </a>
+                <a
+                  href={downloadUrl}
+                  download={contentData.name}
+                  className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-[#f6f8fa] text-[#24292f] no-underline hover:bg-[#eaeef2]"
+                >
+                  Download
+                </a>
+              </div>
+            )}
           </div>
 
-          <BlobViewer
-            content={content}
-            filename={contentData.name}
-            binary={contentData.binary}
-            truncated={contentData.truncated}
-            rawUrl={rawUrl}
-          />
+          {truncated ? (
+            <div className="p-8 text-center text-sm text-[#57606a] bg-[#f6f8fa] border-t border-[#d0d7de]">
+              This file is too large to display.{" "}
+              {downloadUrl && (
+                <a
+                  href={downloadUrl}
+                  download={contentData.name}
+                  className="text-[#0969da] hover:underline font-medium"
+                >
+                  Download file
+                </a>
+              )}
+            </div>
+          ) : binary ? (
+            <div className="p-8 text-center text-sm text-[#57606a] bg-[#f6f8fa] border-t border-[#d0d7de]">
+              Binary file not shown.
+              {downloadUrl && (
+                <>
+                  {" "}
+                  <a
+                    href={downloadUrl}
+                    download={contentData.name}
+                    className="text-[#0969da] hover:underline font-medium"
+                  >
+                    Download file
+                  </a>
+                </>
+              )}
+            </div>
+          ) : (
+            <BlobViewer
+              content={decodeContent(contentData)}
+              filename={contentData.name}
+              binary={false}
+              truncated={false}
+              rawUrl={downloadUrl}
+            />
+          )}
         </div>
       </div>
     </div>
