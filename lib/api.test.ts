@@ -83,3 +83,118 @@ describe("TestUnauthorizedRedirect", () => {
     expect(localStorage.getItem(API_TOKEN_KEY)).toBeNull();
   });
 });
+
+describe("sshKeys", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("list returns array on 200", async () => {
+    const keys = [
+      {
+        id: "1",
+        title: "My Key",
+        key_type: "ssh-ed25519",
+        fingerprint: "SHA256:abc",
+        created_at: "2026-01-01T00:00:00Z",
+        last_used_at: null,
+      },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => keys,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+    const result = await client.sshKeys.list();
+
+    expect(result).toEqual(keys);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/user/keys",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("create returns key object on 201", async () => {
+    const key = {
+      id: "2",
+      title: "Work Laptop",
+      key_type: "ssh-ed25519",
+      fingerprint: "SHA256:xyz",
+      created_at: "2026-06-01T00:00:00Z",
+      last_used_at: null,
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => key,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+    const result = await client.sshKeys.create(
+      "Work Laptop",
+      "ssh-ed25519 AAAA...",
+    );
+
+    expect(result).toEqual(key);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/user/keys",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          title: "Work Laptop",
+          key: "ssh-ed25519 AAAA...",
+        }),
+      }),
+    );
+  });
+
+  it("create throws ApiError with status 409 on conflict", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      statusText: "Conflict",
+      json: async () => ({ message: "Key already exists" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+
+    await expect(
+      client.sshKeys.create("Dup", "ssh-ed25519 AAAA..."),
+    ).rejects.toMatchObject({
+      status: 409,
+    });
+  });
+
+  it("remove resolves without error on 204", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: {
+        get: () => null,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+
+    await expect(client.sshKeys.remove("key-id-1")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/user/keys/key-id-1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+});
