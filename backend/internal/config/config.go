@@ -15,6 +15,7 @@ type Config struct {
 	DBMaxIdleConns    int
 	DBConnMaxLifetime time.Duration
 	Port              string
+	GitDataRoot       string
 	JWTSecret         string
 	RedisAddr         string
 	MinioEndpoint     string
@@ -34,6 +35,7 @@ func Load() Config {
 		DBMaxIdleConns:    getenvInt("DB_MAX_IDLE_CONNS", 5),
 		DBConnMaxLifetime: connMaxLifetime,
 		Port:              getenv("PORT", "8080"),
+		GitDataRoot:       getenv("GIT_DATA_ROOT", "./data/repos"),
 		JWTSecret:         os.Getenv("JWT_SECRET"),
 		RedisAddr:         os.Getenv("REDIS_ADDR"),
 		MinioEndpoint:     os.Getenv("MINIO_ENDPOINT"),

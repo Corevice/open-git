@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -16,12 +18,20 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/open-git/backend/internal/config"
 	"github.com/open-git/backend/internal/domain"
+	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/handler"
 	"github.com/open-git/backend/internal/infrastructure/database"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
+	appmw "github.com/open-git/backend/internal/middleware"
+	authUC "github.com/open-git/backend/internal/usecase/auth"
+	issueUC "github.com/open-git/backend/internal/usecase/issue"
+	prUC "github.com/open-git/backend/internal/usecase/pr"
+	repoUC "github.com/open-git/backend/internal/usecase/repository"
+	repointer "github.com/open-git/backend/internal/repository"
 )
 
 var (
@@ -80,7 +90,7 @@ func main() {
 	e.GET("/readyz", readyzHandler(db))
 	e.GET("/version", versionHandler)
 
-	registerHandlers(e, cfg, sqlx.NewDb(db, cfg.DBType))
+	registerHandlers(e, cfg, db)
 
 	go func() {
 		if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
@@ -221,25 +231,75 @@ func versionHandler(c echo.Context) error {
 	})
 }
 
-func registerHandlers(e *echo.Echo, _ config.Config, sqlxDB *sqlx.DB) {
-	// TODO: wire infrastructure repositories and usecases before serving production traffic.
-	authHandler := handler.NewAuthHandler(nil, nil)
-	repositoryHandler := handler.NewRepositoryHandler(nil, nil, nil)
-	contentHandler := handler.NewContentHandler(nil)
-	tokenHandler := handler.NewTokenHandler(nil, nil, nil)
-	issueHandler := handler.NewIssueHandler(nil, nil, nil, nil)
-	pullRequestHandler := handler.NewPullRequestHandler(nil, nil, nil, nil)
-	oauthHandler := handler.NewOAuthHandler(nil, nil)
-	gitHTTPHandler := handler.NewGitHTTPHandler("", nil, nil, nil, nil)
+func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
+	sqlxDB := sqlx.NewDb(db, cfg.DBType)
+
+	userRepo := infrarepo.NewUserRepository(sqlxDB)
+	repoRepo := infrarepo.NewRepositoryRepository(sqlxDB)
+	tokenRepo := infrarepo.NewTokenRepository(sqlxDB)
+	membershipRepo := infrarepo.NewMembershipRepository(sqlxDB)
+
+	registerUC := authUC.NewRegisterUserUsecase(userRepo)
+	loginUC := authUC.NewLoginUsecase(userRepo, cfg.JWTSecret)
+	issuePATUC := authUC.NewIssuePATUsecase(tokenRepo)
+	revokePATUC := authUC.NewRevokePATUsecase(tokenRepo)
+
+	oauthCodes := &memoryOAuthCodeStore{data: make(map[string]string)}
+	oauthAuthorizeUC := authUC.NewOAuthAuthorizeUsecase(&noopOAuthAppRepo{}, oauthCodes)
+	oauthTokenUC := authUC.NewOAuthTokenUsecase(oauthCodes, issuePATUC)
+
+	createRepoUC := repoUC.NewCreateRepositoryUsecase(repoRepo)
+	getRepoUC := repoUC.NewGetRepositoryUsecase(repoRepo, userRepo, membershipRepo)
+
+	issueRepo := infrarepo.NewIssueRepository(sqlxDB)
+	auditLogRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	txManager := &sqlxTxManager{db: sqlxDB}
+
+	createIssueUC := issueUC.NewCreateIssueUsecase(issueRepo, auditLogRepo, txManager)
+	listIssuesUC := issueUC.NewListIssuesUsecase(issueRepo)
+	createCommentUC := issueUC.NewCreateCommentUsecase(issueRepo, &noopCommentRepo{}, auditLogRepo)
+
+	prRepo := &stubPullRequestRepo{}
+	gitService := &stubGitService{}
+	createPRUC := prUC.NewCreatePRUsecase(prRepo, auditLogRepo, gitService, txManager)
+	mergePRUC := prUC.NewMergePRUsecase(
+		prRepo,
+		&stubBranchProtectionRepo{},
+		&stubReviewRepo{},
+		&stubWorkflowRunRepo{},
+		auditLogRepo,
+		gitService,
+		txManager,
+	)
+
+	resolver := &repoResolver{repos: repoRepo, gitDataRoot: cfg.GitDataRoot}
+	authMiddleware := appmw.AuthMiddleware(tokenRepo)
+
+	resolveRepo := func(c echo.Context, owner, repoName string) (*entity.Repository, error) {
+		return getRepoUC.Execute(c.Request().Context(), repoUC.GetRepositoryInput{
+			RequestUserID: appmw.UserUUIDFromContext(c),
+			OwnerLogin:    owner,
+			Name:          repoName,
+		})
+	}
+
+	authHandler := handler.NewAuthHandler(registerUC, loginUC)
+	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, repoRepo)
+	contentHandler := handler.NewContentHandler(resolver)
+	tokenHandler := handler.NewTokenHandler(tokenRepo, issuePATUC, revokePATUC)
+	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, createCommentUC, resolveRepo)
+	pullRequestHandler := handler.NewPullRequestHandler(createPRUC, mergePRUC, prRepo, resolveRepo)
+	oauthHandler := handler.NewOAuthHandler(oauthAuthorizeUC, oauthTokenUC)
+	gitMembership := &gitMembershipAdapter{memberships: membershipRepo}
+	gitHTTPHandler := handler.NewGitHTTPHandler(
+		cfg.GitDataRoot,
+		resolver,
+		gitMembership,
+		&stubGitBranchProtectionStore{},
+		authMiddleware,
+	)
 	sshKeyRepo := infrarepo.NewSSHKeyRepository(sqlxDB)
 	sshKeyHandler := handler.NewSSHKeyHandler(sshKeyRepo)
-
-	// TODO: replace stub auth middleware with appMiddleware.AuthMiddleware once token repository is wired.
-	authMiddleware := func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			return echo.NewHTTPError(http.StatusUnauthorized, "auth not wired")
-		}
-	}
 
 	api := e.Group("")
 	e.POST("/register", authHandler.Register)
@@ -261,4 +321,146 @@ func registerHandlers(e *echo.Echo, _ config.Config, sqlxDB *sqlx.DB) {
 	pullRequestHandler.RegisterRoutes(api, authMiddleware)
 	oauthHandler.RegisterRoutes(api, authMiddleware)
 	gitHTTPHandler.RegisterRoutes(e)
+}
+
+type repoResolver struct {
+	repos       repointer.IRepositoryRepository
+	gitDataRoot string
+}
+
+func (r *repoResolver) Resolve(ctx context.Context, ownerLogin, repoName string) (*handler.ResolvedGitRepository, error) {
+	repository, err := r.repos.GetByOwnerLoginAndName(ctx, ownerLogin, repoName)
+	if err != nil || repository == nil {
+		return nil, err
+	}
+
+	return &handler.ResolvedGitRepository{
+		ID:             repository.ID,
+		OrganizationID: repository.OrganizationID,
+		OwnerID:        uuidToInt64(repository.OwnerID),
+		Name:           repository.Name,
+		DiskPath:       filepath.Join(r.gitDataRoot, ownerLogin, repoName+".git"),
+	}, nil
+}
+
+type gitMembershipAdapter struct {
+	memberships repointer.IMembershipRepository
+}
+
+func (a *gitMembershipAdapter) HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error) {
+	return a.memberships.HasWriteAccess(ctx, appmw.Int64ToUUID(userID), organizationID)
+}
+
+type sqlxTxManager struct {
+	db *sqlx.DB
+}
+
+func (m *sqlxTxManager) RunInTransaction(ctx context.Context, fn func(context.Context) error) error {
+	tx, err := m.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := fn(ctx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+type memoryOAuthCodeStore struct {
+	data map[string]string
+}
+
+func (s *memoryOAuthCodeStore) Set(_ context.Context, key, value string, _ time.Duration) error {
+	s.data[key] = value
+	return nil
+}
+
+func (s *memoryOAuthCodeStore) GetDel(_ context.Context, key string) (string, error) {
+	value, ok := s.data[key]
+	if !ok {
+		return "", nil
+	}
+	delete(s.data, key)
+	return value, nil
+}
+
+type noopOAuthAppRepo struct{}
+
+func (noopOAuthAppRepo) GetByClientID(_ context.Context, _ string) (*domain.OAuthApp, error) {
+	return nil, errors.New("not found")
+}
+
+type noopCommentRepo struct{}
+
+func (noopCommentRepo) Create(_ context.Context, _ *entity.Comment) error {
+	return errors.New("comment repository not configured")
+}
+
+type stubPullRequestRepo struct{}
+
+func (stubPullRequestRepo) Create(_ context.Context, _ *entity.PullRequest) error {
+	return errors.New("pull request repository not configured")
+}
+
+func (stubPullRequestRepo) GetByNumber(_ context.Context, _ uuid.UUID, _ int) (*entity.PullRequest, error) {
+	return nil, errors.New("not found")
+}
+
+func (stubPullRequestRepo) ListByRepo(_ context.Context, _ uuid.UUID, _ string, _, _ int) ([]*entity.PullRequest, error) {
+	return nil, nil
+}
+
+func (stubPullRequestRepo) UpdateState(_ context.Context, _ uuid.UUID, _ string) error {
+	return errors.New("pull request repository not configured")
+}
+
+func (stubPullRequestRepo) SetMerged(_ context.Context, _ uuid.UUID, _ time.Time) error {
+	return errors.New("pull request repository not configured")
+}
+
+func (stubPullRequestRepo) Update(_ context.Context, _ *entity.PullRequest) error {
+	return errors.New("pull request repository not configured")
+}
+
+type stubGitService struct{}
+
+func (stubGitService) BranchExists(_ context.Context, _ uuid.UUID, _ string) (bool, error) {
+	return false, nil
+}
+
+func (stubGitService) ResolveRef(_ context.Context, _ uuid.UUID, _ string) (string, error) {
+	return "", errors.New("not found")
+}
+
+func (stubGitService) Merge(_ context.Context, _ uuid.UUID, _, _, _ string) error {
+	return errors.New("git service not configured")
+}
+
+type stubBranchProtectionRepo struct{}
+
+func (stubBranchProtectionRepo) GetForRef(_ context.Context, _ uuid.UUID, _ string) (*entity.BranchProtection, error) {
+	return nil, errors.New("not found")
+}
+
+type stubReviewRepo struct{}
+
+func (stubReviewRepo) CountSatisfiedReviews(_ context.Context, _ uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+type stubWorkflowRunRepo struct{}
+
+func (stubWorkflowRunRepo) ListByHeadSHA(_ context.Context, _ uuid.UUID, _ string) ([]*entity.WorkflowRun, error) {
+	return nil, nil
+}
+
+type stubGitBranchProtectionStore struct{}
+
+func (stubGitBranchProtectionStore) IsBranchProtected(_ context.Context, _ uuid.UUID, _ string) (bool, error) {
+	return false, nil
+}
+
+func uuidToInt64(id uuid.UUID) int64 {
+	return int64(binary.BigEndian.Uint64(id[8:]))
 }
