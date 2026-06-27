@@ -154,4 +154,7 @@ func TestGetUserByLoginOK(t *testing.T) {
 	if resp["login"] != "alice" {
 		t.Fatalf("login = %v, want alice", resp["login"])
 	}
+	if _, ok := resp["email"]; ok {
+		t.Fatalf("email should not be exposed for unauthenticated request, got %v", resp["email"])
+	}
 }

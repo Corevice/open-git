@@ -16,7 +16,14 @@ func NewGetCurrentUserUsecase(users repo.IUserRepository) *GetCurrentUserUsecase
 }
 
 func (u *GetCurrentUserUsecase) Execute(ctx context.Context, userID int64) (*domain.User, error) {
-	return u.users.GetByID(ctx, userID)
+	user, err := u.users.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, domain.ErrNotFound
+	}
+	return user, nil
 }
 
 type GetUserByLoginUsecase struct {

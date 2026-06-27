@@ -46,6 +46,9 @@ func (h *OrgHandler) GetOrg(c echo.Context) error {
 		}
 		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
 	}
+	if org == nil {
+		return RespondGitHubError(c, http.StatusNotFound, "Not Found", nil)
+	}
 
 	return RespondGitHubOK(c, toOrgResponse(org))
 }

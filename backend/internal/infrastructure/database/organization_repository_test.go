@@ -2,6 +2,7 @@ package database_test
 
 import (
 	"context"
+	"database/sql"
 	"regexp"
 	"testing"
 	"time"
@@ -78,8 +79,12 @@ func TestListByUserIDEmpty(t *testing.T) {
 	defer closeFn()
 	repo := database.NewOrganizationRepository(db)
 
-	mock.ExpectQuery(`JOIN memberships m ON o\.id = m\.organization_id\s+WHERE m\.user_id = \$1`).
-		WithArgs(int64(99)).
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT o.id, o.login, o.name, o.created_at
+		FROM organizations o
+		JOIN memberships m ON o.id = m.organization_id
+		WHERE m.user_id = $1
+	`)).WithArgs(int64(99)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "login", "name", "created_at"}))
 
 	orgs, err := repo.ListByUserID(context.Background(), 99)
@@ -88,6 +93,38 @@ func TestListByUserIDEmpty(t *testing.T) {
 	}
 	if len(orgs) != 0 {
 		t.Fatalf("expected empty slice, got %d orgs", len(orgs))
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
+	}
+}
+
+func TestListByUserIDFound(t *testing.T) {
+	db, mock, closeFn := newOrgMock(t)
+	defer closeFn()
+	repo := database.NewOrganizationRepository(db)
+
+	now := time.Now().UTC()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT o.id, o.login, o.name, o.created_at
+		FROM organizations o
+		JOIN memberships m ON o.id = m.organization_id
+		WHERE m.user_id = $1
+	`)).WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "login", "name", "created_at"}).
+			AddRow(int64(1), "acme", "Acme Corp", now).
+			AddRow(int64(2), "beta", "Beta Inc", now))
+
+	orgs, err := repo.ListByUserID(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ListByUserID: %v", err)
+	}
+	if len(orgs) != 2 {
+		t.Fatalf("expected 2 orgs, got %d", len(orgs))
+	}
+	if orgs[0].Login != "acme" || orgs[1].Login != "beta" {
+		t.Fatalf("unexpected orgs: %+v", orgs)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

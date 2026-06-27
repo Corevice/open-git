@@ -3,15 +3,17 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/open-git/backend/internal/domain"
+	repo "github.com/open-git/backend/internal/repository"
 )
 
 type organizationRepository struct {
 	db *sql.DB
 }
 
-func NewOrganizationRepository(db *sql.DB) *organizationRepository {
+func NewOrganizationRepository(db *sql.DB) repo.IOrganizationRepository {
 	return &organizationRepository{db: db}
 }
 
@@ -22,7 +24,7 @@ func (r *organizationRepository) GetByLogin(ctx context.Context, login string) (
 
 	var org domain.Organization
 	err := row.Scan(&org.ID, &org.Login, &org.Name, &org.CreatedAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -64,7 +66,7 @@ func (r *organizationRepository) GetMemberRole(ctx context.Context, orgID, userI
 
 	var role string
 	err := r.db.QueryRowContext(ctx, query, orgID, userID).Scan(&role)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {

@@ -29,7 +29,7 @@ func NewUserHandler(
 type userResponse struct {
 	ID    int64  `json:"id"`
 	Login string `json:"login"`
-	Email string `json:"email"`
+	Email string `json:"email,omitempty"`
 	Type  string `json:"type"`
 }
 
@@ -60,13 +60,13 @@ func (h *UserHandler) GetCurrentUser(c echo.Context) error {
 
 	user, err := h.getCurrentUser.Execute(c.Request().Context(), userID)
 	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return RespondGitHubError(c, http.StatusNotFound, "Not Found", nil)
+		}
 		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
 	}
-	if user == nil {
-		return RespondGitHubError(c, http.StatusNotFound, "Not Found", nil)
-	}
 
-	return RespondGitHubOK(c, toUserResponse(user))
+	return RespondGitHubOK(c, toUserResponse(user, true))
 }
 
 func (h *UserHandler) GetUserByLogin(c echo.Context) error {
@@ -78,14 +78,18 @@ func (h *UserHandler) GetUserByLogin(c echo.Context) error {
 		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
 	}
 
-	return RespondGitHubOK(c, toUserResponse(user))
+	includeEmail := middleware.UserIDFromContext(c) != 0
+	return RespondGitHubOK(c, toUserResponse(user, includeEmail))
 }
 
-func toUserResponse(u *domain.User) userResponse {
-	return userResponse{
+func toUserResponse(u *domain.User, includeEmail bool) userResponse {
+	resp := userResponse{
 		ID:    u.ID,
 		Login: u.Login,
-		Email: u.Email,
 		Type:  "User",
 	}
+	if includeEmail {
+		resp.Email = u.Email
+	}
+	return resp
 }
