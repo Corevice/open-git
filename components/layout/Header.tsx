@@ -6,6 +6,7 @@ import { Bell, ChevronDown, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -63,6 +64,8 @@ export function Header() {
       </nav>
 
       <div className="flex shrink-0 items-center gap-2">
+        <ThemeToggle />
+
         <Button
           type="button"
           variant="ghost"
