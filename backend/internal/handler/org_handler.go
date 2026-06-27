@@ -16,17 +16,23 @@ type OrgHandler struct {
 	getOrg       *orgUC.GetOrgUsecase
 	listUserOrgs *orgUC.ListUserOrgsUsecase
 	createOrg    *orgUC.CreateOrgUsecase
+	updateOrg    *orgUC.UpdateOrgUsecase
+	deleteOrg    *orgUC.DeleteOrgUsecase
 }
 
 func NewOrgHandler(
 	getOrg *orgUC.GetOrgUsecase,
 	listUserOrgs *orgUC.ListUserOrgsUsecase,
 	createOrg *orgUC.CreateOrgUsecase,
+	updateOrg *orgUC.UpdateOrgUsecase,
+	deleteOrg *orgUC.DeleteOrgUsecase,
 ) *OrgHandler {
 	return &OrgHandler{
 		getOrg:       getOrg,
 		listUserOrgs: listUserOrgs,
 		createOrg:    createOrg,
+		updateOrg:    updateOrg,
+		deleteOrg:    deleteOrg,
 	}
 }
 
@@ -44,9 +50,16 @@ type createOrgRequest struct {
 	Description string `json:"description"`
 }
 
+type updateOrgRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 func (h *OrgHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.MiddlewareFunc) {
 	g.POST("/orgs", h.CreateOrg, authMiddleware)
 	g.GET("/orgs/:org", h.GetOrg, middleware.OptionalAuth())
+	g.PATCH("/orgs/:org", h.UpdateOrg, authMiddleware)
+	g.DELETE("/orgs/:org", h.DeleteOrg, authMiddleware)
 	g.GET("/user/orgs", h.ListUserOrgs, authMiddleware)
 }
 
@@ -108,6 +121,75 @@ func (h *OrgHandler) ListUserOrgs(c echo.Context) error {
 		resp = append(resp, toOrgResponse(org))
 	}
 	return RespondGitHubOK(c, resp)
+}
+
+func (h *OrgHandler) UpdateOrg(c echo.Context) error {
+	callerID, err := middleware.GetUserUUID(c)
+	if err != nil {
+		return err
+	}
+
+	org, err := h.getOrg.Execute(c.Request().Context(), c.Param("org"))
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return RespondGitHubError(c, http.StatusNotFound, "Not Found", nil)
+		}
+		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
+	}
+
+	var req updateOrgRequest
+	if err := c.Bind(&req); err != nil {
+		return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", nil)
+	}
+
+	updated, err := h.updateOrg.Execute(c.Request().Context(), orgUC.UpdateOrgInput{
+		OrgID:       middleware.Int64ToUUID(org.ID),
+		CallerID:    callerID,
+		Name:        req.Name,
+		Description: req.Description,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrForbidden) {
+			return RespondGitHubError(c, http.StatusForbidden, "Forbidden", nil)
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			return RespondGitHubError(c, http.StatusNotFound, "Not Found", nil)
+		}
+		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
+	}
+
+	return RespondGitHubOK(c, toEntityOrgResponse(updated))
+}
+
+func (h *OrgHandler) DeleteOrg(c echo.Context) error {
+	callerID, err := middleware.GetUserUUID(c)
+	if err != nil {
+		return err
+	}
+
+	org, err := h.getOrg.Execute(c.Request().Context(), c.Param("org"))
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return RespondGitHubError(c, http.StatusNotFound, "Not Found", nil)
+		}
+		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
+	}
+
+	err = h.deleteOrg.Execute(c.Request().Context(), orgUC.DeleteOrgInput{
+		OrgID:    middleware.Int64ToUUID(org.ID),
+		CallerID: callerID,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrForbidden) {
+			return RespondGitHubError(c, http.StatusForbidden, "Forbidden", nil)
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			return RespondGitHubError(c, http.StatusNotFound, "Not Found", nil)
+		}
+		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
+	}
+
+	return c.NoContent(http.StatusNoContent)
 }
 
 func toOrgResponse(o *domain.Organization) orgResponse {
