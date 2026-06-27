@@ -18,6 +18,9 @@ type Config struct {
 	JWTSecret         string
 	RedisAddr         string
 	MinioEndpoint     string
+	GitDataRoot       string
+	SSHListenAddr     string
+	SSHHostKeyPath    string
 }
 
 func Load() Config {
@@ -37,6 +40,9 @@ func Load() Config {
 		JWTSecret:         os.Getenv("JWT_SECRET"),
 		RedisAddr:         os.Getenv("REDIS_ADDR"),
 		MinioEndpoint:     os.Getenv("MINIO_ENDPOINT"),
+		GitDataRoot:       getenv("GIT_DATA_ROOT", "./data/git"),
+		SSHListenAddr:     getenv("SSH_LISTEN_ADDR", ":2222"),
+		SSHHostKeyPath:    getenv("SSH_HOST_KEY_PATH", "./data/ssh_host_rsa_key"),
 	}
 }
 

@@ -2,17 +2,24 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"database/sql"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	gossh "github.com/gliderlabs/ssh"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
@@ -21,6 +28,7 @@ import (
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/handler"
 	"github.com/open-git/backend/internal/infrastructure/database"
+	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
 )
 
@@ -80,7 +88,23 @@ func main() {
 	e.GET("/readyz", readyzHandler(db))
 	e.GET("/version", versionHandler)
 
-	registerHandlers(e, cfg, sqlx.NewDb(db, cfg.DBType))
+	sqlxDB := sqlx.NewDb(db, cfg.DBType)
+	registerHandlers(e, cfg, sqlxDB)
+
+	hostKey, err := loadOrGenerateHostKey(cfg.SSHHostKeyPath)
+	if err != nil {
+		log.Fatalf("load ssh host key: %v", err)
+	}
+
+	sshKeyRepo := infrarepo.NewSSHKeyRepository(sqlxDB)
+	repoResolver := &gitSSHRepoResolver{gitRoot: cfg.GitDataRoot}
+	sshSrv := sshinfra.NewSSHServer(cfg.GitDataRoot, sshKeyRepo, repoResolver, hostKey)
+	go func() {
+		log.Printf("ssh server listening on %s", cfg.SSHListenAddr)
+		if err := sshSrv.Start(cfg.SSHListenAddr); err != nil && !errors.Is(err, gossh.ErrServerClosed) {
+			log.Fatalf("start ssh server: %v", err)
+		}
+	}()
 
 	go func() {
 		if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
@@ -94,9 +118,51 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if err := sshSrv.Close(); err != nil {
+		log.Printf("shutdown ssh server: %v", err)
+	}
 	if err := e.Shutdown(ctx); err != nil {
 		log.Fatalf("shutdown server: %v", err)
 	}
+}
+
+type gitSSHRepoResolver struct {
+	gitRoot string
+}
+
+func (r *gitSSHRepoResolver) Resolve(_ context.Context, ownerLogin, repoName string) (string, uuid.UUID, error) {
+	return filepath.Join(r.gitRoot, ownerLogin, repoName+".git"), uuid.Nil, nil
+}
+
+func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
+	if data, err := os.ReadFile(path); err == nil {
+		signer, err := gossh.ParsePrivateKey(data)
+		if err != nil {
+			return nil, fmt.Errorf("parse host key: %w", err)
+		}
+		return signer, nil
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		return nil, fmt.Errorf("generate host key: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("create host key directory: %w", err)
+	}
+
+	pemBytes := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	})
+	if err := os.WriteFile(path, pemBytes, 0o600); err != nil {
+		return nil, fmt.Errorf("write host key: %w", err)
+	}
+
+	return gossh.NewSignerFromKey(privateKey)
 }
 
 func corsAllowedOrigins() []string {
