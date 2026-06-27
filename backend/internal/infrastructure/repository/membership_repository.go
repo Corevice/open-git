@@ -16,6 +16,10 @@ func NewMembershipRepository(db *sqlx.DB) *MembershipRepository {
 }
 
 func (r *MembershipRepository) HasReadAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
+	if userID == uuid.Nil {
+		return false, nil
+	}
+
 	const query = `
 		SELECT EXISTS(
 			SELECT 1 FROM memberships
@@ -28,6 +32,15 @@ func (r *MembershipRepository) HasReadAccess(ctx context.Context, userID, organi
 		return false, err
 	}
 	return exists, nil
+}
+
+// HasReadAccessForRepository checks repository visibility before membership.
+// Public repositories are readable without org membership; private/internal require membership.
+func (r *MembershipRepository) HasReadAccessForRepository(ctx context.Context, userID uuid.UUID, visibility string, organizationID uuid.UUID) (bool, error) {
+	if visibility == "public" {
+		return true, nil
+	}
+	return r.HasReadAccess(ctx, userID, organizationID)
 }
 
 func (r *MembershipRepository) HasWriteAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {

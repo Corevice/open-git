@@ -4,16 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -28,6 +25,8 @@ import (
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/handler"
 	"github.com/open-git/backend/internal/infrastructure/database"
+	infragit "github.com/open-git/backend/internal/infrastructure/git"
+	infraoauth "github.com/open-git/backend/internal/infrastructure/oauth"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
 	appmw "github.com/open-git/backend/internal/middleware"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
@@ -35,7 +34,6 @@ import (
 	prUC "github.com/open-git/backend/internal/usecase/pr"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
 	repointer "github.com/open-git/backend/internal/repository"
-	"github.com/redis/go-redis/v9"
 )
 
 var (
@@ -94,7 +92,14 @@ func main() {
 	e.GET("/readyz", readyzHandler(db))
 	e.GET("/version", versionHandler)
 
-	registerHandlers(e, cfg, db)
+	cleanup := registerHandlers(e, cfg, db)
+	defer func() {
+		if cleanup != nil {
+			if err := cleanup(); err != nil {
+				log.Printf("cleanup: %v", err)
+			}
+		}
+	}()
 
 	go func() {
 		if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
@@ -235,7 +240,7 @@ func versionHandler(c echo.Context) error {
 	})
 }
 
-func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
+func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) func() error {
 	sqlxDB := sqlx.NewDb(db, cfg.DBType)
 
 	userRepo := infrarepo.NewUserRepository(sqlxDB)
@@ -248,8 +253,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
 	issuePATUC := authUC.NewIssuePATUsecase(tokenRepo)
 	revokePATUC := authUC.NewRevokePATUsecase(tokenRepo)
 
-	oauthCodes := newOAuthCodeStore(cfg)
-	oauthAuthorizeUC := authUC.NewOAuthAuthorizeUsecase(&noopOAuthAppRepo{}, oauthCodes)
+	oauthCodes, oauthCleanup := infraoauth.NewCodeStore(cfg.RedisAddr)
+	oauthAuthorizeUC := authUC.NewOAuthAuthorizeUsecase(infraoauth.NewEnvAppRepository(), oauthCodes)
 	oauthTokenUC := authUC.NewOAuthTokenUsecase(oauthCodes, issuePATUC)
 
 	createRepoUC := repoUC.NewCreateRepositoryUsecase(repoRepo)
@@ -257,16 +262,16 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
 
 	issueRepo := infrarepo.NewIssueRepository(sqlxDB)
 	auditLogRepo := infrarepo.NewAuditLogRepository(sqlxDB)
-	txManager := &sqlxTxManager{db: sqlxDB}
-	commentRepo := &sqlxCommentRepository{db: sqlxDB}
+	txManager := database.NewTxManager(sqlxDB)
+	commentRepo := infrarepo.NewCommentRepository(sqlxDB)
 
 	createIssueUC := issueUC.NewCreateIssueUsecase(issueRepo, auditLogRepo, txManager)
 	listIssuesUC := issueUC.NewListIssuesUsecase(issueRepo)
 	createCommentUC := issueUC.NewCreateCommentUsecase(issueRepo, commentRepo, auditLogRepo)
 
-	prRepo := &sqlxPullRequestRepository{db: sqlxDB}
-	branchProtectionRepo := &sqlxBranchProtectionRepository{db: sqlxDB}
-	gitBranchProtectionStore := &sqlxGitBranchProtectionStore{db: sqlxDB}
+	prRepo := infrarepo.NewPullRequestRepository(sqlxDB)
+	branchProtectionRepo := infrarepo.NewBranchProtectionRepository(sqlxDB)
+	gitBranchProtectionStore := infrarepo.NewGitBranchProtectionStore(sqlxDB)
 	gitService := &stubGitService{}
 	createPRUC := prUC.NewCreatePRUsecase(prRepo, auditLogRepo, gitService, txManager)
 	mergePRUC := prUC.NewMergePRUsecase(
@@ -328,6 +333,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
 	pullRequestHandler.RegisterRoutes(api, authMiddleware)
 	oauthHandler.RegisterRoutes(api, authMiddleware)
 	gitHTTPHandler.RegisterRoutes(e)
+
+	return oauthCleanup
 }
 
 type repoResolver struct {
@@ -344,391 +351,31 @@ func (r *repoResolver) Resolve(ctx context.Context, ownerLogin, repoName string)
 		return nil, apperror.ErrNotFound
 	}
 
-	diskPath, err := safeGitRepoPath(r.gitDataRoot, ownerLogin, repoName)
+	diskPath, err := infragit.SafeRepoPath(r.gitDataRoot, ownerLogin, repoName)
 	if err != nil {
 		return nil, err
+	}
+
+	ownerID, ok := uuidToInt64(repository.OwnerID)
+	if !ok {
+		return nil, apperror.ErrNotFound
 	}
 
 	return &handler.ResolvedGitRepository{
 		ID:             repository.ID,
 		OrganizationID: repository.OrganizationID,
-		OwnerID:        uuidToInt64(repository.OwnerID),
+		OwnerID:        ownerID,
 		Name:           repository.Name,
 		DiskPath:       diskPath,
 	}, nil
 }
 
-func safeGitRepoPath(root, ownerLogin, repoName string) (string, error) {
-	if ownerLogin == "" || repoName == "" {
-		return "", errors.New("invalid repository path")
-	}
-	if strings.Contains(ownerLogin, "..") || strings.Contains(repoName, "..") {
-		return "", errors.New("invalid repository path")
-	}
-	if strings.ContainsAny(ownerLogin, `/\`) || strings.ContainsAny(repoName, `/\`) {
-		return "", errors.New("invalid repository path")
-	}
-
-	rootAbs, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	diskPath := filepath.Join(rootAbs, ownerLogin, repoName+".git")
-	cleanPath := filepath.Clean(diskPath)
-	if cleanPath != rootAbs && !strings.HasPrefix(cleanPath, rootAbs+string(filepath.Separator)) {
-		return "", errors.New("invalid repository path")
-	}
-	return cleanPath, nil
-}
-
 type gitMembershipAdapter struct {
-	memberships repointer.IMembershipRepository
-}
-
-func (a *gitMembershipAdapter) HasReadAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error) {
-	return a.memberships.HasReadAccess(ctx, appmw.Int64ToUUID(userID), organizationID)
+	memberships *infrarepo.MembershipRepository
 }
 
 func (a *gitMembershipAdapter) HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error) {
 	return a.memberships.HasWriteAccess(ctx, appmw.Int64ToUUID(userID), organizationID)
-}
-
-type txContextKey struct{}
-
-type sqlxTxManager struct {
-	db *sqlx.DB
-}
-
-func (m *sqlxTxManager) RunInTransaction(ctx context.Context, fn func(context.Context) error) error {
-	tx, err := m.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	txCtx := context.WithValue(ctx, txContextKey{}, tx)
-	if err := fn(txCtx); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-type sqlxExtContext interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryRowxContext(ctx context.Context, query string, args ...any) *sqlx.Row
-	NamedExecContext(ctx context.Context, query string, arg any) (sql.Result, error)
-}
-
-func sqlxExecutor(ctx context.Context, db *sqlx.DB) sqlxExtContext {
-	if tx, ok := ctx.Value(txContextKey{}).(*sqlx.Tx); ok && tx != nil {
-		return tx
-	}
-	return db
-}
-
-func newOAuthCodeStore(cfg config.Config) authUC.OAuthCodeStore {
-	if cfg.RedisAddr != "" {
-		return &redisOAuthCodeStore{client: redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})}
-	}
-	return &memoryOAuthCodeStore{data: make(map[string]oauthCodeEntry)}
-}
-
-type oauthCodeEntry struct {
-	value   string
-	expires time.Time
-}
-
-type memoryOAuthCodeStore struct {
-	mu   sync.Mutex
-	data map[string]oauthCodeEntry
-}
-
-func (s *memoryOAuthCodeStore) Set(_ context.Context, key, value string, ttl time.Duration) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.data[key] = oauthCodeEntry{
-		value:   value,
-		expires: time.Now().Add(ttl),
-	}
-	return nil
-}
-
-func (s *memoryOAuthCodeStore) GetDel(_ context.Context, key string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry, ok := s.data[key]
-	if !ok {
-		return "", errors.New("oauth code not found")
-	}
-	delete(s.data, key)
-	if time.Now().After(entry.expires) {
-		return "", errors.New("oauth code expired")
-	}
-	return entry.value, nil
-}
-
-type redisOAuthCodeStore struct {
-	client *redis.Client
-}
-
-func (s *redisOAuthCodeStore) Set(ctx context.Context, key, value string, ttl time.Duration) error {
-	return s.client.Set(ctx, key, value, ttl).Err()
-}
-
-func (s *redisOAuthCodeStore) GetDel(ctx context.Context, key string) (string, error) {
-	value, err := s.client.GetDel(ctx, key).Result()
-	if errors.Is(err, redis.Nil) {
-		return "", errors.New("oauth code not found")
-	}
-	return value, err
-}
-
-type sqlxCommentRepository struct {
-	db *sqlx.DB
-}
-
-func (r *sqlxCommentRepository) Create(ctx context.Context, comment *entity.Comment) error {
-	const query = `
-		INSERT INTO comments (id, organization_id, issue_id, author_id, body, created_at)
-		SELECT $1, organization_id, $2, $3, $4, $5
-		FROM issues
-		WHERE id = $2
-	`
-	_, err := sqlxExecutor(ctx, r.db).ExecContext(
-		ctx,
-		query,
-		comment.ID,
-		comment.IssueID,
-		comment.AuthorID,
-		comment.Body,
-		time.Now().UTC(),
-	)
-	return err
-}
-
-type sqlxPullRequestRepository struct {
-	db *sqlx.DB
-}
-
-func (r *sqlxPullRequestRepository) Create(ctx context.Context, pr *entity.PullRequest) error {
-	const query = `
-		INSERT INTO pull_requests (
-			id, organization_id, repository_id, number, head_ref, base_ref, state, author_id, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`
-	authorID := pr.AuthorID
-	if authorID == uuid.Nil {
-		authorID = uuid.New()
-	}
-	_, err := sqlxExecutor(ctx, r.db).ExecContext(
-		ctx,
-		query,
-		pr.ID,
-		pr.OrganizationID,
-		pr.RepositoryID,
-		pr.Number,
-		pr.HeadRef,
-		pr.BaseRef,
-		pr.State,
-		authorID,
-		time.Now().UTC(),
-	)
-	return err
-}
-
-func (r *sqlxPullRequestRepository) GetByNumber(ctx context.Context, repoID uuid.UUID, number int) (*entity.PullRequest, error) {
-	const query = `
-		SELECT id, organization_id, repository_id, number, head_ref, base_ref, state, merged_at
-		FROM pull_requests
-		WHERE repository_id = $1 AND number = $2
-	`
-	row := sqlxExecutor(ctx, r.db).QueryRowxContext(ctx, query, repoID, number)
-
-	var pr entity.PullRequest
-	var mergedAt sql.NullTime
-	err := row.Scan(
-		&pr.ID,
-		&pr.OrganizationID,
-		&pr.RepositoryID,
-		&pr.Number,
-		&pr.HeadRef,
-		&pr.BaseRef,
-		&pr.State,
-		&mergedAt,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, apperror.ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if mergedAt.Valid {
-		t := mergedAt.Time
-		pr.MergedAt = &t
-	}
-	return &pr, nil
-}
-
-func (r *sqlxPullRequestRepository) ListByRepo(ctx context.Context, repoID uuid.UUID, state string, page, perPage int) ([]*entity.PullRequest, error) {
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 30
-	}
-	offset := (page - 1) * perPage
-
-	query := `
-		SELECT id, organization_id, repository_id, number, head_ref, base_ref, state, merged_at
-		FROM pull_requests
-		WHERE repository_id = $1
-	`
-	args := []any{repoID}
-	if state != "" {
-		query += " AND state = $2"
-		args = append(args, state)
-	}
-	query += " ORDER BY number DESC LIMIT $" + itoa(len(args)+1) + " OFFSET $" + itoa(len(args)+2)
-	args = append(args, perPage, offset)
-
-	rows, err := r.db.QueryxContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var pulls []*entity.PullRequest
-	for rows.Next() {
-		var pr entity.PullRequest
-		var mergedAt sql.NullTime
-		if err := rows.Scan(
-			&pr.ID,
-			&pr.OrganizationID,
-			&pr.RepositoryID,
-			&pr.Number,
-			&pr.HeadRef,
-			&pr.BaseRef,
-			&pr.State,
-			&mergedAt,
-		); err != nil {
-			return nil, err
-		}
-		if mergedAt.Valid {
-			t := mergedAt.Time
-			pr.MergedAt = &t
-		}
-		pulls = append(pulls, &pr)
-	}
-	return pulls, rows.Err()
-}
-
-func (r *sqlxPullRequestRepository) UpdateState(ctx context.Context, id uuid.UUID, state string) error {
-	const query = `UPDATE pull_requests SET state = $1 WHERE id = $2`
-	_, err := sqlxExecutor(ctx, r.db).ExecContext(ctx, query, state, id)
-	return err
-}
-
-func (r *sqlxPullRequestRepository) SetMerged(ctx context.Context, id uuid.UUID, mergedAt time.Time) error {
-	const query = `UPDATE pull_requests SET state = $1, merged_at = $2 WHERE id = $3`
-	_, err := sqlxExecutor(ctx, r.db).ExecContext(ctx, query, entity.PullRequestStateMerged, mergedAt, id)
-	return err
-}
-
-func (r *sqlxPullRequestRepository) Update(ctx context.Context, pr *entity.PullRequest) error {
-	const query = `
-		UPDATE pull_requests
-		SET state = $1, merged_at = $2, head_ref = $3, base_ref = $4
-		WHERE id = $5
-	`
-	var mergedAt any
-	if pr.MergedAt != nil {
-		mergedAt = *pr.MergedAt
-	}
-	_, err := sqlxExecutor(ctx, r.db).ExecContext(ctx, query, pr.State, mergedAt, pr.HeadRef, pr.BaseRef, pr.ID)
-	return err
-}
-
-func (r *sqlxPullRequestRepository) NextNumber(ctx context.Context, repoID uuid.UUID) (int, error) {
-	const query = `SELECT COALESCE(MAX(number), 0) + 1 FROM pull_requests WHERE repository_id = $1`
-	var next int
-	if err := sqlxExecutor(ctx, r.db).QueryRowxContext(ctx, query, repoID).Scan(&next); err != nil {
-		return 0, err
-	}
-	return next, nil
-}
-
-type sqlxBranchProtectionRepository struct {
-	db *sqlx.DB
-}
-
-func (r *sqlxBranchProtectionRepository) GetForRef(ctx context.Context, repoID uuid.UUID, ref string) (*entity.BranchProtection, error) {
-	const query = `
-		SELECT required_reviews, required_checks
-		FROM branch_protections
-		WHERE repository_id = $1 AND pattern = $2
-		LIMIT 1
-	`
-	var requiredReviews int
-	var requiredChecksRaw string
-	err := r.db.QueryRowxContext(ctx, query, repoID, ref).Scan(&requiredReviews, &requiredChecksRaw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, apperror.ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	var requiredChecks []string
-	if requiredChecksRaw != "" {
-		if err := json.Unmarshal([]byte(requiredChecksRaw), &requiredChecks); err != nil {
-			return nil, err
-		}
-	}
-
-	return &entity.BranchProtection{
-		RequiredReviews: requiredReviews,
-		RequiredChecks:  requiredChecks,
-	}, nil
-}
-
-type sqlxGitBranchProtectionStore struct {
-	db *sqlx.DB
-}
-
-func (s *sqlxGitBranchProtectionStore) IsBranchProtected(ctx context.Context, repositoryID uuid.UUID, branch string) (bool, error) {
-	const query = `
-		SELECT EXISTS(
-			SELECT 1 FROM branch_protections
-			WHERE repository_id = $1 AND pattern = $2
-		)
-	`
-	var exists bool
-	if err := s.db.QueryRowxContext(ctx, query, repositoryID, branch).Scan(&exists); err != nil {
-		return false, err
-	}
-	return exists, nil
-}
-
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	pos := len(buf)
-	for i > 0 {
-		pos--
-		buf[pos] = byte('0' + i%10)
-		i /= 10
-	}
-	return string(buf[pos:])
-}
-
-// Stub implementations for features not yet backed by infrastructure repositories.
-
-type noopOAuthAppRepo struct{}
-
-func (noopOAuthAppRepo) GetByClientID(_ context.Context, _ string) (*domain.OAuthApp, error) {
-	return nil, errors.New("not found")
 }
 
 type stubGitService struct{}
@@ -758,13 +405,13 @@ func (stubWorkflowRunRepo) ListByHeadSHA(_ context.Context, _ uuid.UUID, _ strin
 }
 
 // uuidToInt64 extracts the int64 user ID only when the UUID uses the
-// Int64ToUUID encoding (first 8 bytes zero). Full UUIDs return 0 to avoid
+// Int64ToUUID encoding (first 8 bytes zero). Full UUIDs return false to avoid
 // collision-based privilege escalation in permission checks.
-func uuidToInt64(id uuid.UUID) int64 {
+func uuidToInt64(id uuid.UUID) (int64, bool) {
 	for i := 0; i < 8; i++ {
 		if id[i] != 0 {
-			return 0
+			return 0, false
 		}
 	}
-	return int64(binary.BigEndian.Uint64(id[8:]))
+	return int64(binary.BigEndian.Uint64(id[8:])), true
 }
