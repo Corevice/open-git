@@ -349,7 +349,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	getOrgUC := orgUC.NewGetOrgUsecase(orgRepo)
 	listUserOrgsUC := orgUC.NewListUserOrgsUsecase(orgRepo)
-	orgHandler := handler.NewOrgHandler(getOrgUC, listUserOrgsUC)
+	entityOrgRepo := infrarepo.NewOrganizationRepository(sqlxDB)
+	createOrgUC := orgUC.NewCreateOrgUsecase(entityOrgRepo, membershipRepo)
+	orgHandler := handler.NewOrgHandler(getOrgUC, listUserOrgsUC, createOrgUC)
 
 	contentHandler := handler.NewContentHandler(repoGitResolver)
 

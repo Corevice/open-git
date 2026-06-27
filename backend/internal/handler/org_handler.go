@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/domain"
+	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
 	orgUC "github.com/open-git/backend/internal/usecase/org"
 )
@@ -14,28 +15,66 @@ import (
 type OrgHandler struct {
 	getOrg       *orgUC.GetOrgUsecase
 	listUserOrgs *orgUC.ListUserOrgsUsecase
+	createOrg    *orgUC.CreateOrgUsecase
 }
 
 func NewOrgHandler(
 	getOrg *orgUC.GetOrgUsecase,
 	listUserOrgs *orgUC.ListUserOrgsUsecase,
+	createOrg *orgUC.CreateOrgUsecase,
 ) *OrgHandler {
 	return &OrgHandler{
 		getOrg:       getOrg,
 		listUserOrgs: listUserOrgs,
+		createOrg:    createOrg,
 	}
 }
 
 type orgResponse struct {
-	ID    int64  `json:"id"`
-	Login string `json:"login"`
-	Name  string `json:"name"`
-	Type  string `json:"type"`
+	ID          int64  `json:"id"`
+	Login       string `json:"login"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+}
+
+type createOrgRequest struct {
+	Login       string `json:"login"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 func (h *OrgHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.MiddlewareFunc) {
+	g.POST("/orgs", h.CreateOrg, authMiddleware)
 	g.GET("/orgs/:org", h.GetOrg, middleware.OptionalAuth())
 	g.GET("/user/orgs", h.ListUserOrgs, authMiddleware)
+}
+
+func (h *OrgHandler) CreateOrg(c echo.Context) error {
+	creatorID, err := middleware.GetUserUUID(c)
+	if err != nil {
+		return err
+	}
+
+	var req createOrgRequest
+	if err := c.Bind(&req); err != nil {
+		return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", nil)
+	}
+
+	org, err := h.createOrg.Execute(c.Request().Context(), orgUC.CreateOrgInput{
+		CreatorID:   creatorID,
+		Login:       req.Login,
+		Name:        req.Name,
+		Description: req.Description,
+	})
+	if err != nil {
+		if errors.Is(err, orgUC.ErrDuplicateLogin) || errors.Is(err, orgUC.ErrReservedLogin) {
+			return RespondGitHubError(c, http.StatusUnprocessableEntity, err.Error(), nil)
+		}
+		return RespondGitHubError(c, http.StatusUnprocessableEntity, err.Error(), nil)
+	}
+
+	return c.JSON(http.StatusCreated, toEntityOrgResponse(org))
 }
 
 func (h *OrgHandler) GetOrg(c echo.Context) error {
@@ -77,5 +116,15 @@ func toOrgResponse(o *domain.Organization) orgResponse {
 		Login: o.Login,
 		Name:  o.Name,
 		Type:  "Organization",
+	}
+}
+
+func toEntityOrgResponse(o *entity.Organization) orgResponse {
+	return orgResponse{
+		ID:          middleware.UUIDToInt64(o.ID),
+		Login:       o.Login,
+		Name:        o.Name,
+		Description: o.Description,
+		Type:        "Organization",
 	}
 }
