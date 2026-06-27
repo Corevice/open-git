@@ -27,6 +27,7 @@ import (
 	"github.com/open-git/backend/internal/config"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/handler"
+	appmiddleware "github.com/open-git/backend/internal/middleware"
 	"github.com/open-git/backend/internal/infrastructure/database"
 	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
@@ -327,4 +328,18 @@ func registerHandlers(e *echo.Echo, _ config.Config, sqlxDB *sqlx.DB) {
 	pullRequestHandler.RegisterRoutes(api, authMiddleware)
 	oauthHandler.RegisterRoutes(api, authMiddleware)
 	gitHTTPHandler.RegisterRoutes(e)
+
+	v3 := e.Group("/api/v3")
+	v3.Use(appmiddleware.GitHubCompatHeaders())
+	v3.Use(appmiddleware.RateLimitMiddleware(5000))
+
+	repositoryHandler.RegisterRoutes(v3, authMiddleware)
+	contentHandler.RegisterRoutes(v3)
+	issueHandler.RegisterRoutes(v3, authMiddleware)
+	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
+
+	v3Tokens := v3.Group("/user/tokens", authMiddleware)
+	v3Tokens.GET("", tokenHandler.List)
+	v3Tokens.POST("", tokenHandler.Create)
+	v3Tokens.DELETE("/:id", tokenHandler.Revoke)
 }
