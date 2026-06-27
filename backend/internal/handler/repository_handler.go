@@ -4,9 +4,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/open-git/backend/internal/domain"
+	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
@@ -50,11 +51,11 @@ type updateVisibilityRequest struct {
 
 type repositoryOwnerResponse struct {
 	Login string `json:"login"`
-	ID    int64  `json:"id"`
+	ID    string `json:"id"`
 }
 
 type repositoryResponse struct {
-	ID            int64                   `json:"id"`
+	ID            string                  `json:"id"`
 	Name          string                  `json:"name"`
 	FullName      string                  `json:"full_name"`
 	Private       bool                    `json:"private"`
@@ -128,9 +129,9 @@ func (h *RepositoryHandler) UpdateVisibility(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid request"})
 	}
 
-	visibility := domain.VisibilityPublic
+	visibility := entity.VisibilityPublic
 	if *req.Private {
-		visibility = domain.VisibilityPrivate
+		visibility = entity.VisibilityPrivate
 	}
 
 	if err := h.repos.UpdateVisibility(c.Request().Context(), repository.ID, visibility); err != nil {
@@ -159,7 +160,7 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID int64) (*domain.Repository, error) {
+func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID uuid.UUID) (*entity.Repository, error) {
 	repository, err := h.get.Execute(c.Request().Context(), repoUC.GetRepositoryInput{
 		RequestUserID: userID,
 		OwnerLogin:    c.Param("owner"),
@@ -177,21 +178,18 @@ func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID int64)
 	return repository, nil
 }
 
-func toRepositoryResponse(r *domain.Repository) repositoryResponse {
-	ownerLogin := r.OwnerLogin
-	if ownerLogin == "" {
-		ownerLogin = "unknown"
-	}
+func toRepositoryResponse(r *entity.Repository) repositoryResponse {
+	ownerLogin := "unknown"
 	return repositoryResponse{
-		ID:            r.ID,
+		ID:            r.ID.String(),
 		Name:          r.Name,
 		FullName:      ownerLogin + "/" + r.Name,
-		Private:       r.Visibility == domain.VisibilityPrivate,
-		Description:   r.Description,
+		Private:       r.Visibility == entity.VisibilityPrivate,
+		Description:   "",
 		DefaultBranch: r.DefaultBranch,
 		Owner: repositoryOwnerResponse{
 			Login: ownerLogin,
-			ID:    r.OwnerID,
+			ID:    r.OwnerID.String(),
 		},
 	}
 }
