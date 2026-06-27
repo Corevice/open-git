@@ -1,6 +1,7 @@
+import DOMPurify from "isomorphic-dompurify";
 import { marked } from "marked";
-import DOMPurify from "dompurify";
 
 export function renderMarkdown(src: string): string {
-  return DOMPurify.sanitize(marked.parse(src) as string);
+  const html = marked.parse(src, { async: false }) as string;
+  return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
 }

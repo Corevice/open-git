@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import {
   Select,
   SelectContent,
@@ -28,5 +29,67 @@ export default function BranchSelector({ branches, currentBranch, onChange }: Pr
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+function branchNamesSet(branches: { name: string }[]): Set<string> {
+  return new Set(branches.map((branch) => branch.name));
+}
+
+export function RepoRefSelector({
+  branches,
+  currentBranch,
+}: {
+  branches: { name: string }[];
+  currentBranch: string;
+}) {
+  const router = useRouter();
+  const allowed = branchNamesSet(branches);
+
+  return (
+    <BranchSelector
+      branches={branches}
+      currentBranch={currentBranch}
+      onChange={(name) => {
+        if (!allowed.has(name)) return;
+        router.push(`?ref=${encodeURIComponent(name)}`);
+      }}
+    />
+  );
+}
+
+export function TreeBranchSelector({
+  owner,
+  repo,
+  currentPath,
+  branches,
+  currentBranch,
+}: {
+  owner: string;
+  repo: string;
+  currentPath: string;
+  branches: { name: string }[];
+  currentBranch: string;
+}) {
+  const router = useRouter();
+  const allowed = branchNamesSet(branches);
+
+  return (
+    <BranchSelector
+      branches={branches}
+      currentBranch={currentBranch}
+      onChange={(name) => {
+        if (!allowed.has(name)) return;
+        if (currentPath) {
+          const encodedPath = currentPath
+            .split("/")
+            .map(encodeURIComponent)
+            .join("/");
+          router.push(`/${owner}/${repo}/tree/${encodeURIComponent(name)}/${encodedPath}`);
+          return;
+        }
+        router.push(`/${owner}/${repo}/tree/${encodeURIComponent(name)}`);
+      }}
+    />
   );
 }
