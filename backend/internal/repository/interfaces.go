@@ -23,16 +23,17 @@ type IAccessTokenRepository interface {
 }
 
 type IRepositoryRepository interface {
-	Create(ctx context.Context, repo *domain.Repository) error
-	GetByOwnerAndName(ctx context.Context, ownerID int64, name string) (*domain.Repository, error)
-	NextNumber(ctx context.Context, ownerID int64) (int64, error)
-	ListByOrg(ctx context.Context, organizationID int64) ([]*domain.Repository, error)
-	UpdateVisibility(ctx context.Context, id int64, visibility domain.Visibility) error
-	Delete(ctx context.Context, id int64) error
+	Create(ctx context.Context, repo *entity.Repository) error
+	GetByOwnerAndName(ctx context.Context, ownerID uuid.UUID, name string) (*entity.Repository, error)
+	GetByOwnerLoginAndName(ctx context.Context, ownerLogin, name string) (*entity.Repository, error)
+	ListByOrg(ctx context.Context, organizationID uuid.UUID, page, perPage int) ([]*entity.Repository, error)
+	UpdateVisibility(ctx context.Context, id uuid.UUID, visibility string) error
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 type IMembershipRepository interface {
-	HasReadAccess(ctx context.Context, userID, organizationID int64) (bool, error)
+	HasReadAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error)
+	HasWriteAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error)
 }
 
 type IOAuthAppRepository interface {
