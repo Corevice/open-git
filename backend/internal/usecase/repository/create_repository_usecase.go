@@ -47,6 +47,32 @@ type ownerLoginResolver interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*entity.User, error)
 }
 
+type createRepositoryUsecaseOptions struct {
+	gitDataRoot string
+	gitInit     GitInitService
+	users       ownerLoginResolver
+}
+
+type CreateRepositoryUsecaseOption func(*createRepositoryUsecaseOptions)
+
+func WithGitDataRoot(gitDataRoot string) CreateRepositoryUsecaseOption {
+	return func(o *createRepositoryUsecaseOptions) {
+		o.gitDataRoot = gitDataRoot
+	}
+}
+
+func WithGitInitService(gitInit GitInitService) CreateRepositoryUsecaseOption {
+	return func(o *createRepositoryUsecaseOptions) {
+		o.gitInit = gitInit
+	}
+}
+
+func WithOwnerLoginResolver(users ownerLoginResolver) CreateRepositoryUsecaseOption {
+	return func(o *createRepositoryUsecaseOptions) {
+		o.users = users
+	}
+}
+
 type CreateRepositoryUsecase struct {
 	repos       repo.IRepositoryRepository
 	gitDataRoot string
@@ -54,15 +80,20 @@ type CreateRepositoryUsecase struct {
 	users       ownerLoginResolver
 }
 
-func NewCreateRepositoryUsecase(repos repo.IRepositoryRepository, gitDataRoot string, gitInit GitInitService, users ownerLoginResolver) *CreateRepositoryUsecase {
+func NewCreateRepositoryUsecase(repos repo.IRepositoryRepository, opts ...CreateRepositoryUsecaseOption) *CreateRepositoryUsecase {
+	cfg := &createRepositoryUsecaseOptions{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	gitInit := cfg.gitInit
 	if gitInit == nil {
 		gitInit = gitInitFunc(gitinfra.AutoInitRepository)
 	}
 	return &CreateRepositoryUsecase{
 		repos:       repos,
-		gitDataRoot: gitDataRoot,
+		gitDataRoot: cfg.gitDataRoot,
 		gitInit:     gitInit,
-		users:       users,
+		users:       cfg.users,
 	}
 }
 

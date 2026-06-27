@@ -107,7 +107,7 @@ func TestDuplicateName(t *testing.T) {
 			repoKey(testOwnerID, "existing"): {OwnerID: testOwnerID, Name: "existing"},
 		},
 	}
-	uc := repository.NewCreateRepositoryUsecase(repos, "/data/git", nil, nil)
+	uc := repository.NewCreateRepositoryUsecase(repos, repository.WithGitDataRoot("/data/git"))
 
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
@@ -121,7 +121,7 @@ func TestDuplicateName(t *testing.T) {
 
 func TestInvalidName(t *testing.T) {
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
-	uc := repository.NewCreateRepositoryUsecase(repos, "/data/git", nil, nil)
+	uc := repository.NewCreateRepositoryUsecase(repos, repository.WithGitDataRoot("/data/git"))
 
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
@@ -135,7 +135,7 @@ func TestInvalidName(t *testing.T) {
 
 func TestValidCreate(t *testing.T) {
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
-	uc := repository.NewCreateRepositoryUsecase(repos, "/data/git", nil, nil)
+	uc := repository.NewCreateRepositoryUsecase(repos, repository.WithGitDataRoot("/data/git"))
 
 	repo, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
@@ -170,7 +170,7 @@ func TestValidCreate(t *testing.T) {
 func TestAutoInitCallsGitInitService(t *testing.T) {
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
 	gitInit := &mockGitInitService{}
-	uc := repository.NewCreateRepositoryUsecase(repos, "/data/git", gitInit, nil)
+	uc := repository.NewCreateRepositoryUsecase(repos, repository.WithGitDataRoot("/data/git"), repository.WithGitInitService(gitInit))
 
 	repo, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:           testOwnerID,
@@ -207,7 +207,7 @@ func TestAutoInitCallsGitInitService(t *testing.T) {
 func TestAutoInitFalseDoesNotCallGitInitService(t *testing.T) {
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
 	gitInit := &mockGitInitService{}
-	uc := repository.NewCreateRepositoryUsecase(repos, "/data/git", gitInit, nil)
+	uc := repository.NewCreateRepositoryUsecase(repos, repository.WithGitDataRoot("/data/git"), repository.WithGitInitService(gitInit))
 
 	repo, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,

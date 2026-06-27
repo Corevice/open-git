@@ -80,8 +80,13 @@ func AutoInitRepository(bareRepoPath string, opts AutoInitOpts) error {
 		return fmt.Errorf("create initial commit: %w", err)
 	}
 
+	absTmpDir, err := filepath.Abs(tmpDir)
+	if err != nil {
+		return fmt.Errorf("resolve temp dir: %w", err)
+	}
+
 	if _, err := gogit.PlainClone(bareRepoPath, true, &gogit.CloneOptions{
-		URL:           tmpDir,
+		URL:           "file://" + filepath.ToSlash(absTmpDir),
 		ReferenceName: plumbing.NewBranchReferenceName("main"),
 		SingleBranch:  true,
 	}); err != nil {
