@@ -124,6 +124,44 @@ func TestUserRepository_DuplicateLoginConflict(t *testing.T) {
 	}
 }
 
+func TestUserRepository_Update(t *testing.T) {
+	db := newUserTestDB(t)
+	repo := repository.NewUserRepository(db)
+
+	user := &entity.User{
+		Login:        "profile-user",
+		Email:        "profile@example.com",
+		PasswordHash: "hashed",
+	}
+	if err := repo.Create(context.Background(), user); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	user.Name = "Profile Name"
+	user.Bio = "A short bio"
+	user.AvatarURL = "https://example.com/avatar.png"
+	if err := repo.Update(context.Background(), user); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	got, err := repo.GetByID(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Name != "Profile Name" {
+		t.Fatalf("Name: got %q, want %q", got.Name, "Profile Name")
+	}
+	if got.Bio != "A short bio" {
+		t.Fatalf("Bio: got %q, want %q", got.Bio, "A short bio")
+	}
+	if got.AvatarURL != "https://example.com/avatar.png" {
+		t.Fatalf("AvatarURL: got %q, want %q", got.AvatarURL, "https://example.com/avatar.png")
+	}
+	if got.UpdatedAt.IsZero() {
+		t.Fatal("expected UpdatedAt to be set")
+	}
+}
+
 func TestUserRepository_GetByIDNotFound(t *testing.T) {
 	db := newUserTestDB(t)
 	repo := repository.NewUserRepository(db)
