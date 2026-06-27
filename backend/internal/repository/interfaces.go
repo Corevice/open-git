@@ -31,6 +31,7 @@ type IRepositoryRepository interface {
 	ListByOwner(ctx context.Context, ownerID uuid.UUID, page, perPage int) ([]*entity.Repository, error)
 	CountByOwner(ctx context.Context, ownerID uuid.UUID) (int, error)
 	UpdateVisibility(ctx context.Context, id uuid.UUID, visibility string) error
+	UpdateName(ctx context.Context, id uuid.UUID, newName string) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
