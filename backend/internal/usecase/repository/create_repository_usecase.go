@@ -13,6 +13,7 @@ import (
 	"github.com/open-git/backend/internal/domain/entity"
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	repo "github.com/open-git/backend/internal/repository"
+	"github.com/open-git/backend/internal/validator"
 )
 
 var (
@@ -59,6 +60,9 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 	if err != nil {
 		return nil, err
 	}
+	if err := validator.ValidateLogin(ownerLogin); err != nil {
+		return nil, fmt.Errorf("resolve owner login: %w", err)
+	}
 
 	if _, err := u.repos.GetByOwnerAndName(ctx, input.OwnerID, input.Name); err == nil {
 		return nil, ErrDuplicateName
@@ -84,11 +88,11 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 
 	diskPath := filepath.Join(u.gitRoot, ownerLogin, repository.Name+".git")
 	if err := infragit.InitBare(diskPath); err != nil {
-		return nil, u.joinWithRollback(err, "init bare repository", u.rollbackCreate(ctx, repository.ID, diskPath))
+		return nil, u.joinWithRollback(err, "init bare repository", u.rollbackCreate(repository.ID, ownerLogin, repository.Name, diskPath))
 	}
 
 	if err := u.repos.UpdateDiskPath(ctx, repository.ID, diskPath); err != nil {
-		return nil, u.joinWithRollback(err, "update disk path", u.rollbackCreate(ctx, repository.ID, diskPath))
+		return nil, u.joinWithRollback(err, "update disk path", u.rollbackCreate(repository.ID, ownerLogin, repository.Name, diskPath))
 	}
 
 	repository.DiskPath = diskPath
@@ -113,9 +117,20 @@ func (u *CreateRepositoryUsecase) resolveOwnerLogin(ctx context.Context, input C
 	return user.Login, nil
 }
 
-func (u *CreateRepositoryUsecase) rollbackCreate(ctx context.Context, repositoryID uuid.UUID, diskPath string) error {
+func (u *CreateRepositoryUsecase) expectedDiskPath(ownerLogin, repoName string) string {
+	if validator.ValidateLogin(ownerLogin) != nil || !repoNameRegex.MatchString(repoName) {
+		return ""
+	}
+	return filepath.Join(u.gitRoot, ownerLogin, repoName+".git")
+}
+
+func (u *CreateRepositoryUsecase) rollbackCreate(repositoryID uuid.UUID, ownerLogin, repoName, diskPath string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	var rollbackErr error
-	if diskPath != "" {
+	expectedPath := u.expectedDiskPath(ownerLogin, repoName)
+	if diskPath != "" && expectedPath != "" && filepath.Clean(diskPath) == filepath.Clean(expectedPath) {
 		if err := os.RemoveAll(diskPath); err != nil {
 			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove bare repository: %w", err))
 		}

@@ -198,3 +198,37 @@ func TestCreateRepositoryInitsBareRepo(t *testing.T) {
 		t.Fatalf("expected valid bare git repo: %v", err)
 	}
 }
+
+func TestCreateRepositoryRollbackOnInitBareFailure(t *testing.T) {
+	gitRoot := t.TempDir()
+	ownerLogin := "alice"
+	blockedPath := filepath.Join(gitRoot, ownerLogin, "my-repo.git")
+	if err := os.MkdirAll(filepath.Dir(blockedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blockedPath, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
+	uc := repository.NewCreateRepositoryUsecase(repos, &mockUserRepo{}, gitRoot)
+
+	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
+		OwnerID:        testOwnerID,
+		OwnerLogin:     ownerLogin,
+		OrganizationID: testOrgID,
+		Name:           "my-repo",
+	})
+	if err == nil {
+		t.Fatal("expected error when bare repo init fails")
+	}
+	if len(repos.created) != 1 {
+		t.Fatalf("expected one created repository before rollback, got %d", len(repos.created))
+	}
+	if len(repos.deleted) != 1 {
+		t.Fatalf("expected DB rollback delete, got %d deletes", len(repos.deleted))
+	}
+	if repos.deleted[0] != repos.created[0].ID {
+		t.Fatalf("expected rollback to delete created repository id %s, got %s", repos.created[0].ID, repos.deleted[0])
+	}
+}

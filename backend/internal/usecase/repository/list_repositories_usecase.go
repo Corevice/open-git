@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
@@ -20,6 +21,19 @@ const (
 )
 
 var ErrOwnerNotFound = errors.New("owner not found")
+
+func NormalizeRepositoryPagination(page, perPage int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 30
+	}
+	if perPage > MaxRepositoryPerPage {
+		perPage = MaxRepositoryPerPage
+	}
+	return page, perPage
+}
 
 type ListRepositoriesInput struct {
 	RequestUserID  uuid.UUID
@@ -57,30 +71,17 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 
 	orgID := input.OrganizationID
 	if orgID == uuid.Nil {
-		if requestUserID, ok := userIDFromUUID(input.RequestUserID); ok && requestUserID == owner.ID {
-			orgID = input.RequestUserID
-		} else {
-			orgID = uuidFromInt64(owner.ID)
-		}
+		orgID = uuidFromInt64(owner.ID)
 	}
 
-	page := input.Page
-	if page < 1 {
-		page = 1
-	}
-	perPage := input.PerPage
-	if perPage < 1 {
-		perPage = 30
-	}
-	if perPage > MaxRepositoryPerPage {
-		perPage = MaxRepositoryPerPage
-	}
+	page, perPage := NormalizeRepositoryPagination(input.Page, input.PerPage)
 
 	targetStart := (page - 1) * perPage
 	targetEnd := targetStart + perPage
 	pageRepos := make([]*entity.Repository, 0, perPage)
 	total := 0
 	dbPage := 1
+	membershipAccess := make(map[uuid.UUID]bool)
 
 	for dbPage <= (maxRepositoriesPerOrg+listRepositoriesBatch-1)/listRepositoriesBatch {
 		batch, err := u.repos.ListByOrg(ctx, orgID, dbPage, listRepositoriesBatch)
@@ -92,7 +93,7 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 		}
 
 		for _, r := range batch {
-			if !u.canViewRepository(ctx, input.RequestUserID, r) {
+			if !u.canViewRepository(ctx, input.RequestUserID, r, membershipAccess) {
 				continue
 			}
 			if total >= targetStart && total < targetEnd {
@@ -151,15 +152,28 @@ func (u *ListRepositoriesUsecase) resolveOwner(ctx context.Context, input ListRe
 	return owner, owner.Login, nil
 }
 
-func (u *ListRepositoriesUsecase) canViewRepository(ctx context.Context, requestUserID uuid.UUID, r *entity.Repository) bool {
+func (u *ListRepositoriesUsecase) canViewRepository(
+	ctx context.Context,
+	requestUserID uuid.UUID,
+	r *entity.Repository,
+	membershipAccess map[uuid.UUID]bool,
+) bool {
 	if r.Visibility != entity.VisibilityPrivate {
 		return true
 	}
 	if requestUserID == uuid.Nil {
 		return false
 	}
+	if requestUserID == r.OwnerID {
+		return true
+	}
+	if allowed, ok := membershipAccess[r.OrganizationID]; ok {
+		return allowed
+	}
 	hasAccess, err := u.memberships.HasReadAccess(ctx, requestUserID, r.OrganizationID)
-	return err == nil && hasAccess
+	allowed := err == nil && hasAccess
+	membershipAccess[r.OrganizationID] = allowed
+	return allowed
 }
 
 func isUserUUID(id uuid.UUID) bool {
@@ -187,10 +201,5 @@ func int64FromUUID(id uuid.UUID) int64 {
 }
 
 func uuidFromInt64(id int64) uuid.UUID {
-	if id <= 0 {
-		return uuid.Nil
-	}
-	var u uuid.UUID
-	binary.BigEndian.PutUint64(u[userUUIDPrefixLen:], uint64(id))
-	return u
+	return middleware.Int64ToUUID(id)
 }

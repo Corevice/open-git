@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
@@ -13,14 +15,15 @@ import (
 	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
+	"github.com/open-git/backend/internal/validator"
 )
 
 type RepositoryHandler struct {
-	create    *repoUC.CreateRepositoryUsecase
-	list      *repoUC.ListRepositoriesUsecase
-	get       *repoUC.GetRepositoryUsecase
-	repos     repo.IRepositoryRepository
-	users     repo.IUserRepository
+	create  *repoUC.CreateRepositoryUsecase
+	list    *repoUC.ListRepositoriesUsecase
+	get     *repoUC.GetRepositoryUsecase
+	repos   repo.IRepositoryRepository
+	users   repo.IUserRepository
 	gitRoot string
 }
 
@@ -115,7 +118,7 @@ func (h *RepositoryHandler) ListRepositories(c echo.Context) error {
 		return err
 	}
 
-	page, perPage := normalizeRepositoryPagination(c)
+	page, perPage := parseRepositoryPagination(c)
 
 	result, err := h.list.Execute(c.Request().Context(), repoUC.ListRepositoriesInput{
 		RequestUserID:  userID,
@@ -139,8 +142,11 @@ func (h *RepositoryHandler) ListRepositories(c echo.Context) error {
 func (h *RepositoryHandler) ListOwnerRepos(c echo.Context) error {
 	requestUserID := middleware.UserUUIDFromContext(c)
 	ownerLogin := c.Param("owner")
+	if err := validator.ValidateLogin(ownerLogin); err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+	}
 
-	page, perPage := normalizeRepositoryPagination(c)
+	page, perPage := parseRepositoryPagination(c)
 
 	result, err := h.list.Execute(c.Request().Context(), repoUC.ListRepositoriesInput{
 		RequestUserID: requestUserID,
@@ -219,16 +225,14 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 	}
 
 	diskPath := repository.DiskPath
-	ownerLogin := c.Param("owner")
-
-	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
-	}
-
-	if diskPath != "" && isSafeRepositoryDiskPath(h.gitRoot, ownerLogin, repository.Name, diskPath) {
+	if diskPath != "" && isSafeRepositoryDiskPath(h.gitRoot, diskPath, repository.Name) {
 		if err := os.RemoveAll(diskPath); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository files"})
 		}
+	}
+
+	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -252,28 +256,27 @@ func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID uuid.U
 	return repository, nil
 }
 
-func normalizeRepositoryPagination(c echo.Context) (int, int) {
+func parseRepositoryPagination(c echo.Context) (int, int) {
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 30
-	}
-	if perPage > repoUC.MaxRepositoryPerPage {
-		perPage = repoUC.MaxRepositoryPerPage
-	}
-	return page, perPage
+	return repoUC.NormalizeRepositoryPagination(page, perPage)
 }
 
-func isSafeRepositoryDiskPath(gitRoot, ownerLogin, repoName, diskPath string) bool {
-	if diskPath == "" {
+func isSafeRepositoryDiskPath(gitRoot, diskPath, repoName string) bool {
+	if diskPath == "" || repoName == "" {
 		return false
 	}
 
-	expectedPath := filepath.Join(filepath.Clean(gitRoot), ownerLogin, repoName+".git")
-	return filepath.Clean(diskPath) == filepath.Clean(expectedPath)
+	cleanRoot := filepath.Clean(gitRoot)
+	cleanPath := filepath.Clean(diskPath)
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil {
+		return false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return false
+	}
+	return filepath.Base(cleanPath) == repoName+".git"
 }
 
 func (h *RepositoryHandler) resolveAuthenticatedOwner(c echo.Context) (uuid.UUID, string, error) {
@@ -284,7 +287,7 @@ func (h *RepositoryHandler) resolveAuthenticatedOwner(c echo.Context) (uuid.UUID
 
 	userID := middleware.Int64ToUUID(userIDInt)
 	if h.users == nil {
-		return userID, "", nil
+		return uuid.Nil, "", echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to resolve owner"})
 	}
 
 	user, err := h.users.GetByID(c.Request().Context(), userIDInt)
