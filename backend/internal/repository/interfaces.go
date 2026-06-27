@@ -40,6 +40,13 @@ type IOAuthAppRepository interface {
 	GetByClientID(ctx context.Context, clientID string) (*domain.OAuthApp, error)
 }
 
+type IOrganizationRepository interface {
+	// GetByLogin returns nil, nil when the organization is not found.
+	GetByLogin(ctx context.Context, login string) (*domain.Organization, error)
+	ListByUserID(ctx context.Context, userID int64) ([]*domain.Organization, error)
+	GetMemberRole(ctx context.Context, orgID, userID int64) (string, error)
+}
+
 type ISSHKeyStore interface {
 	FindByFingerprint(ctx context.Context, fingerprint string) (*entity.SSHKey, error)
 	ListByUserID(ctx context.Context, userID uuid.UUID) ([]*entity.SSHKey, error)
