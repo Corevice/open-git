@@ -365,13 +365,13 @@ func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID uuid.U
 }
 
 func toRepositoryResponse(r *entity.Repository) repositoryResponse {
-	ownerLogin := "unknown"
+	ownerLogin := r.OwnerLogin
 	return repositoryResponse{
 		ID:            r.ID.String(),
 		Name:          r.Name,
 		FullName:      ownerLogin + "/" + r.Name,
 		Private:       r.Visibility == entity.VisibilityPrivate,
-		Description:   "",
+		Description:   r.Description,
 		DefaultBranch: r.DefaultBranch,
 		Owner: repositoryOwnerResponse{
 			Login: ownerLogin,
