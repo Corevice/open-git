@@ -43,7 +43,7 @@ CREATE TABLE repositories (
     default_branch TEXT NOT NULL DEFAULT 'main',
     description TEXT NOT NULL DEFAULT '',
     disk_path TEXT NOT NULL DEFAULT '',
-    is_empty INTEGER NOT NULL DEFAULT 1,
+    is_empty INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(owner_id, name)
 );
@@ -156,15 +156,31 @@ func TestListByOrgPagination(t *testing.T) {
 }
 
 func TestGetByOwnerLoginAndName_NotFound(t *testing.T) {
-	db := newRepositoryTestDB(t)
-	repo := repository.NewRepositoryRepository(db)
+	mockDB, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer mockDB.Close()
 
-	found, err := repo.GetByOwnerLoginAndName(context.Background(), "missing-user", "missing-repo")
+	sqlxDB := sqlx.NewDb(mockDB, "postgres")
+	repo := repository.NewRepositoryRepository(sqlxDB)
+
+	mock.ExpectQuery(`JOIN\s+users\s+u\s+ON\s+r\.owner_id\s*=\s*u\.id`).
+		WithArgs("missing-user", "missing-repo").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "organization_id", "owner_id", "name", "visibility", "default_branch", "description", "is_empty", "created_at",
+		}))
+
+	found, err := repo.GetByOwnerLoginAndName(context.Background(), "missing-user", "missing-repo", uuid.Nil)
 	if err != nil {
 		t.Fatalf("GetByOwnerLoginAndName: %v", err)
 	}
 	if found != nil {
 		t.Fatalf("expected nil repository, got %+v", found)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations not met: %v", err)
 	}
 }
 
@@ -177,7 +193,7 @@ func TestGetByOwnerLoginAndName_Found(t *testing.T) {
 	repoID := uuid.New()
 	seedRepositoryFixtures(t, db, orgID, ownerID, repoID, "alice", "demo")
 
-	found, err := repo.GetByOwnerLoginAndName(context.Background(), "alice", "demo")
+	found, err := repo.GetByOwnerLoginAndName(context.Background(), "alice", "demo", ownerID)
 	if err != nil {
 		t.Fatalf("GetByOwnerLoginAndName: %v", err)
 	}
@@ -195,6 +211,39 @@ func TestGetByOwnerLoginAndName_Found(t *testing.T) {
 	}
 	if found.DiskPath != "" {
 		t.Fatalf("expected disk_path to be omitted, got %q", found.DiskPath)
+	}
+}
+
+func TestGetByOwnerLoginAndName_PrivateNoAuth(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	repo := repository.NewRepositoryRepository(db)
+
+	orgID := uuid.New()
+	ownerID := uuid.New()
+	repoID := uuid.New()
+	seedRepositoryFixtures(t, db, orgID, ownerID, repoID, "alice", "demo")
+
+	found, err := repo.GetByOwnerLoginAndName(context.Background(), "alice", "demo", uuid.Nil)
+	if err != nil {
+		t.Fatalf("GetByOwnerLoginAndName: %v", err)
+	}
+	if found != nil {
+		t.Fatal("expected nil for private repository without authorized viewer")
+	}
+}
+
+func TestUpdateDiskPath_InvalidPath(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	repo := repository.NewRepositoryRepository(db)
+
+	orgID := uuid.New()
+	ownerID := uuid.New()
+	repoID := uuid.New()
+	seedRepositoryFixtures(t, db, orgID, ownerID, repoID, "alice", "demo")
+
+	err := repo.UpdateDiskPath(context.Background(), repoID, "../etc/passwd")
+	if !errors.Is(err, repository.ErrInvalidDiskPath) {
+		t.Fatalf("expected ErrInvalidDiskPath, got %v", err)
 	}
 }
 

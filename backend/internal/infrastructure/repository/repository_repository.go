@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +13,8 @@ import (
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 )
+
+var ErrInvalidDiskPath = errors.New("invalid disk path")
 
 type sqlxRepositoryRepository struct {
 	*sqlx.DB
@@ -24,10 +28,10 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanRepository(scanner rowScanner, includeDiskPath bool) (*entity.Repository, error) {
+func scanRepositoryFull(scanner rowScanner) (*entity.Repository, error) {
 	var repo entity.Repository
 	var isEmpty int
-	dest := []any{
+	err := scanner.Scan(
 		&repo.ID,
 		&repo.OrganizationID,
 		&repo.OwnerID,
@@ -35,13 +39,10 @@ func scanRepository(scanner rowScanner, includeDiskPath bool) (*entity.Repositor
 		&repo.Visibility,
 		&repo.DefaultBranch,
 		&repo.Description,
-	}
-	if includeDiskPath {
-		dest = append(dest, &repo.DiskPath)
-	}
-	dest = append(dest, &isEmpty, &repo.CreatedAt)
-
-	err := scanner.Scan(dest...)
+		&repo.DiskPath,
+		&isEmpty,
+		&repo.CreatedAt,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -50,6 +51,57 @@ func scanRepository(scanner rowScanner, includeDiskPath bool) (*entity.Repositor
 	}
 	repo.IsEmpty = isEmpty != 0
 	return &repo, nil
+}
+
+func scanRepositoryMetadata(scanner rowScanner) (*entity.Repository, error) {
+	var repo entity.Repository
+	var isEmpty int
+	err := scanner.Scan(
+		&repo.ID,
+		&repo.OrganizationID,
+		&repo.OwnerID,
+		&repo.Name,
+		&repo.Visibility,
+		&repo.DefaultBranch,
+		&repo.Description,
+		&isEmpty,
+		&repo.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	repo.IsEmpty = isEmpty != 0
+	return &repo, nil
+}
+
+func validateDiskPath(diskPath string) error {
+	if diskPath == "" {
+		return nil
+	}
+	if strings.Contains(diskPath, "..") {
+		return ErrInvalidDiskPath
+	}
+	if !filepath.IsAbs(diskPath) {
+		return ErrInvalidDiskPath
+	}
+	if filepath.Clean(diskPath) != diskPath {
+		return ErrInvalidDiskPath
+	}
+	return nil
+}
+
+func canViewRepository(repo *entity.Repository, requestUserID uuid.UUID) bool {
+	switch repo.Visibility {
+	case entity.VisibilityPublic:
+		return true
+	case entity.VisibilityPrivate, entity.VisibilityInternal:
+		return requestUserID != uuid.Nil && requestUserID == repo.OwnerID
+	default:
+		return false
+	}
 }
 
 func execUpdateOne(ctx context.Context, db *sqlx.DB, query string, args ...any) error {
@@ -108,13 +160,13 @@ func (r *sqlxRepositoryRepository) GetByOwnerAndName(ctx context.Context, ownerI
 	`
 
 	row := r.DB.QueryRowxContext(ctx, query, ownerID, name)
-	return scanRepository(row, true)
+	return scanRepositoryFull(row)
 }
 
 // GetByOwnerLoginAndName resolves a repository by owner login and name.
-// disk_path is intentionally omitted; callers must enforce visibility authorization
-// before using the returned metadata.
-func (r *sqlxRepositoryRepository) GetByOwnerLoginAndName(ctx context.Context, ownerLogin, name string) (*entity.Repository, error) {
+// disk_path is intentionally omitted. Visibility is enforced here: private and
+// internal repositories are only returned when requestUserID matches the owner.
+func (r *sqlxRepositoryRepository) GetByOwnerLoginAndName(ctx context.Context, ownerLogin, name string, requestUserID uuid.UUID) (*entity.Repository, error) {
 	const query = `
 		SELECT r.id, r.organization_id, r.owner_id, r.name, r.visibility, r.default_branch, r.description, r.is_empty, r.created_at
 		FROM repositories r
@@ -123,7 +175,14 @@ func (r *sqlxRepositoryRepository) GetByOwnerLoginAndName(ctx context.Context, o
 	`
 
 	row := r.DB.QueryRowxContext(ctx, query, ownerLogin, name)
-	return scanRepository(row, false)
+	repo, err := scanRepositoryMetadata(row)
+	if err != nil || repo == nil {
+		return repo, err
+	}
+	if !canViewRepository(repo, requestUserID) {
+		return nil, nil
+	}
+	return repo, nil
 }
 
 func (r *sqlxRepositoryRepository) ListByOrg(ctx context.Context, orgID uuid.UUID, page, perPage int) ([]*entity.Repository, error) {
@@ -151,7 +210,7 @@ func (r *sqlxRepositoryRepository) ListByOrg(ctx context.Context, orgID uuid.UUI
 
 	var repos []*entity.Repository
 	for rows.Next() {
-		repo, err := scanRepository(rows, true)
+		repo, err := scanRepositoryFull(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -170,6 +229,9 @@ func (r *sqlxRepositoryRepository) UpdateVisibility(ctx context.Context, id uuid
 }
 
 func (r *sqlxRepositoryRepository) UpdateDiskPath(ctx context.Context, id uuid.UUID, diskPath string) error {
+	if err := validateDiskPath(diskPath); err != nil {
+		return err
+	}
 	const query = `UPDATE repositories SET disk_path = $1 WHERE id = $2`
 	return execUpdateOne(ctx, r.DB, query, diskPath, id)
 }

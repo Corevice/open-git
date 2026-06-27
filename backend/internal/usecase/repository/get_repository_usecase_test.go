@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/usecase/repository"
 )
@@ -40,11 +39,11 @@ func (m *getMockRepositoryRepo) UpdateVisibility(context.Context, int64, domain.
 	return nil
 }
 
-func (m *getMockRepositoryRepo) UpdateDiskPath(context.Context, uuid.UUID, string) error {
+func (m *getMockRepositoryRepo) UpdateDiskPath(context.Context, int64, string) error {
 	return nil
 }
 
-func (m *getMockRepositoryRepo) SetIsEmpty(context.Context, uuid.UUID, bool) error {
+func (m *getMockRepositoryRepo) SetIsEmpty(context.Context, int64, bool) error {
 	return nil
 }
 
