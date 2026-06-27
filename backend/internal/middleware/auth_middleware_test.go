@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/domain"
@@ -131,5 +133,43 @@ func TestExpiredToken(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestGetUserUUIDAbsent(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	_, err := middleware.GetUserUUID(c)
+	if err == nil {
+		t.Fatal("expected error when user uuid is absent")
+	}
+
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected echo.HTTPError, got %T", err)
+	}
+	if httpErr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", httpErr.Code)
+	}
+}
+
+func TestGetUserUUIDPresent(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	want := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
+	middleware.SetUserUUID(c, want)
+
+	got, err := middleware.GetUserUUID(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("expected %v, got %v", want, got)
 	}
 }

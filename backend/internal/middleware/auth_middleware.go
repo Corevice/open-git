@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	userIDContextKey     = "user_id"
-	userUUIDContextKey   = "user_uuid"
-	scopesContextKey     = "scopes"
+	userIDContextKey   = "user_id"
+	userUUIDContextKey = "user_uuid"
+	scopesContextKey   = "scopes"
 )
 
 func AuthMiddleware(tokens repository.IAccessTokenRepository) echo.MiddlewareFunc {
