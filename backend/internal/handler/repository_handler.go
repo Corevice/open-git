@@ -4,7 +4,9 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -19,8 +21,8 @@ type RepositoryHandler struct {
 	create *repoUC.CreateRepositoryUsecase
 	list   *repoUC.ListRepositoriesUsecase
 	get    *repoUC.GetRepositoryUsecase
-	repos  repo.IRepositoryRepository
-	users  repo.IUserRepository
+	repos   repo.IRepositoryRepository
+	gitRoot string
 }
 
 func NewRepositoryHandler(
@@ -28,14 +30,14 @@ func NewRepositoryHandler(
 	list *repoUC.ListRepositoriesUsecase,
 	get *repoUC.GetRepositoryUsecase,
 	repos repo.IRepositoryRepository,
-	users repo.IUserRepository,
+	gitRoot string,
 ) *RepositoryHandler {
 	return &RepositoryHandler{
-		create: create,
-		list:   list,
-		get:    get,
-		repos:  repos,
-		users:  users,
+		create:  create,
+		list:    list,
+		get:     get,
+		repos:   repos,
+		gitRoot: gitRoot,
 	}
 }
 
@@ -80,24 +82,13 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 		return err
 	}
 
-	intUserID, err := middleware.GetUserID(c)
-	if err != nil {
-		return err
-	}
-
-	user, err := h.users.GetByID(c.Request().Context(), intUserID)
-	if err != nil || user == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to resolve user"})
-	}
-
 	var req createRepositoryRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid request"})
 	}
 
-	repository, err := h.create.Execute(c.Request().Context(), repoUC.CreateRepositoryInput{
+	result, err := h.create.Execute(c.Request().Context(), repoUC.CreateRepositoryInput{
 		OwnerID:        userID,
-		OwnerLogin:     user.Login,
 		OrganizationID: userID,
 		Name:           req.Name,
 		Private:        req.Private,
@@ -113,7 +104,7 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to create repository"})
 	}
 
-	return c.JSON(http.StatusCreated, toRepositoryResponse(repository, user.Login))
+	return c.JSON(http.StatusCreated, toRepositoryResponse(result.Repository, result.OwnerLogin))
 }
 
 func (h *RepositoryHandler) ListRepositories(c echo.Context) error {
@@ -122,24 +113,13 @@ func (h *RepositoryHandler) ListRepositories(c echo.Context) error {
 		return err
 	}
 
-	intUserID, err := middleware.GetUserID(c)
-	if err != nil {
-		return err
-	}
+	page, perPage := normalizeRepositoryPagination(c)
 
-	user, err := h.users.GetByID(c.Request().Context(), intUserID)
-	if err != nil || user == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to resolve user"})
-	}
-
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
-
-	repositories, total, err := h.list.Execute(c.Request().Context(), repoUC.ListRepositoriesInput{
-		RequestUserID: userID,
-		OwnerLogin:    user.Login,
-		Page:          page,
-		PerPage:       perPage,
+	result, err := h.list.Execute(c.Request().Context(), repoUC.ListRepositoriesInput{
+		RequestUserID:  userID,
+		OrganizationID: userID,
+		Page:           page,
+		PerPage:        perPage,
 	})
 	if err != nil {
 		if errors.Is(err, repoUC.ErrOwnerNotFound) {
@@ -148,25 +128,18 @@ func (h *RepositoryHandler) ListRepositories(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to list repositories"})
 	}
 
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 30
-	}
-	setPaginationHeaders(c, page, perPage, total)
+	setPaginationHeaders(c, page, perPage, result.Total)
 
-	return c.JSON(http.StatusOK, toRepositoryResponses(repositories, user.Login))
+	return c.JSON(http.StatusOK, toRepositoryResponses(result.Repositories, result.OwnerLogin))
 }
 
 func (h *RepositoryHandler) ListOwnerRepos(c echo.Context) error {
 	requestUserID := middleware.UserUUIDFromContext(c)
 	ownerLogin := c.Param("owner")
 
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
+	page, perPage := normalizeRepositoryPagination(c)
 
-	repositories, total, err := h.list.Execute(c.Request().Context(), repoUC.ListRepositoriesInput{
+	result, err := h.list.Execute(c.Request().Context(), repoUC.ListRepositoriesInput{
 		RequestUserID: requestUserID,
 		OwnerLogin:    ownerLogin,
 		Page:          page,
@@ -179,15 +152,9 @@ func (h *RepositoryHandler) ListOwnerRepos(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to list repositories"})
 	}
 
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 30
-	}
-	setPaginationHeaders(c, page, perPage, total)
+	setPaginationHeaders(c, page, perPage, result.Total)
 
-	return c.JSON(http.StatusOK, toRepositoryResponses(repositories, ownerLogin))
+	return c.JSON(http.StatusOK, toRepositoryResponses(result.Repositories, result.OwnerLogin))
 }
 
 func (h *RepositoryHandler) GetRepository(c echo.Context) error {
@@ -249,13 +216,16 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 	}
 
 	diskPath := repository.DiskPath
+	ownerLogin := c.Param("owner")
 
 	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
 	}
 
-	if diskPath != "" {
-		_ = os.RemoveAll(diskPath)
+	if diskPath != "" && isSafeRepositoryDiskPath(h.gitRoot, ownerLogin, repository.Name, diskPath) {
+		if err := os.RemoveAll(diskPath); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository files"})
+		}
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -277,6 +247,42 @@ func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID uuid.U
 		return nil, echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
 	}
 	return repository, nil
+}
+
+func normalizeRepositoryPagination(c echo.Context) (int, int) {
+	page, _ := strconv.Atoi(c.QueryParam("page"))
+	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 30
+	}
+	return page, perPage
+}
+
+func isSafeRepositoryDiskPath(gitRoot, ownerLogin, repoName, diskPath string) bool {
+	if diskPath == "" || strings.Contains(diskPath, "..") {
+		return false
+	}
+
+	expectedPath := filepath.Join(gitRoot, ownerLogin, repoName+".git")
+	cleanExpected := filepath.Clean(expectedPath)
+	cleanDiskPath := filepath.Clean(diskPath)
+
+	if cleanDiskPath != cleanExpected {
+		return false
+	}
+
+	rel, err := filepath.Rel(filepath.Clean(gitRoot), cleanDiskPath)
+	if err != nil {
+		return false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return false
+	}
+
+	return true
 }
 
 func toRepositoryResponses(repositories []*entity.Repository, ownerLogin string) []repositoryResponse {
