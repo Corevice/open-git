@@ -2,7 +2,6 @@ package database_test
 
 import (
 	"context"
-	"database/sql"
 	"regexp"
 	"testing"
 	"time"
@@ -29,7 +28,9 @@ func TestGetByLoginNotFound(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`SELECT id, login, name, created_at FROM organizations WHERE login = $1`,
-	)).WithArgs("unknown").WillReturnError(sql.ErrNoRows)
+	)).WithArgs("unknown").WillReturnRows(sqlmock.NewRows([]string{
+		"id", "login", "name", "created_at",
+	}))
 
 	org, err := repo.GetByLogin(context.Background(), "unknown")
 	if err != nil {
@@ -77,7 +78,7 @@ func TestListByUserIDEmpty(t *testing.T) {
 	defer closeFn()
 	repo := database.NewOrganizationRepository(db)
 
-	mock.ExpectQuery(`SELECT o\.id, o\.login, o\.name, o\.created_at`).
+	mock.ExpectQuery(`JOIN memberships m ON o\.id = m\.organization_id\s+WHERE m\.user_id = \$1`).
 		WithArgs(int64(99)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "login", "name", "created_at"}))
 
@@ -101,7 +102,7 @@ func TestGetMemberRoleNonMember(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`SELECT role FROM memberships WHERE organization_id = $1 AND user_id = $2`,
-	)).WithArgs(int64(1), int64(2)).WillReturnError(sql.ErrNoRows)
+	)).WithArgs(int64(1), int64(2)).WillReturnRows(sqlmock.NewRows([]string{"role"}))
 
 	role, err := repo.GetMemberRole(context.Background(), 1, 2)
 	if err != nil {
