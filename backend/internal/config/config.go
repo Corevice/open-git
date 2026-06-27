@@ -19,6 +19,8 @@ type Config struct {
 	RedisAddr         string
 	MinioEndpoint     string
 	GitDataRoot       string
+	SSHPort           string
+	SSHEnabled        bool
 	SSHListenAddr     string
 	SSHHostKeyPath    string
 }
@@ -41,6 +43,8 @@ func Load() Config {
 		RedisAddr:         os.Getenv("REDIS_ADDR"),
 		MinioEndpoint:     os.Getenv("MINIO_ENDPOINT"),
 		GitDataRoot:       getenv("GIT_DATA_ROOT", "./data/git"),
+		SSHPort:           getenv("SSH_PORT", "2222"),
+		SSHEnabled:        getenvBool("SSH_ENABLED", true),
 		SSHListenAddr:     getenv("SSH_LISTEN_ADDR", ":2222"),
 		SSHHostKeyPath:    getenv("SSH_HOST_KEY_PATH", "./data/ssh_host_rsa_key"),
 	}
