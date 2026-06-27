@@ -4,12 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"database/sql"
-	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -99,7 +96,7 @@ func main() {
 	e.GET("/readyz", readyzHandler(db))
 	e.GET("/version", versionHandler)
 
-	registerHandlers(e, cfg, db)
+	sshServer := registerHandlers(e, cfg, db)
 
 	go func() {
 		if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
@@ -113,6 +110,11 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if sshServer != nil {
+		if err := sshServer.Close(); err != nil {
+			log.Printf("shutdown ssh server: %v", err)
+		}
+	}
 	if err := e.Shutdown(ctx); err != nil {
 		log.Fatalf("shutdown server: %v", err)
 	}
@@ -266,70 +268,6 @@ func domainUserToEntity(user *domain.User) *entity.User {
 	return entityUser
 }
 
-const gitWWWAuthenticateHeader = `Basic realm="OpenGit"`
-
-func gitBasicAuthMiddleware(tokens repo.IAccessTokenRepository) echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			record, err := lookupBasicAuthToken(c, tokens)
-			if err != nil {
-				c.Response().Header().Set("WWW-Authenticate", gitWWWAuthenticateHeader)
-				return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
-			}
-			appmiddleware.SetAuthContext(c, record.UserID, record.Scopes)
-			return next(c)
-		}
-	}
-}
-
-func lookupBasicAuthToken(c echo.Context, tokens repo.IAccessTokenRepository) (*domain.AccessToken, error) {
-	pat, ok := basicAuthPAT(c.Request().Header.Get("Authorization"))
-	if !ok {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
-	}
-
-	record, err := tokens.FindByTokenHash(c.Request().Context(), hashPATToken(pat))
-	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
-	}
-	if record == nil {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
-	}
-	if record.RevokedAt != nil {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
-	}
-	if record.ExpiresAt != nil && !record.ExpiresAt.After(time.Now().UTC()) {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
-	}
-	return record, nil
-}
-
-func basicAuthPAT(header string) (string, bool) {
-	if header == "" {
-		return "", false
-	}
-	const prefix = "Basic "
-	if !strings.HasPrefix(header, prefix) {
-		return "", false
-	}
-
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(header[len(prefix):]))
-	if err != nil {
-		return "", false
-	}
-
-	_, pat, ok := strings.Cut(string(decoded), ":")
-	if !ok || pat == "" {
-		return "", false
-	}
-	return pat, true
-}
-
-func hashPATToken(raw string) string {
-	sum := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(sum[:])
-}
-
 func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
 	if data, err := os.ReadFile(path); err == nil {
 		signer, err := gossh.ParsePrivateKey(data)
@@ -361,7 +299,7 @@ func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
 	return gossh.NewSignerFromKey(privateKey)
 }
 
-func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
+func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) *sshinfra.SSHServer {
 	sqlxDB := sqlx.NewDb(db, cfg.DBType)
 
 	entityUserRepo := infrarepo.NewUserRepository(sqlxDB)
@@ -374,9 +312,10 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
 	issueRepo := infrarepo.NewIssueRepository(sqlxDB)
 
 	realAuthMiddleware := appmiddleware.AuthMiddleware(tokenRepo)
-	realGitBasicAuth := gitBasicAuthMiddleware(tokenRepo)
+	realGitBasicAuth := appmiddleware.GitBasicAuthMiddleware(tokenRepo)
+	realOptionalGitAuth := appmiddleware.OptionalGitAuth(tokenRepo)
 
-	gitResolver := &gitResolver{repos: repoRepo, gitRoot: cfg.GitDataRoot}
+	repoGitResolver := &gitResolver{repos: repoRepo, gitRoot: cfg.GitDataRoot}
 	membershipAdapter := &gitMembershipAdapter{memberships: membershipRepo}
 
 	registerUC := authUC.NewRegisterUserUsecase(userRepo)
@@ -387,7 +326,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
 	getRepoUC := repoUC.NewGetRepositoryUsecase(repoRepo, userRepo, legacyMembershipRepo)
 	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, repoRepo)
 
-	contentHandler := handler.NewContentHandler(gitResolver)
+	contentHandler := handler.NewContentHandler(repoGitResolver)
 
 	issuePATUC := authUC.NewIssuePATUsecase(tokenRepo)
 	revokePATUC := authUC.NewRevokePATUsecase(tokenRepo)
@@ -408,7 +347,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
 
 	gitHTTPHandler := handler.NewGitHTTPHandler(
 		cfg.GitDataRoot,
-		gitResolver,
+		repoGitResolver,
 		membershipAdapter,
 		nil,
 		realGitBasicAuth,
@@ -434,7 +373,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
 	issueHandler.RegisterRoutes(api, realAuthMiddleware)
 	pullRequestHandler.RegisterRoutes(api, realAuthMiddleware)
 	oauthHandler.RegisterRoutes(api, realAuthMiddleware)
-	gitHTTPHandler.RegisterRoutes(e)
+	e.GET("/:owner/:repo.git/info/refs", gitHTTPHandler.InfoRefs, realOptionalGitAuth)
+	e.POST("/:owner/:repo.git/git-upload-pack", gitHTTPHandler.UploadPack, realOptionalGitAuth)
+	e.POST("/:owner/:repo.git/git-receive-pack", gitHTTPHandler.ReceivePack, realGitBasicAuth)
 
 	v3 := e.Group("/api/v3")
 	v3.Use(appmiddleware.GitHubCompatHeaders())
@@ -455,29 +396,27 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) {
 	v3Keys.POST("", sshKeyHandler.Add)
 	v3Keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
+	var sshServer *sshinfra.SSHServer
 	if cfg.SSHEnabled {
-		go func() {
-			hostKey, err := loadOrGenerateHostKey(cfg.SSHHostKeyPath)
-			if err != nil {
-				log.Fatalf("load ssh host key: %v", err)
-			}
+		hostKey, err := loadOrGenerateHostKey(cfg.SSHHostKeyPath)
+		if err != nil {
+			log.Fatalf("load ssh host key: %v", err)
+		}
 
-			sshServer := sshinfra.NewSSHServer(
-				cfg.GitDataRoot,
-				sshKeyRepo,
-				&gitSSHInfraResolver{resolver: gitResolver},
-				hostKey,
-			)
-			addr := cfg.SSHPort
-			if !strings.HasPrefix(addr, ":") {
-				addr = ":" + addr
-			}
-			log.Printf("ssh server listening on %s", addr)
-			if err := sshServer.Start(addr); err != nil && !errors.Is(err, gossh.ErrServerClosed) {
-				log.Fatalf("start ssh server: %v", err)
+		sshServer = sshinfra.NewSSHServer(
+			cfg.GitDataRoot,
+			sshKeyRepo,
+			&gitSSHInfraResolver{resolver: repoGitResolver},
+			hostKey,
+		)
+		go func() {
+			log.Printf("ssh server listening on %s", cfg.SSHListenAddr)
+			if err := sshServer.Start(cfg.SSHListenAddr); err != nil && !errors.Is(err, gossh.ErrServerClosed) {
+				log.Printf("ssh server stopped: %v", err)
 			}
 		}()
 	}
+	return sshServer
 }
 
 func corsAllowedOrigins() []string {

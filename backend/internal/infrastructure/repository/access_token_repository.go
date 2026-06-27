@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
@@ -30,7 +31,11 @@ var _ repo.IAccessTokenRepository = (*sqlxAccessTokenRepository)(nil)
 
 func (r *sqlxAccessTokenRepository) Create(ctx context.Context, token *domain.AccessToken) error {
 	if token.ID == 0 {
-		token.ID = time.Now().UTC().UnixNano()
+		id, err := randomTokenID()
+		if err != nil {
+			return err
+		}
+		token.ID = id
 	}
 	if token.CreatedAt.IsZero() {
 		token.CreatedAt = time.Now().UTC()
@@ -59,12 +64,13 @@ func (r *sqlxAccessTokenRepository) Create(ctx context.Context, token *domain.Ac
 }
 
 func (r *sqlxAccessTokenRepository) ListByUserID(ctx context.Context, userID int64) ([]*domain.AccessToken, error) {
-	const query = `
+	query := `
 		SELECT id, user_id, token_hash, scopes, expires_at, revoked_at, created_at
 		FROM access_tokens
-		WHERE user_id = $1 AND revoked_at IS NULL
+		WHERE user_id = ? AND revoked_at IS NULL
 		ORDER BY created_at DESC
 	`
+	query = r.DB.Rebind(query)
 
 	rows, err := r.DB.QueryxContext(ctx, query, formatTokenID(userID))
 	if err != nil {
@@ -88,11 +94,12 @@ func (r *sqlxAccessTokenRepository) ListByUserID(ctx context.Context, userID int
 
 func (r *sqlxAccessTokenRepository) Revoke(ctx context.Context, tokenID, userID int64) error {
 	now := time.Now().UTC()
-	const query = `
+	query := `
 		UPDATE access_tokens
-		SET revoked_at = $1
-		WHERE id = $2 AND user_id = $3 AND revoked_at IS NULL
+		SET revoked_at = ?
+		WHERE id = ? AND user_id = ? AND revoked_at IS NULL
 	`
+	query = r.DB.Rebind(query)
 
 	result, err := r.DB.ExecContext(ctx, query, now, formatTokenID(tokenID), formatTokenID(userID))
 	if err != nil {
@@ -109,11 +116,12 @@ func (r *sqlxAccessTokenRepository) Revoke(ctx context.Context, tokenID, userID 
 }
 
 func (r *sqlxAccessTokenRepository) FindByTokenHash(ctx context.Context, tokenHash string) (*domain.AccessToken, error) {
-	const query = `
+	query := `
 		SELECT id, user_id, token_hash, scopes, expires_at, revoked_at, created_at
 		FROM access_tokens
-		WHERE token_hash = $1
+		WHERE token_hash = ? AND revoked_at IS NULL
 	`
+	query = r.DB.Rebind(query)
 
 	row := r.DB.QueryRowxContext(ctx, query, tokenHash)
 	token, err := scanAccessToken(row, r.DriverName())
@@ -191,7 +199,7 @@ func marshalScopes(driver string, scopes []string) (any, error) {
 	return string(data), nil
 }
 
-func unmarshalScopes(driver string, raw any) ([]string, error) {
+func unmarshalScopes(_ string, raw any) ([]string, error) {
 	switch value := raw.(type) {
 	case nil:
 		return []string{}, nil
@@ -202,11 +210,6 @@ func unmarshalScopes(driver string, raw any) ([]string, error) {
 	case pq.StringArray:
 		return []string(value), nil
 	default:
-		if driver == "postgres" {
-			if arr, ok := raw.(pq.StringArray); ok {
-				return []string(arr), nil
-			}
-		}
 		return nil, fmt.Errorf("unsupported scopes type %T", raw)
 	}
 }
@@ -223,6 +226,18 @@ func decodeScopesJSON(data []byte) ([]string, error) {
 		return []string{}, nil
 	}
 	return scopes, nil
+}
+
+func randomTokenID() (int64, error) {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return 0, err
+	}
+	id := int64(binary.BigEndian.Uint64(buf[:]) & 0x7fffffffffffffff)
+	if id == 0 {
+		return 1, nil
+	}
+	return id, nil
 }
 
 func formatTokenID(id int64) string {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -31,6 +32,16 @@ func Load() Config {
 		connMaxLifetime = time.Hour
 	}
 
+	sshPort := getenv("SSH_PORT", "2222")
+	sshListenAddr := os.Getenv("SSH_LISTEN_ADDR")
+	if sshListenAddr == "" {
+		if strings.HasPrefix(sshPort, ":") {
+			sshListenAddr = sshPort
+		} else {
+			sshListenAddr = ":" + sshPort
+		}
+	}
+
 	return Config{
 		DBType:            getenv("DB_TYPE", "sqlite"),
 		DBDSN:             os.Getenv("DB_DSN"),
@@ -43,9 +54,9 @@ func Load() Config {
 		RedisAddr:         os.Getenv("REDIS_ADDR"),
 		MinioEndpoint:     os.Getenv("MINIO_ENDPOINT"),
 		GitDataRoot:       getenv("GIT_DATA_ROOT", "./data/git"),
-		SSHPort:           getenv("SSH_PORT", "2222"),
+		SSHPort:           sshPort,
 		SSHEnabled:        getenvBool("SSH_ENABLED", true),
-		SSHListenAddr:     getenv("SSH_LISTEN_ADDR", ":2222"),
+		SSHListenAddr:     sshListenAddr,
 		SSHHostKeyPath:    getenv("SSH_HOST_KEY_PATH", "./data/ssh_host_rsa_key"),
 	}
 }
