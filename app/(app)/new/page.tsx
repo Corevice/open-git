@@ -2,16 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { apiClient } from "@/lib/api-client";
+import { ApiClient, ApiError } from "@/lib/api";
+import type { OrgProfile } from "@/lib/api-types";
 import { useAuth } from "@/lib/auth";
-import { ApiError } from "@/lib/api";
-
-type CreateRepoResponse = {
-  owner: string;
-  name: string;
-};
 
 type FieldErrors = Record<string, string[]>;
 
@@ -27,30 +22,107 @@ function getFieldErrors(err: unknown): FieldErrors {
   return fieldErrors ?? {};
 }
 
+const GITIGNORE_OPTIONS = [
+  { value: "", label: "なし" },
+  { value: "Node", label: "Node" },
+  { value: "Python", label: "Python" },
+  { value: "Go", label: "Go" },
+] as const;
+
+const LICENSE_OPTIONS = [
+  { value: "", label: "なし" },
+  { value: "mit", label: "MIT" },
+  { value: "apache-2.0", label: "Apache-2.0" },
+  { value: "gpl-3.0", label: "GPL-3.0" },
+] as const;
+
 export default function NewRepoPage() {
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, token } = useAuth();
+  const [userLogin, setUserLogin] = useState<string>("");
+  const [orgs, setOrgs] = useState<OrgProfile[]>([]);
+  const [selectedOwner, setSelectedOwner] = useState("");
   const [repoName, setRepoName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<"public" | "private">("public");
+  const [autoInit, setAutoInit] = useState(false);
+  const [gitignoreTemplate, setGitignoreTemplate] = useState("");
+  const [licenseTemplate, setLicenseTemplate] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
+  const apiClient = useMemo(
+    () =>
+      new ApiClient(
+        process.env.NEXT_PUBLIC_API_BASE_URL ??
+          process.env.NEXT_PUBLIC_API_URL ??
+          "http://localhost:8080",
+      ),
+    [],
+  );
+
+  useEffect(() => {
+    if (token) {
+      apiClient.setToken(token);
+    }
+  }, [apiClient, token]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !token) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadOwners() {
+      try {
+        const [user, userOrgs] = await Promise.all([
+          apiClient.users.getCurrent(),
+          apiClient.get<OrgProfile[]>("/api/v3/user/orgs"),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setUserLogin(user.login);
+        setOrgs(userOrgs);
+        setSelectedOwner((prev) => prev || user.login);
+      } catch {
+        if (!cancelled) {
+          setError("オーナー情報の取得に失敗しました。");
+        }
+      }
+    }
+
+    void loadOwners();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, isAuthenticated, token]);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!repoName.trim() || submitting) return;
+    if (!repoName.trim() || submitting || !selectedOwner) return;
 
     setSubmitting(true);
     setError(null);
     setFieldErrors({});
 
+    const body = {
+      name: repoName.trim(),
+      description: description.trim() || undefined,
+      private: visibility === "private",
+      auto_init: autoInit,
+      ...(gitignoreTemplate ? { gitignore_template: gitignoreTemplate } : {}),
+      ...(licenseTemplate ? { license_template: licenseTemplate } : {}),
+    };
+
     try {
-      const created = (await apiClient.createRepo(
-        repoName.trim(),
-        visibility,
-        description.trim() || undefined,
-      )) as CreateRepoResponse;
+      const created =
+        selectedOwner === userLogin
+          ? await apiClient.repos.createForUser(body)
+          : await apiClient.repos.createForOrg(selectedOwner, body);
       router.push(`/${created.owner}/${created.name}`);
     } catch (err) {
       if (isApiError(err) && err.status === 422) {
@@ -99,6 +171,29 @@ export default function NewRepoPage() {
         )}
 
         <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label htmlFor="owner" className="mb-1.5 block text-sm font-semibold">
+              オーナー <span className="text-[#cf222e]">*</span>
+            </label>
+            <select
+              id="owner"
+              value={selectedOwner}
+              onChange={(e) => setSelectedOwner(e.target.value)}
+              className="w-full rounded-md border border-[#d1d9e0] px-3 py-2 text-sm"
+              required
+              disabled={!userLogin}
+            >
+              {userLogin && (
+                <option value={userLogin}>{userLogin} (ユーザー)</option>
+              )}
+              {orgs.map((org) => (
+                <option key={org.login} value={org.login}>
+                  {org.login} (組織)
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="mb-4">
             <label htmlFor="repo-name" className="mb-1.5 block text-sm font-semibold">
               リポジトリ名 <span className="text-[#cf222e]">*</span>
@@ -184,6 +279,54 @@ export default function NewRepoPage() {
             )}
           </div>
 
+          <hr className="my-6 border-t border-[#d1d9e0]" />
+
+          <div className="mb-4">
+            <label className="mb-1.5 block text-sm font-semibold">初期化オプション</label>
+            <label className="mb-3 flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={autoInit}
+                onChange={(e) => setAutoInit(e.target.checked)}
+              />
+              <span className="text-sm">README でこのリポジトリを初期化する</span>
+            </label>
+            <div className="mb-3">
+              <label htmlFor="gitignore-template" className="mb-1.5 block text-sm">
+                .gitignore テンプレート
+              </label>
+              <select
+                id="gitignore-template"
+                value={gitignoreTemplate}
+                onChange={(e) => setGitignoreTemplate(e.target.value)}
+                className="w-full rounded-md border border-[#d1d9e0] px-3 py-2 text-sm"
+              >
+                {GITIGNORE_OPTIONS.map((opt) => (
+                  <option key={opt.value || "none"} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="license-template" className="mb-1.5 block text-sm">
+                ライセンス
+              </label>
+              <select
+                id="license-template"
+                value={licenseTemplate}
+                onChange={(e) => setLicenseTemplate(e.target.value)}
+                className="w-full rounded-md border border-[#d1d9e0] px-3 py-2 text-sm"
+              >
+                {LICENSE_OPTIONS.map((opt) => (
+                  <option key={opt.value || "none"} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           {error && (
             <p className="mt-4 text-sm text-[#cf222e]" role="alert">
               {error}
@@ -199,7 +342,12 @@ export default function NewRepoPage() {
             </Link>
             <button
               type="submit"
-              disabled={!repoName.trim() || submitting || !isAuthenticated}
+              disabled={
+                !repoName.trim() ||
+                submitting ||
+                !isAuthenticated ||
+                !selectedOwner
+              }
               className="inline-flex items-center gap-2 rounded-md bg-[#1f883d] px-4 py-2 text-sm font-medium text-white hover:bg-[#1a7f37] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting && (
