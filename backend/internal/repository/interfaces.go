@@ -10,15 +10,15 @@ import (
 
 type IUserRepository interface {
 	Create(ctx context.Context, user *domain.User) error
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
+	GetByID(ctx context.Context, id int64) (*domain.User, error)
 	GetByLogin(ctx context.Context, login string) (*domain.User, error)
 	GetByEmail(ctx context.Context, email string) (*domain.User, error)
 }
 
 type IAccessTokenRepository interface {
 	Create(ctx context.Context, token *domain.AccessToken) error
-	ListByUserID(ctx context.Context, userID uuid.UUID) ([]*domain.AccessToken, error)
-	Revoke(ctx context.Context, tokenID, userID uuid.UUID) error
+	ListByUserID(ctx context.Context, userID int64) ([]*domain.AccessToken, error)
+	Revoke(ctx context.Context, tokenID, userID int64) error
 	FindByTokenHash(ctx context.Context, tokenHash string) (*domain.AccessToken, error)
 }
 

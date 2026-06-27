@@ -65,7 +65,7 @@ type repositoryResponse struct {
 }
 
 func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
-	userID, err := middleware.GetUserID(c)
+	userID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 }
 
 func (h *RepositoryHandler) GetRepository(c echo.Context) error {
-	requestUserID := middleware.UserIDFromContext(c)
+	requestUserID := middleware.UserUUIDFromContext(c)
 
 	repository, err := h.get.Execute(c.Request().Context(), repoUC.GetRepositoryInput{
 		RequestUserID: requestUserID,
@@ -114,7 +114,7 @@ func (h *RepositoryHandler) GetRepository(c echo.Context) error {
 }
 
 func (h *RepositoryHandler) UpdateVisibility(c echo.Context) error {
-	userID, err := middleware.GetUserID(c)
+	userID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return err
 	}
@@ -143,7 +143,7 @@ func (h *RepositoryHandler) UpdateVisibility(c echo.Context) error {
 }
 
 func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
-	userID, err := middleware.GetUserID(c)
+	userID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return err
 	}

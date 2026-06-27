@@ -58,7 +58,7 @@ func (m *getMockUserRepo) Create(context.Context, *domain.User) error {
 	return nil
 }
 
-func (m *getMockUserRepo) GetByID(context.Context, uuid.UUID) (*domain.User, error) {
+func (m *getMockUserRepo) GetByID(context.Context, int64) (*domain.User, error) {
 	return nil, errors.New("not found")
 }
 
