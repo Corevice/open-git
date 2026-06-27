@@ -6,7 +6,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"database/sql"
-	"encoding/binary"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -96,7 +95,10 @@ func main() {
 	e.GET("/readyz", readyzHandler(db))
 	e.GET("/version", versionHandler)
 
-	sshServer := registerHandlers(e, cfg, db)
+	sshServer, err := registerHandlers(e, cfg, db)
+	if err != nil {
+		log.Fatalf("register handlers: %v", err)
+	}
 
 	go func() {
 		if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
@@ -127,6 +129,9 @@ type gitResolver struct {
 
 func (r *gitResolver) Resolve(ctx context.Context, ownerLogin, repoName string) (*handler.ResolvedGitRepository, error) {
 	repoName = strings.TrimSuffix(repoName, ".git")
+	if strings.Contains(ownerLogin, "..") || strings.Contains(repoName, "..") {
+		return nil, domain.ErrNotFound
+	}
 	repository, err := r.repos.GetByOwnerLoginAndName(ctx, ownerLogin, repoName)
 	if err != nil {
 		return nil, err
@@ -138,7 +143,7 @@ func (r *gitResolver) Resolve(ctx context.Context, ownerLogin, repoName string) 
 	return &handler.ResolvedGitRepository{
 		ID:             repository.ID,
 		OrganizationID: repository.OrganizationID,
-		OwnerID:        uuidToInt64(repository.OwnerID),
+		OwnerID:        appmiddleware.UUIDToInt64(repository.OwnerID),
 		Name:           repository.Name,
 		Visibility:     repository.Visibility,
 		DiskPath:       filepath.Join(r.gitRoot, ownerLogin, repoName+".git"),
@@ -250,16 +255,12 @@ func (r *gitSSHInfraResolver) Resolve(ctx context.Context, ownerLogin, repoName 
 	return resolved.DiskPath, appmiddleware.Int64ToUUID(resolved.OwnerID), nil
 }
 
-func uuidToInt64(id uuid.UUID) int64 {
-	return int64(binary.BigEndian.Uint64(id[8:]))
-}
-
 func entityUserToDomain(user *entity.User) *domain.User {
 	if user == nil {
 		return nil
 	}
 	return &domain.User{
-		ID:           uuidToInt64(user.ID),
+		ID:           appmiddleware.UUIDToInt64(user.ID),
 		Login:        user.Login,
 		Email:        user.Email,
 		PasswordHash: user.PasswordHash,
@@ -311,7 +312,7 @@ func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
 	return gossh.NewSignerFromKey(privateKey)
 }
 
-func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) *sshinfra.SSHServer {
+func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SSHServer, error) {
 	sqlxDB := sqlx.NewDb(db, cfg.DBType)
 
 	entityUserRepo := infrarepo.NewUserRepository(sqlxDB)
@@ -412,7 +413,12 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) *sshinfra.SSH
 	if cfg.SSHEnabled {
 		hostKey, err := loadOrGenerateHostKey(cfg.SSHHostKeyPath)
 		if err != nil {
-			log.Fatalf("load ssh host key: %v", err)
+			return nil, fmt.Errorf("load ssh host key: %w", err)
+		}
+
+		sshListenAddr := cfg.SSHPort
+		if !strings.HasPrefix(sshListenAddr, ":") {
+			sshListenAddr = ":" + sshListenAddr
 		}
 
 		sshServer = sshinfra.NewSSHServer(
@@ -422,13 +428,13 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) *sshinfra.SSH
 			hostKey,
 		)
 		go func() {
-			log.Printf("ssh server listening on %s", cfg.SSHListenAddr)
-			if err := sshServer.Start(cfg.SSHListenAddr); err != nil && !errors.Is(err, gossh.ErrServerClosed) {
+			log.Printf("ssh server listening on %s", sshListenAddr)
+			if err := sshServer.Start(sshListenAddr); err != nil && !errors.Is(err, gossh.ErrServerClosed) {
 				log.Printf("ssh server stopped: %v", err)
 			}
 		}()
 	}
-	return sshServer
+	return sshServer, nil
 }
 
 func corsAllowedOrigins() []string {

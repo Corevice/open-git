@@ -120,7 +120,15 @@ func (h *GitHTTPHandler) InfoRefs(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := h.ensureReadAccess(c, repo); err != nil {
+	if service == transport.ReceivePackService.String() {
+		userID, err := middleware.GetUserID(c)
+		if err != nil {
+			return err
+		}
+		if err := h.ensureWriteAccess(c.Request().Context(), userID, repo); err != nil {
+			return err
+		}
+	} else if err := h.ensureReadAccess(c, repo); err != nil {
 		return err
 	}
 

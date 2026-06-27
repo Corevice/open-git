@@ -16,6 +16,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/open-git/backend/internal/domain"
 	dbErrors "github.com/open-git/backend/internal/infrastructure/database"
+	appmiddleware "github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
@@ -231,15 +232,17 @@ func decodeScopesJSON(data []byte) ([]string, error) {
 }
 
 func randomTokenID() (int64, error) {
-	var buf [8]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return 0, err
+	for range 8 {
+		var buf [8]byte
+		if _, err := rand.Read(buf[:]); err != nil {
+			return 0, err
+		}
+		id := int64(binary.BigEndian.Uint64(buf[:]) & 0x7fffffffffffffff)
+		if id != 0 {
+			return id, nil
+		}
 	}
-	id := int64(binary.BigEndian.Uint64(buf[:]) & 0x7fffffffffffffff)
-	if id == 0 {
-		return 1, nil
-	}
-	return id, nil
+	return 0, fmt.Errorf("failed to generate token id")
 }
 
 func formatTokenID(id int64) string {
@@ -254,5 +257,5 @@ func parseTokenID(raw string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return int64(binary.BigEndian.Uint64(parsed[8:])), nil
+	return appmiddleware.UUIDToInt64(parsed), nil
 }
