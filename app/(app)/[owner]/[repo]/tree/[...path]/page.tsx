@@ -1,14 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import DOMPurify from "isomorphic-dompurify";
-import { marked } from "marked";
+import { TreeBranchSelector } from "@/components/repo/BranchSelector";
 import FileTree, { type TreeEntry } from "@/components/repo/FileTree";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+import {
+  apiClient,
+  decodeBase64Content,
+  decodePathSegments,
+  isApiError,
+} from "@/lib/api-client";
+import { renderMarkdown } from "@/lib/markdown";
 
 interface RepoMetadata {
   name: string;
-  full_name: string;
   description: string | null;
   private: boolean;
   visibility?: string;
@@ -16,7 +19,6 @@ interface RepoMetadata {
   stargazers_count: number;
   watchers_count: number;
   forks_count: number;
-  open_issues_count?: number;
   owner: { login: string };
 }
 
@@ -25,20 +27,12 @@ interface ContentItem {
   path: string;
   type: "dir" | "file";
   sha: string;
+  content?: string | null;
+  encoding?: string;
 }
 
 interface BranchItem {
   name: string;
-}
-
-async function apiGet<T>(path: string): Promise<T | null> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Accept: "application/vnd.github+json" },
-    cache: "no-store",
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
-  return res.json() as Promise<T>;
 }
 
 function visibilityLabel(repo: RepoMetadata): string {
@@ -64,11 +58,6 @@ function mapContents(items: ContentItem[]): TreeEntry[] {
   }));
 }
 
-function renderReadmeMarkdown(raw: string): string {
-  const html = marked.parse(raw, { async: false }) as string;
-  return DOMPurify.sanitize(html);
-}
-
 async function fetchReadme(
   owner: string,
   repo: string,
@@ -76,14 +65,18 @@ async function fetchReadme(
   dirPath: string,
 ): Promise<string | null> {
   if (dirPath) return null;
-  const data = await apiGet<{ content?: string; encoding?: string }>(
-    `/repos/${owner}/${repo}/contents/README.md?ref=${encodeURIComponent(branch)}`,
-  );
-  if (!data?.content || data.encoding !== "base64") return null;
   try {
-    return Buffer.from(data.content, "base64").toString("utf-8");
-  } catch {
-    return null;
+    const data = await apiClient.getContents<ContentItem>(
+      owner,
+      repo,
+      "README.md",
+      branch,
+    );
+    if (!data.content || data.encoding !== "base64") return null;
+    return decodeBase64Content(data.content);
+  } catch (err) {
+    if (isApiError(err) && err.status === 404) return null;
+    throw err;
   }
 }
 
@@ -92,34 +85,50 @@ export default async function RepoTreePage({
 }: {
   params: Promise<{ owner: string; repo: string; path: string[] }>;
 }) {
-  const { owner, repo, path: pathSegments } = await params;
-  if (!pathSegments?.length) notFound();
+  const { owner, repo, path: rawPathSegments } = await params;
+  const pathSegments = decodePathSegments(rawPathSegments ?? []);
+  if (!pathSegments.length) notFound();
 
   const branch = pathSegments[0];
   const currentPath = pathSegments.slice(1).join("/");
 
-  const metadata = await apiGet<RepoMetadata>(`/repos/${owner}/${repo}`);
-  if (!metadata) notFound();
+  let metadata: RepoMetadata;
+  try {
+    metadata = await apiClient.getRepo<RepoMetadata>(owner, repo);
+  } catch (err) {
+    if (isApiError(err) && err.status === 404) notFound();
+    throw err;
+  }
 
-  const contentsPath = currentPath
-    ? `/repos/${owner}/${repo}/contents/${currentPath}?ref=${encodeURIComponent(branch)}`
-    : `/repos/${owner}/${repo}/contents?ref=${encodeURIComponent(branch)}`;
+  let contentsRaw: ContentItem[] | ContentItem | null = null;
+  try {
+    contentsRaw = await apiClient.getContents<ContentItem[] | ContentItem>(
+      owner,
+      repo,
+      currentPath,
+      branch,
+    );
+  } catch (err) {
+    if (!isApiError(err) || err.status !== 404) throw err;
+  }
 
-  const [contentsRaw, branchesRaw, readmeRaw] = await Promise.all([
-    apiGet<ContentItem[] | ContentItem>(contentsPath),
-    apiGet<BranchItem[]>(`/repos/${owner}/${repo}/branches?per_page=100`),
-    fetchReadme(owner, repo, branch, currentPath),
-  ]);
+  let branchesRaw: BranchItem[];
+  try {
+    branchesRaw = await apiClient.getBranches<BranchItem[]>(owner, repo);
+  } catch {
+    branchesRaw = [{ name: branch }];
+  }
+
+  const branches = branchesRaw.length > 0 ? branchesRaw : [{ name: branch }];
+  const readmeRaw = await fetchReadme(owner, repo, branch, currentPath);
 
   const contents: ContentItem[] = Array.isArray(contentsRaw)
     ? contentsRaw
     : contentsRaw
       ? [contentsRaw]
       : [];
-  const branches = branchesRaw ?? [{ name: branch }];
   const entries = mapContents(contents);
-  const readmeHtml = readmeRaw ? renderReadmeMarkdown(readmeRaw) : null;
-
+  const readmeHtml = readmeRaw ? renderMarkdown(readmeRaw) : null;
   const pathParts = currentPath ? currentPath.split("/") : [];
 
   return (
@@ -190,29 +199,13 @@ export default async function RepoTreePage({
       <div className="max-w-[1280px] mx-auto px-6 py-6">
         <div className="bg-white border border-[#d0d7de] rounded-lg overflow-hidden">
           <div className="p-3 border-b border-[#d0d7de] flex items-center gap-3 flex-wrap">
-            <details className="relative">
-              <summary className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#f6f8fa] border border-[#d0d7de] rounded-md text-sm cursor-pointer list-none">
-                ⎇ <strong>{branch}</strong> ▾
-              </summary>
-              <ul className="absolute left-0 top-full mt-1 z-20 min-w-[160px] bg-white border border-[#d0d7de] rounded-md shadow-lg py-1 list-none m-0">
-                {branches.map((b) => (
-                  <li key={b.name}>
-                    <Link
-                      href={
-                        currentPath
-                          ? `/${owner}/${repo}/tree/${b.name}/${currentPath}`
-                          : `/${owner}/${repo}?ref=${encodeURIComponent(b.name)}`
-                      }
-                      className={`block px-3 py-2 text-sm no-underline hover:bg-[#f6f8fa] ${
-                        b.name === branch ? "font-semibold text-[#0969da]" : "text-[#24292f]"
-                      }`}
-                    >
-                      {b.name}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </details>
+            <TreeBranchSelector
+              owner={owner}
+              repo={repo}
+              currentPath={currentPath}
+              branches={branches}
+              currentBranch={branch}
+            />
 
             <nav className="flex items-center gap-1 text-sm flex-wrap min-w-0">
               <Link href={`/${owner}/${repo}`} className="text-[#0969da] hover:underline no-underline">
@@ -220,7 +213,7 @@ export default async function RepoTreePage({
               </Link>
               <span className="text-[#57606a]">/</span>
               <Link
-                href={`/${owner}/${repo}/tree/${branch}`}
+                href={`/${owner}/${repo}/tree/${encodeURIComponent(branch)}`}
                 className="text-[#0969da] hover:underline no-underline font-mono"
               >
                 {branch}
@@ -235,7 +228,10 @@ export default async function RepoTreePage({
                       <span className="font-mono text-[#24292f]">{part}</span>
                     ) : (
                       <Link
-                        href={`/${owner}/${repo}/tree/${branch}/${sub}`}
+                        href={`/${owner}/${repo}/tree/${encodeURIComponent(branch)}/${sub
+                          .split("/")
+                          .map(encodeURIComponent)
+                          .join("/")}`}
                         className="text-[#0969da] hover:underline no-underline font-mono"
                       >
                         {part}
