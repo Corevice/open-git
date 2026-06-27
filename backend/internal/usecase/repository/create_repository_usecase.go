@@ -6,7 +6,8 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/open-git/backend/internal/domain"
+	"github.com/google/uuid"
+	"github.com/open-git/backend/internal/domain/entity"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
@@ -18,8 +19,8 @@ var (
 var repoNameRegex = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
 
 type CreateRepositoryInput struct {
-	OwnerID        int64
-	OrganizationID int64
+	OwnerID        uuid.UUID
+	OrganizationID uuid.UUID
 	Name           string
 	Private        bool
 	Description    string
@@ -33,7 +34,7 @@ func NewCreateRepositoryUsecase(repos repo.IRepositoryRepository) *CreateReposit
 	return &CreateRepositoryUsecase{repos: repos}
 }
 
-func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepositoryInput) (*domain.Repository, error) {
+func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepositoryInput) (*entity.Repository, error) {
 	if !repoNameRegex.MatchString(input.Name) {
 		return nil, ErrInvalidName
 	}
@@ -42,22 +43,17 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 		return nil, ErrDuplicateName
 	}
 
-	if _, err := u.repos.NextNumber(ctx, input.OwnerID); err != nil {
-		return nil, err
-	}
-
-	visibility := domain.VisibilityPublic
+	visibility := entity.VisibilityPublic
 	if input.Private {
-		visibility = domain.VisibilityPrivate
+		visibility = entity.VisibilityPrivate
 	}
 
-	repository := &domain.Repository{
+	repository := &entity.Repository{
 		OrganizationID: input.OrganizationID,
 		OwnerID:        input.OwnerID,
 		Name:           input.Name,
 		Visibility:     visibility,
 		DefaultBranch:  "main",
-		Description:    input.Description,
 		CreatedAt:      time.Now().UTC(),
 	}
 
