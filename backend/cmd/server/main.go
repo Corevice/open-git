@@ -30,13 +30,14 @@ import (
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/handler"
 	appmiddleware "github.com/open-git/backend/internal/middleware"
-	"github.com/open-git/backend/internal/infrastructure/database"
+	infraDB "github.com/open-git/backend/internal/infrastructure/database"
 	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
-	repo "github.com/open-git/backend/internal/repository"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
+	orgUC "github.com/open-git/backend/internal/usecase/org"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
+	userUC "github.com/open-git/backend/internal/usecase/user"
 )
 
 var (
@@ -51,19 +52,19 @@ func main() {
 		log.Fatalf("invalid config: %v", err)
 	}
 
-	db, err := database.Connect(cfg)
+	db, err := infraDB.Connect(cfg)
 	if err != nil {
 		log.Fatalf("connect database: %v", err)
 	}
 	defer db.Close()
 
-	if err := database.Ping(context.Background(), db); err != nil {
+	if err := infraDB.Ping(context.Background(), db); err != nil {
 		log.Fatalf("ping database: %v", err)
 	}
-	log.Printf("database connected (%s): %s", cfg.DBType, database.MaskDSN(cfg.DBDSN))
+	log.Printf("database connected (%s): %s", cfg.DBType, infraDB.MaskDSN(cfg.DBDSN))
 
 	if cfg.DBAutoMigrate {
-		if err := database.RunMigrations(db, cfg.DBType, "./migrations"); err != nil {
+		if err := infraDB.RunMigrations(db, cfg.DBType, "./migrations"); err != nil {
 			log.Fatalf("run migrations: %v", err)
 		}
 	}
@@ -315,16 +316,18 @@ func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
 func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SSHServer, error) {
 	sqlxDB := sqlx.NewDb(db, cfg.DBType)
 
+	tokenRepo := infrarepo.NewAccessTokenRepository(sqlxDB)
 	entityUserRepo := infrarepo.NewUserRepository(sqlxDB)
 	userRepo := &legacyUserRepoAdapter{users: entityUserRepo}
-	tokenRepo := infrarepo.NewAccessTokenRepository(sqlxDB)
 	repoRepo := infrarepo.NewRepositoryRepository(sqlxDB)
-	sshKeyRepo := infrarepo.NewSSHKeyRepository(sqlxDB)
 	membershipRepo := infrarepo.NewMembershipRepository(sqlxDB)
 	legacyMembershipRepo := &legacyMembershipRepoAdapter{inner: membershipRepo}
+	orgRepo := infraDB.NewOrganizationRepository(db)
+	auditLogRepo := infraDB.NewAuditLogRepository(db)
+	sshKeyRepo := infrarepo.NewSSHKeyRepository(sqlxDB)
 	issueRepo := infrarepo.NewIssueRepository(sqlxDB)
 
-	realAuthMiddleware := appmiddleware.AuthMiddleware(tokenRepo)
+	authMiddleware := appmiddleware.AuthMiddleware(tokenRepo)
 	realGitBasicAuth := appmiddleware.GitBasicAuthMiddleware(tokenRepo)
 	realOptionalGitAuth := appmiddleware.OptionalGitAuth(tokenRepo)
 
@@ -337,7 +340,16 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	createRepoUC := repoUC.NewCreateRepositoryUsecase(repoRepo)
 	getRepoUC := repoUC.NewGetRepositoryUsecase(repoRepo, userRepo, legacyMembershipRepo)
-	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, repoRepo)
+	listReposUC := repoUC.NewListRepositoriesUsecase(repoRepo, legacyMembershipRepo, userRepo)
+	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, listReposUC, repoRepo, orgRepo, auditLogRepo)
+
+	getCurrentUserUC := userUC.NewGetCurrentUserUsecase(userRepo)
+	getUserByLoginUC := userUC.NewGetUserByLoginUsecase(userRepo)
+	userHandler := handler.NewUserHandler(getCurrentUserUC, getUserByLoginUC)
+
+	getOrgUC := orgUC.NewGetOrgUsecase(orgRepo)
+	listUserOrgsUC := orgUC.NewListUserOrgsUsecase(orgRepo)
+	orgHandler := handler.NewOrgHandler(getOrgUC, listUserOrgsUC)
 
 	contentHandler := handler.NewContentHandler(repoGitResolver)
 
@@ -371,21 +383,21 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	e.POST("/register", authHandler.Register)
 	e.POST("/login", authHandler.Login)
 
-	tokens := api.Group("/user/tokens", realAuthMiddleware)
+	tokens := api.Group("/user/tokens", authMiddleware)
 	tokens.GET("", tokenHandler.List)
 	tokens.POST("", tokenHandler.Create)
 	tokens.DELETE("/:id", tokenHandler.Revoke)
 
-	keys := api.Group("/user/keys", realAuthMiddleware)
+	keys := api.Group("/user/keys", authMiddleware)
 	keys.GET("", sshKeyHandler.List)
 	keys.POST("", sshKeyHandler.Add)
 	keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
-	repositoryHandler.RegisterRoutes(api, realAuthMiddleware)
+	repositoryHandler.RegisterRoutes(api, authMiddleware)
 	contentHandler.RegisterRoutes(api)
-	issueHandler.RegisterRoutes(api, realAuthMiddleware)
-	pullRequestHandler.RegisterRoutes(api, realAuthMiddleware)
-	oauthHandler.RegisterRoutes(api, realAuthMiddleware)
+	issueHandler.RegisterRoutes(api, authMiddleware)
+	pullRequestHandler.RegisterRoutes(api, authMiddleware)
+	oauthHandler.RegisterRoutes(api, authMiddleware)
 	e.GET("/:owner/:repo.git/info/refs", gitHTTPHandler.InfoRefs, realOptionalGitAuth)
 	e.POST("/:owner/:repo.git/git-upload-pack", gitHTTPHandler.UploadPack, realOptionalGitAuth)
 	e.POST("/:owner/:repo.git/git-receive-pack", gitHTTPHandler.ReceivePack, realGitBasicAuth)
@@ -394,17 +406,19 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3.Use(appmiddleware.GitHubCompatHeaders())
 	v3.Use(appmiddleware.RateLimitMiddleware(5000))
 
-	repositoryHandler.RegisterRoutes(v3, realAuthMiddleware)
+	userHandler.RegisterRoutes(v3, authMiddleware)
+	orgHandler.RegisterRoutes(v3, authMiddleware)
+	repositoryHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
-	issueHandler.RegisterRoutes(v3, realAuthMiddleware)
-	pullRequestHandler.RegisterRoutes(v3, realAuthMiddleware)
+	issueHandler.RegisterRoutes(v3, authMiddleware)
+	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
 
-	v3Tokens := v3.Group("/user/tokens", realAuthMiddleware)
+	v3Tokens := v3.Group("/user/tokens", authMiddleware)
 	v3Tokens.GET("", tokenHandler.List)
 	v3Tokens.POST("", tokenHandler.Create)
 	v3Tokens.DELETE("/:id", tokenHandler.Revoke)
 
-	v3Keys := v3.Group("/user/keys", realAuthMiddleware)
+	v3Keys := v3.Group("/user/keys", authMiddleware)
 	v3Keys.GET("", sshKeyHandler.List)
 	v3Keys.POST("", sshKeyHandler.Add)
 	v3Keys.DELETE("/:key_id", sshKeyHandler.Delete)
