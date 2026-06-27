@@ -224,15 +224,15 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 		return err
 	}
 
+	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
+	}
+
 	diskPath := repository.DiskPath
 	if diskPath != "" && isSafeRepositoryDiskPath(h.gitRoot, diskPath, repository.Name) {
 		if err := os.RemoveAll(diskPath); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository files"})
 		}
-	}
-
-	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -267,16 +267,23 @@ func isSafeRepositoryDiskPath(gitRoot, diskPath, repoName string) bool {
 		return false
 	}
 
-	cleanRoot := filepath.Clean(gitRoot)
-	cleanPath := filepath.Clean(diskPath)
-	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	resolvedRoot, err := filepath.EvalSymlinks(filepath.Clean(gitRoot))
+	if err != nil {
+		return false
+	}
+	resolvedPath, err := filepath.EvalSymlinks(filepath.Clean(diskPath))
+	if err != nil {
+		return false
+	}
+
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
 	if err != nil {
 		return false
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return false
 	}
-	return filepath.Base(cleanPath) == repoName+".git"
+	return filepath.Base(resolvedPath) == repoName+".git"
 }
 
 func (h *RepositoryHandler) resolveAuthenticatedOwner(c echo.Context) (uuid.UUID, string, error) {

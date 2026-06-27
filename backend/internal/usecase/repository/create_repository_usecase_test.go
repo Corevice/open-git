@@ -94,7 +94,10 @@ func (m *mockUserRepo) GetByID(context.Context, int64) (*domain.User, error) {
 	return nil, errors.New("not found")
 }
 
-func (m *mockUserRepo) GetByLogin(context.Context, string) (*domain.User, error) {
+func (m *mockUserRepo) GetByLogin(_ context.Context, login string) (*domain.User, error) {
+	if login == "alice" {
+		return &domain.User{ID: 1, Login: "alice"}, nil
+	}
 	return nil, errors.New("not found")
 }
 
@@ -196,6 +199,22 @@ func TestCreateRepositoryInitsBareRepo(t *testing.T) {
 
 	if _, err := gogit.PlainOpen(diskPath); err != nil {
 		t.Fatalf("expected valid bare git repo: %v", err)
+	}
+}
+
+func TestOwnerLoginMismatch(t *testing.T) {
+	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
+	uc := repository.NewCreateRepositoryUsecase(repos, &mockUserRepo{}, t.TempDir())
+
+	wrongOwnerID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
+		OwnerID:        wrongOwnerID,
+		OwnerLogin:     "alice",
+		OrganizationID: testOrgID,
+		Name:           "my-repo",
+	})
+	if !errors.Is(err, repository.ErrOwnerLoginMismatch) {
+		t.Fatalf("expected ErrOwnerLoginMismatch, got %v", err)
 	}
 }
 

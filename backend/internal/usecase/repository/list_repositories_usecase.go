@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 
 	"github.com/google/uuid"
@@ -11,8 +10,6 @@ import (
 	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 )
-
-const userUUIDPrefixLen = 8
 
 const (
 	MaxRepositoryPerPage  = 100
@@ -71,7 +68,7 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 
 	orgID := input.OrganizationID
 	if orgID == uuid.Nil {
-		orgID = uuidFromInt64(owner.ID)
+		orgID = middleware.Int64ToUUID(owner.ID)
 	}
 
 	page, perPage := NormalizeRepositoryPagination(input.Page, input.PerPage)
@@ -116,30 +113,11 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 }
 
 func (u *ListRepositoriesUsecase) resolveOwner(ctx context.Context, input ListRepositoriesInput) (*domain.User, string, error) {
-	if input.OwnerLogin != "" {
-		owner, err := u.users.GetByLogin(ctx, input.OwnerLogin)
-		if err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				return nil, "", ErrOwnerNotFound
-			}
-			return nil, "", err
-		}
-		if owner == nil {
-			return nil, "", ErrOwnerNotFound
-		}
-		return owner, owner.Login, nil
-	}
-
-	if input.OrganizationID == uuid.Nil {
+	if input.OwnerLogin == "" {
 		return nil, "", ErrOwnerNotFound
 	}
 
-	userID, ok := userIDFromUUID(input.OrganizationID)
-	if !ok {
-		return nil, "", ErrOwnerNotFound
-	}
-
-	owner, err := u.users.GetByID(ctx, userID)
+	owner, err := u.users.GetByLogin(ctx, input.OwnerLogin)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, "", ErrOwnerNotFound
@@ -167,6 +145,9 @@ func (u *ListRepositoriesUsecase) canViewRepository(
 	if requestUserID == r.OwnerID {
 		return true
 	}
+	if requestUserID == r.OrganizationID {
+		return true
+	}
 	if allowed, ok := membershipAccess[r.OrganizationID]; ok {
 		return allowed
 	}
@@ -174,32 +155,4 @@ func (u *ListRepositoriesUsecase) canViewRepository(
 	allowed := err == nil && hasAccess
 	membershipAccess[r.OrganizationID] = allowed
 	return allowed
-}
-
-func isUserUUID(id uuid.UUID) bool {
-	for i := 0; i < userUUIDPrefixLen; i++ {
-		if id[i] != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func userIDFromUUID(id uuid.UUID) (int64, bool) {
-	if id == uuid.Nil || !isUserUUID(id) {
-		return 0, false
-	}
-	return int64(binary.BigEndian.Uint64(id[userUUIDPrefixLen:])), true
-}
-
-func int64FromUUID(id uuid.UUID) int64 {
-	userID, ok := userIDFromUUID(id)
-	if !ok {
-		return 0
-	}
-	return userID
-}
-
-func uuidFromInt64(id int64) uuid.UUID {
-	return middleware.Int64ToUUID(id)
 }
