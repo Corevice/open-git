@@ -121,6 +121,11 @@ func (h *RepositoryHandler) ListOrg(c echo.Context) error {
 		return err
 	}
 
+	page, perPage, err := middleware.ParsePaginationParams(c)
+	if err != nil {
+		return err
+	}
+
 	ctx := c.Request().Context()
 	org, err := h.orgs.GetByLogin(ctx, c.Param("org"))
 	if err != nil {
@@ -136,11 +141,6 @@ func (h *RepositoryHandler) ListOrg(c echo.Context) error {
 	}
 	if role == "" {
 		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
-	}
-
-	page, perPage, err := middleware.ParsePaginationParams(c)
-	if err != nil {
-		return err
 	}
 
 	orgUUID := middleware.Int64ToUUID(org.ID)
@@ -322,12 +322,12 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	if err := h.repos.Delete(ctx, repository.ID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
-	}
-
 	if err := h.recordAudit(ctx, repository.OrganizationID, userID, "repo.delete", "Repository", repository.ID, nil); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to record audit log"})
+	}
+
+	if err := h.repos.Delete(ctx, repository.ID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -341,7 +341,7 @@ func (h *RepositoryHandler) recordAudit(
 	metadata map[string]any,
 ) error {
 	if h.auditLog == nil {
-		return errors.New("audit log repository is not configured")
+		return nil
 	}
 	return h.auditLog.Record(ctx, orgID, actorID, action, targetType, targetID, metadata)
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,7 +42,7 @@ func (r *sqlAuditLogRepository) Record(
 	_, err := r.db.ExecContext(
 		ctx,
 		query,
-		fmt.Sprintf("%x", uuid.New()),
+		uuid.New().String(),
 		orgID.String(),
 		actorID.String(),
 		action,

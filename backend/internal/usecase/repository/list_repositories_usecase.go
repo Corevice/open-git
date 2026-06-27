@@ -5,14 +5,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain/entity"
-	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
 type ListRepositoriesInput struct {
 	OrganizationID uuid.UUID
 	OwnerID        uuid.UUID
-	OwnerLogin     string
 	RequestUserID  uuid.UUID
 	Page           int
 	PerPage        int
@@ -47,19 +45,9 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 		err          error
 	)
 
-	switch {
-	case input.OwnerID != uuid.Nil:
+	if input.OwnerID != uuid.Nil {
 		repositories, err = u.repos.ListByOwner(ctx, input.OwnerID, page, perPage)
-	case input.OwnerLogin != "" && u.users != nil:
-		user, lookupErr := u.users.GetByLogin(ctx, input.OwnerLogin)
-		if lookupErr != nil {
-			return nil, lookupErr
-		}
-		if user == nil {
-			return []*entity.Repository{}, nil
-		}
-		repositories, err = u.repos.ListByOwner(ctx, middleware.Int64ToUUID(user.ID), page, perPage)
-	default:
+	} else {
 		repositories, err = u.repos.ListByOrg(ctx, input.OrganizationID, page, perPage)
 	}
 	if err != nil {

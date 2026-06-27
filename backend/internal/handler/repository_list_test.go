@@ -20,10 +20,11 @@ import (
 )
 
 var (
-	listTestUserID  = int64(7)
-	listTestUserUUID = uuid.MustParse("00000000-0000-0000-0000-000000000007")
-	listTestOrgID   = int64(42)
-	listTestOrgUUID = uuid.MustParse("00000000-0000-0000-0000-000000000042")
+	listTestUserID     = int64(7)
+	listTestUserUUID   = uuid.MustParse("00000000-0000-0000-0000-000000000007")
+	listTestOwnerLogin = "testuser"
+	listTestOrgID      = int64(42)
+	listTestOrgUUID    = uuid.MustParse("00000000-0000-0000-0000-000000000042")
 )
 
 type listMockRepositoryRepo struct {
@@ -47,7 +48,7 @@ func (m *listMockRepositoryRepo) Create(_ context.Context, repo *entity.Reposito
 		repo.ID = uuid.New()
 	}
 	m.byOwner[repo.OwnerID] = append(m.byOwner[repo.OwnerID], repo)
-	m.byLoginName[repoLoginKey("unknown", repo.Name)] = repo
+	m.byLoginName[repoLoginKey(listTestOwnerLogin, repo.Name)] = repo
 	return nil
 }
 
@@ -368,7 +369,7 @@ func TestDeleteRepoAuditLog(t *testing.T) {
 			},
 		},
 		byLoginName: map[string]*entity.Repository{
-			repoLoginKey("unknown", "delete-me"): {
+			repoLoginKey(listTestOwnerLogin, "delete-me"): {
 				ID:             repoID,
 				OrganizationID: listTestUserUUID,
 				OwnerID:        listTestUserUUID,
@@ -381,7 +382,7 @@ func TestDeleteRepoAuditLog(t *testing.T) {
 	auditLog := &listMockAuditLogRepo{}
 	e := newRepositoryHandlerEcho(t, repos, &listMockOrgRepo{}, auditLog, authMiddleware(listTestUserID))
 
-	req := httptest.NewRequest(http.MethodDelete, "/repos/unknown/delete-me", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/repos/"+listTestOwnerLogin+"/delete-me", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
