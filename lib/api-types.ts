@@ -10,6 +10,17 @@ export interface Repository {
   owner: string;
   visibility: string;
   defaultBranch: string;
+  clone_url?: string;
+  ssh_url?: string;
+}
+
+export interface SSHKey {
+  id: string;
+  title: string;
+  key_type: string;
+  fingerprint: string;
+  created_at: string;
+  last_used_at: string | null;
 }
 
 export interface Issue {

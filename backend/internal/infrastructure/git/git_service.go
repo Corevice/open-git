@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -42,7 +43,24 @@ const (
 	TreeEntryTypeDir  = "dir"
 )
 
-var ErrPathNotFound = errors.New("path not found")
+var (
+	ErrPathNotFound      = errors.New("path not found")
+	ErrRefAlreadyExists  = errors.New("reference already exists")
+)
+
+// BranchSummary describes a branch or tag reference.
+type BranchSummary struct {
+	Name      string
+	CommitSHA string
+}
+
+// FileDiff describes a single file change between two refs.
+type FileDiff struct {
+	OldPath string
+	NewPath string
+	Patch   string
+	Status  string
+}
 
 // InitBare creates a new bare repository at path.
 func InitBare(path string) error {
@@ -342,4 +360,189 @@ func GetCommits(repoPath, branch string, page, perPage int) ([]CommitSummary, in
 		endIdx = total
 	}
 	return all[startIdx:endIdx], total, nil
+}
+
+// GetBranches returns all branch references in the repository.
+func GetBranches(repoPath string) ([]BranchSummary, error) {
+	repo, err := openRepository(repoPath)
+	if err != nil {
+		return nil, err
+	}
+
+	iter, err := repo.Branches()
+	if err != nil {
+		return nil, err
+	}
+
+	branches := make([]BranchSummary, 0)
+	err = iter.ForEach(func(ref *plumbing.Reference) error {
+		branches = append(branches, BranchSummary{
+			Name:      strings.TrimPrefix(ref.Name().String(), "refs/heads/"),
+			CommitSHA: ref.Hash().String(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return branches, nil
+}
+
+// GetTags returns all tag references in the repository.
+func GetTags(repoPath string) ([]BranchSummary, error) {
+	repo, err := openRepository(repoPath)
+	if err != nil {
+		return nil, err
+	}
+
+	iter, err := repo.Tags()
+	if err != nil {
+		return nil, err
+	}
+
+	tags := make([]BranchSummary, 0)
+	err = iter.ForEach(func(ref *plumbing.Reference) error {
+		tags = append(tags, BranchSummary{
+			Name:      strings.TrimPrefix(ref.Name().String(), "refs/tags/"),
+			CommitSHA: ref.Hash().String(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return tags, nil
+}
+
+// CreateBranch creates a new branch pointing at fromRef.
+func CreateBranch(repoPath, name, fromRef string) error {
+	repo, err := openRepository(repoPath)
+	if err != nil {
+		return err
+	}
+
+	refName := plumbing.NewBranchReferenceName(name)
+	if _, err := repo.Storer.Reference(refName); err == nil {
+		return ErrRefAlreadyExists
+	} else if !errors.Is(err, plumbing.ErrReferenceNotFound) {
+		return err
+	}
+
+	commit, err := resolveCommit(repo, fromRef)
+	if err != nil {
+		return err
+	}
+
+	ref := plumbing.NewHashReference(refName, commit.Hash)
+	return repo.Storer.SetReference(ref)
+}
+
+// DeleteBranch removes a branch reference.
+func DeleteBranch(repoPath, name string) error {
+	repo, err := openRepository(repoPath)
+	if err != nil {
+		return err
+	}
+
+	err = repo.Storer.RemoveReference(plumbing.NewBranchReferenceName(name))
+	if err != nil {
+		if errors.Is(err, plumbing.ErrReferenceNotFound) {
+			return ErrPathNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+// SetDefaultBranch updates HEAD to point at the named branch.
+func SetDefaultBranch(repoPath, name string) error {
+	repo, err := openRepository(repoPath)
+	if err != nil {
+		return err
+	}
+
+	ref := plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.NewBranchReferenceName(name))
+	return repo.Storer.SetReference(ref)
+}
+
+// GetDiff returns file-level diffs between baseRef and headRef.
+func GetDiff(repoPath, baseRef, headRef string) ([]FileDiff, error) {
+	repo, err := openRepository(repoPath)
+	if err != nil {
+		return nil, err
+	}
+
+	baseCommit, err := resolveCommit(repo, baseRef)
+	if err != nil {
+		return nil, err
+	}
+	headCommit, err := resolveCommit(repo, headRef)
+	if err != nil {
+		return nil, err
+	}
+
+	baseTree, err := baseCommit.Tree()
+	if err != nil {
+		return nil, err
+	}
+	headTree, err := headCommit.Tree()
+	if err != nil {
+		return nil, err
+	}
+
+	changes, err := object.DiffTree(context.Background(), baseTree, headTree)
+	if err != nil {
+		return nil, err
+	}
+
+	patch, err := changes.Patch()
+	if err != nil {
+		return nil, err
+	}
+
+	filePatches := patch.FilePatches()
+	diffs := make([]FileDiff, 0, len(filePatches))
+	for _, fp := range filePatches {
+		from, to := fp.Files()
+		oldPath := ""
+		newPath := ""
+		if from != nil {
+			oldPath = from.Path()
+		}
+		if to != nil {
+			newPath = to.Path()
+		}
+
+		status := ""
+		var patchContent strings.Builder
+		for _, chunk := range fp.Chunks() {
+			switch chunk.Type() {
+			case object.Add:
+				if status == "" {
+					status = "add"
+				}
+			case object.Delete:
+				status = "delete"
+			case object.Modify:
+				if status != "delete" {
+					status = "modify"
+				}
+			}
+			if chunk.Type() != object.Equal {
+				patchContent.WriteString(chunk.Content())
+			}
+		}
+		if status == "" {
+			status = "modify"
+		}
+
+		diffs = append(diffs, FileDiff{
+			OldPath: oldPath,
+			NewPath: newPath,
+			Patch:   patchContent.String(),
+			Status:  status,
+		})
+	}
+
+	return diffs, nil
 }
