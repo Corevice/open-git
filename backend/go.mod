@@ -12,6 +12,8 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/prometheus/client_golang v1.22.0
+	github.com/testcontainers/testcontainers-go v0.35.0
+	github.com/testcontainers/testcontainers-go/modules/postgres v0.35.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
