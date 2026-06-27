@@ -198,3 +198,78 @@ describe("sshKeys", () => {
     );
   });
 });
+
+describe("users", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("getCurrent calls GET /api/v3/user with auth header", async () => {
+    const user = { id: 1, login: "alice", email: "alice@example.com" };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => user,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+    client.setToken("test-bearer-token");
+
+    const result = await client.users.getCurrent();
+
+    expect(result).toEqual(user);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/user",
+      expect.objectContaining({
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer test-bearer-token",
+        },
+      }),
+    );
+  });
+
+  it("updateCurrent({name:'Bob'}) calls PATCH /api/v3/user", async () => {
+    const updatedUser = {
+      id: 1,
+      login: "alice",
+      email: "alice@example.com",
+      name: "Bob",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => updatedUser,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+    client.setToken("test-bearer-token");
+
+    const result = await client.users.updateCurrent({ name: "Bob" });
+
+    expect(result).toEqual(updatedUser);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/user",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer test-bearer-token",
+        },
+        body: JSON.stringify({ name: "Bob" }),
+      }),
+    );
+  });
+});
