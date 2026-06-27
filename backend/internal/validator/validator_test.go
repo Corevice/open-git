@@ -1,6 +1,7 @@
 package validator_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/open-git/backend/internal/validator"
@@ -10,24 +11,35 @@ func TestValidateLogin(t *testing.T) {
 	tests := []struct {
 		name    string
 		login   string
-		wantErr bool
+		wantErr error
 	}{
-		{name: "valid login", login: "alice-dev", wantErr: false},
-		{name: "too short", login: "ab", wantErr: true},
-		{name: "contains space", login: "hello world", wantErr: true},
-		{name: "empty", login: "", wantErr: true},
-		{name: "too long", login: "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrst", wantErr: true},
-		{name: "invalid characters", login: "alice_dev", wantErr: true},
+		{name: "valid alice-dev", login: "alice-dev", wantErr: nil},
+		{name: "valid alice123", login: "alice123", wantErr: nil},
+		{name: "valid single char", login: "a", wantErr: nil},
+		{name: "40 chars", login: "abcdefghijklmnopqrstuvwxyzabcdefghijklmn", wantErr: validator.ErrInvalidLogin},
+		{name: "leading hyphen", login: "-alice", wantErr: validator.ErrInvalidLogin},
+		{name: "trailing hyphen", login: "alice-", wantErr: validator.ErrInvalidLogin},
+		{name: "double hyphen", login: "alice--dev", wantErr: validator.ErrInvalidLogin},
+		{name: "admin reserved", login: "admin", wantErr: validator.ErrReservedLogin},
+		{name: "contains space", login: "hello world", wantErr: validator.ErrInvalidLogin},
+		{name: "empty", login: "", wantErr: validator.ErrInvalidLogin},
+		{name: "invalid characters", login: "alice_dev", wantErr: validator.ErrInvalidLogin},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validator.ValidateLogin(tt.login)
-			if tt.wantErr && err == nil {
-				t.Fatal("expected error, got nil")
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				return
 			}
-			if !tt.wantErr && err != nil {
-				t.Fatalf("expected no error, got %v", err)
+			if err == nil {
+				t.Fatalf("expected error %v, got nil", tt.wantErr)
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
 			}
 		})
 	}
