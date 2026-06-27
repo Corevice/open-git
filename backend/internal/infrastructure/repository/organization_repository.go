@@ -33,26 +33,27 @@ func (r *sqlxOrganizationRepository) Create(ctx context.Context, org *entity.Org
 	}
 
 	const query = `
-		INSERT INTO organizations (id, login, name, plan_tier, created_at)
-		VALUES (:id, :login, :name, :plan_tier, :created_at)
+		INSERT INTO organizations (id, login, name, description, plan_tier, created_at)
+		VALUES (:id, :login, :name, :description, :plan_tier, :created_at)
 	`
 
 	_, err := r.DB.NamedExecContext(ctx, query, map[string]any{
-		"id":         org.ID,
-		"login":      org.Login,
-		"name":       org.Name,
-		"plan_tier":  org.PlanTier,
-		"created_at": org.CreatedAt,
+		"id":          org.ID,
+		"login":       org.Login,
+		"name":        org.Name,
+		"description": org.Description,
+		"plan_tier":   org.PlanTier,
+		"created_at":  org.CreatedAt,
 	})
 	return dbErrors.MapDBError(err)
 }
 
 func (r *sqlxOrganizationRepository) GetByID(ctx context.Context, id uuid.UUID) (*entity.Organization, error) {
-	return r.getOne(ctx, `SELECT id, login, name, plan_tier, created_at FROM organizations WHERE id = ?`, id)
+	return r.getOne(ctx, `SELECT id, login, name, description, plan_tier, created_at FROM organizations WHERE id = ?`, id)
 }
 
 func (r *sqlxOrganizationRepository) GetByLogin(ctx context.Context, login string) (*entity.Organization, error) {
-	return r.getOne(ctx, `SELECT id, login, name, plan_tier, created_at FROM organizations WHERE login = ?`, login)
+	return r.getOne(ctx, `SELECT id, login, name, description, plan_tier, created_at FROM organizations WHERE login = ?`, login)
 }
 
 func (r *sqlxOrganizationRepository) getOne(ctx context.Context, query string, arg any) (*entity.Organization, error) {
@@ -60,7 +61,7 @@ func (r *sqlxOrganizationRepository) getOne(ctx context.Context, query string, a
 	row := r.DB.QueryRowxContext(ctx, query, arg)
 
 	var org entity.Organization
-	err := row.Scan(&org.ID, &org.Login, &org.Name, &org.PlanTier, &org.CreatedAt)
+	err := row.Scan(&org.ID, &org.Login, &org.Name, &org.Description, &org.PlanTier, &org.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
@@ -80,7 +81,7 @@ func (r *sqlxOrganizationRepository) List(ctx context.Context, page, perPage int
 	offset := (page - 1) * perPage
 
 	query := `
-		SELECT id, login, name, plan_tier, created_at
+		SELECT id, login, name, description, plan_tier, created_at
 		FROM organizations
 		ORDER BY created_at ASC
 		LIMIT ? OFFSET ?
@@ -96,7 +97,7 @@ func (r *sqlxOrganizationRepository) List(ctx context.Context, page, perPage int
 	var orgs []*entity.Organization
 	for rows.Next() {
 		var org entity.Organization
-		if err := rows.Scan(&org.ID, &org.Login, &org.Name, &org.PlanTier, &org.CreatedAt); err != nil {
+		if err := rows.Scan(&org.ID, &org.Login, &org.Name, &org.Description, &org.PlanTier, &org.CreatedAt); err != nil {
 			return nil, dbErrors.MapDBError(err)
 		}
 		orgs = append(orgs, &org)

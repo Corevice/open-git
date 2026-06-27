@@ -1,0 +1,3 @@
+ALTER TABLE repositories ADD COLUMN description TEXT NOT NULL DEFAULT '';
+ALTER TABLE repositories ADD COLUMN git_path TEXT NOT NULL DEFAULT '';
+ALTER TABLE repositories ADD COLUMN owner_login TEXT NOT NULL DEFAULT '';

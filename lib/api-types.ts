@@ -2,6 +2,36 @@ export interface User {
   id: number;
   login: string;
   email: string;
+  name?: string;
+  bio?: string;
+  avatar_url?: string;
+}
+
+export interface OrgProfile {
+  id: number;
+  login: string;
+  name: string;
+  description: string;
+  type: "Organization";
+}
+
+export interface OrgMember {
+  id: number;
+  login: string;
+  role: string;
+}
+
+export interface AccessTokenMeta {
+  id: number;
+  note: string;
+  scopes: string[];
+  expires_at: string | null;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface CreateTokenResult extends AccessTokenMeta {
+  token: string;
 }
 
 export interface Repository {
