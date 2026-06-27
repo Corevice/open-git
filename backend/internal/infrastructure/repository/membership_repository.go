@@ -7,15 +7,15 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-type sqlxMembershipRepository struct {
+type MembershipRepository struct {
 	*sqlx.DB
 }
 
-func NewMembershipRepository(db *sqlx.DB) *sqlxMembershipRepository {
-	return &sqlxMembershipRepository{DB: db}
+func NewMembershipRepository(db *sqlx.DB) *MembershipRepository {
+	return &MembershipRepository{DB: db}
 }
 
-func (r *sqlxMembershipRepository) HasReadAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
+func (r *MembershipRepository) HasReadAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
 	const query = `
 		SELECT EXISTS(
 			SELECT 1 FROM memberships
@@ -30,7 +30,7 @@ func (r *sqlxMembershipRepository) HasReadAccess(ctx context.Context, userID, or
 	return exists, nil
 }
 
-func (r *sqlxMembershipRepository) HasWriteAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
+func (r *MembershipRepository) HasWriteAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
 	const query = `
 		SELECT EXISTS(
 			SELECT 1 FROM memberships
