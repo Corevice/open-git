@@ -1,4 +1,15 @@
-import type { OrgMember, OrgProfile, SSHKey, User } from "./api-types";
+import type {
+  AccessTokenMeta,
+  CreateTokenResult,
+  OrgMember,
+  OrgProfile,
+  SSHKey,
+  User,
+} from "./api-types";
+
+export type AccessTokenListItem = AccessTokenMeta & {
+  revoked_at: string | null;
+};
 
 export const API_TOKEN_KEY = "open-git-auth-token";
 
@@ -133,5 +144,12 @@ export class ApiClient {
     create: (title: string, key: string) =>
       this.post<SSHKey>("/api/v3/user/keys", { title, key }),
     remove: (id: string) => this.del("/api/v3/user/keys/" + id),
+  };
+
+  tokens = {
+    list: () => this.get<AccessTokenListItem[]>("/api/v3/user/tokens"),
+    create: (data: { note: string; scopes: string[]; expires_at?: string }) =>
+      this.post<CreateTokenResult>("/api/v3/user/tokens", data),
+    revoke: (id: number) => this.del(`/api/v3/user/tokens/${id}`),
   };
 }
