@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -28,10 +29,10 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanRepositoryFull(scanner rowScanner) (*entity.Repository, error) {
+func scanRepository(scanner rowScanner, includeDiskPath bool) (*entity.Repository, error) {
 	var repo entity.Repository
 	var isEmpty int
-	err := scanner.Scan(
+	dest := []any{
 		&repo.ID,
 		&repo.OrganizationID,
 		&repo.OwnerID,
@@ -39,10 +40,13 @@ func scanRepositoryFull(scanner rowScanner) (*entity.Repository, error) {
 		&repo.Visibility,
 		&repo.DefaultBranch,
 		&repo.Description,
-		&repo.DiskPath,
-		&isEmpty,
-		&repo.CreatedAt,
-	)
+	}
+	if includeDiskPath {
+		dest = append(dest, &repo.DiskPath)
+	}
+	dest = append(dest, &isEmpty, &repo.CreatedAt)
+
+	err := scanner.Scan(dest...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -53,28 +57,11 @@ func scanRepositoryFull(scanner rowScanner) (*entity.Repository, error) {
 	return &repo, nil
 }
 
-func scanRepositoryMetadata(scanner rowScanner) (*entity.Repository, error) {
-	var repo entity.Repository
-	var isEmpty int
-	err := scanner.Scan(
-		&repo.ID,
-		&repo.OrganizationID,
-		&repo.OwnerID,
-		&repo.Name,
-		&repo.Visibility,
-		&repo.DefaultBranch,
-		&repo.Description,
-		&isEmpty,
-		&repo.CreatedAt,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+func gitStorageBaseDir() string {
+	if baseDir := os.Getenv("GIT_STORAGE_PATH"); baseDir != "" {
+		return baseDir
 	}
-	if err != nil {
-		return nil, err
-	}
-	repo.IsEmpty = isEmpty != 0
-	return &repo, nil
+	return "/data/repos"
 }
 
 func validateDiskPath(diskPath string) error {
@@ -87,21 +74,112 @@ func validateDiskPath(diskPath string) error {
 	if !filepath.IsAbs(diskPath) {
 		return ErrInvalidDiskPath
 	}
-	if filepath.Clean(diskPath) != diskPath {
+	cleaned := filepath.Clean(diskPath)
+	if cleaned != diskPath {
+		return ErrInvalidDiskPath
+	}
+	baseAbs, err := filepath.Abs(gitStorageBaseDir())
+	if err != nil {
+		return ErrInvalidDiskPath
+	}
+	pathAbs, err := filepath.Abs(cleaned)
+	if err != nil {
+		return ErrInvalidDiskPath
+	}
+	rel, err := filepath.Rel(baseAbs, pathAbs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return ErrInvalidDiskPath
 	}
 	return nil
 }
 
-func canViewRepository(repo *entity.Repository, requestUserID uuid.UUID) bool {
+func (r *sqlxRepositoryRepository) isRepositoryCollaborator(ctx context.Context, repositoryID, userID uuid.UUID) (bool, error) {
+	const query = `
+		SELECT COUNT(*)
+		FROM repository_collaborators
+		WHERE repository_id = $1 AND user_id = $2
+	`
+	var count int
+	if err := r.DB.GetContext(ctx, &count, query, repositoryID, userID); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r *sqlxRepositoryRepository) hasOrganizationMembership(ctx context.Context, organizationID, userID uuid.UUID) (bool, error) {
+	const query = `
+		SELECT COUNT(*)
+		FROM memberships
+		WHERE organization_id = $1 AND user_id = $2
+	`
+	var count int
+	if err := r.DB.GetContext(ctx, &count, query, organizationID, userID); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r *sqlxRepositoryRepository) canViewRepository(ctx context.Context, repo *entity.Repository, requestUserID uuid.UUID) (bool, error) {
 	switch repo.Visibility {
 	case entity.VisibilityPublic:
-		return true
+		return true, nil
 	case entity.VisibilityPrivate, entity.VisibilityInternal:
-		return requestUserID != uuid.Nil && requestUserID == repo.OwnerID
+		if requestUserID == uuid.Nil {
+			return false, nil
+		}
+		if requestUserID == repo.OwnerID {
+			return true, nil
+		}
+		isCollaborator, err := r.isRepositoryCollaborator(ctx, repo.ID, requestUserID)
+		if err != nil {
+			return false, err
+		}
+		if isCollaborator {
+			return true, nil
+		}
+		if repo.Visibility == entity.VisibilityInternal {
+			return r.hasOrganizationMembership(ctx, repo.OrganizationID, requestUserID)
+		}
+		return false, nil
 	default:
-		return false
+		return false, nil
 	}
+}
+
+func (r *sqlxRepositoryRepository) authorizeRepositoryWrite(ctx context.Context, requestUserID, repositoryID uuid.UUID) error {
+	if requestUserID == uuid.Nil {
+		return domain.ErrForbidden
+	}
+
+	const query = `
+		SELECT owner_id
+		FROM repositories
+		WHERE id = $1
+	`
+	var ownerID uuid.UUID
+	if err := r.DB.GetContext(ctx, &ownerID, query, repositoryID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		return err
+	}
+	if requestUserID == ownerID {
+		return nil
+	}
+
+	const collaboratorQuery = `
+		SELECT COUNT(*)
+		FROM repository_collaborators
+		WHERE repository_id = $1 AND user_id = $2 AND permission IN ('write', 'admin')
+	`
+	var count int
+	if err := r.DB.GetContext(ctx, &count, collaboratorQuery, repositoryID, requestUserID); err != nil {
+		return err
+	}
+	if count == 0 {
+		return domain.ErrForbidden
+	}
+	return nil
 }
 
 func execUpdateOne(ctx context.Context, db *sqlx.DB, query string, args ...any) error {
@@ -160,26 +238,30 @@ func (r *sqlxRepositoryRepository) GetByOwnerAndName(ctx context.Context, ownerI
 	`
 
 	row := r.DB.QueryRowxContext(ctx, query, ownerID, name)
-	return scanRepositoryFull(row)
+	return scanRepository(row, true)
 }
 
 // GetByOwnerLoginAndName resolves a repository by owner login and name.
-// disk_path is intentionally omitted. Visibility is enforced here: private and
-// internal repositories are only returned when requestUserID matches the owner.
+// Visibility is enforced here: private/internal repositories require owner,
+// collaborator, or (for internal) organization membership access.
 func (r *sqlxRepositoryRepository) GetByOwnerLoginAndName(ctx context.Context, ownerLogin, name string, requestUserID uuid.UUID) (*entity.Repository, error) {
 	const query = `
-		SELECT r.id, r.organization_id, r.owner_id, r.name, r.visibility, r.default_branch, r.description, r.is_empty, r.created_at
+		SELECT r.id, r.organization_id, r.owner_id, r.name, r.visibility, r.default_branch, r.description, r.disk_path, r.is_empty, r.created_at
 		FROM repositories r
 		JOIN users u ON r.owner_id = u.id
 		WHERE u.login = $1 AND r.name = $2
 	`
 
 	row := r.DB.QueryRowxContext(ctx, query, ownerLogin, name)
-	repo, err := scanRepositoryMetadata(row)
+	repo, err := scanRepository(row, true)
 	if err != nil || repo == nil {
 		return repo, err
 	}
-	if !canViewRepository(repo, requestUserID) {
+	canView, err := r.canViewRepository(ctx, repo, requestUserID)
+	if err != nil {
+		return nil, err
+	}
+	if !canView {
 		return nil, nil
 	}
 	return repo, nil
@@ -210,7 +292,7 @@ func (r *sqlxRepositoryRepository) ListByOrg(ctx context.Context, orgID uuid.UUI
 
 	var repos []*entity.Repository
 	for rows.Next() {
-		repo, err := scanRepositoryFull(rows)
+		repo, err := scanRepository(rows, true)
 		if err != nil {
 			return nil, err
 		}
@@ -228,7 +310,10 @@ func (r *sqlxRepositoryRepository) UpdateVisibility(ctx context.Context, id uuid
 	return err
 }
 
-func (r *sqlxRepositoryRepository) UpdateDiskPath(ctx context.Context, id uuid.UUID, diskPath string) error {
+func (r *sqlxRepositoryRepository) UpdateDiskPath(ctx context.Context, requestUserID, id uuid.UUID, diskPath string) error {
+	if err := r.authorizeRepositoryWrite(ctx, requestUserID, id); err != nil {
+		return err
+	}
 	if err := validateDiskPath(diskPath); err != nil {
 		return err
 	}
@@ -236,7 +321,10 @@ func (r *sqlxRepositoryRepository) UpdateDiskPath(ctx context.Context, id uuid.U
 	return execUpdateOne(ctx, r.DB, query, diskPath, id)
 }
 
-func (r *sqlxRepositoryRepository) SetIsEmpty(ctx context.Context, id uuid.UUID, isEmpty bool) error {
+func (r *sqlxRepositoryRepository) SetIsEmpty(ctx context.Context, requestUserID, id uuid.UUID, isEmpty bool) error {
+	if err := r.authorizeRepositoryWrite(ctx, requestUserID, id); err != nil {
+		return err
+	}
 	isEmptyInt := 0
 	if isEmpty {
 		isEmptyInt = 1

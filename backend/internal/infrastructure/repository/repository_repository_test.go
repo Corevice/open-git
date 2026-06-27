@@ -47,6 +47,20 @@ CREATE TABLE repositories (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(owner_id, name)
 );
+
+CREATE TABLE memberships (
+    organization_id TEXT NOT NULL REFERENCES organizations(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'member')),
+    PRIMARY KEY (organization_id, user_id)
+);
+
+CREATE TABLE repository_collaborators (
+    repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    permission TEXT NOT NULL CHECK (permission IN ('read', 'write', 'admin')),
+    PRIMARY KEY (repository_id, user_id)
+);
 `
 
 func newRepositoryTestDB(t *testing.T) *sqlx.DB {
@@ -168,7 +182,7 @@ func TestGetByOwnerLoginAndName_NotFound(t *testing.T) {
 	mock.ExpectQuery(`JOIN\s+users\s+u\s+ON\s+r\.owner_id\s*=\s*u\.id`).
 		WithArgs("missing-user", "missing-repo").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "organization_id", "owner_id", "name", "visibility", "default_branch", "description", "is_empty", "created_at",
+			"id", "organization_id", "owner_id", "name", "visibility", "default_branch", "description", "disk_path", "is_empty", "created_at",
 		}))
 
 	found, err := repo.GetByOwnerLoginAndName(context.Background(), "missing-user", "missing-repo", uuid.Nil)
@@ -209,8 +223,96 @@ func TestGetByOwnerLoginAndName_Found(t *testing.T) {
 	if !found.IsEmpty {
 		t.Fatal("expected repository to be empty")
 	}
-	if found.DiskPath != "" {
-		t.Fatalf("expected disk_path to be omitted, got %q", found.DiskPath)
+}
+
+func TestGetByOwnerLoginAndName_PublicNoAuth(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	repo := repository.NewRepositoryRepository(db)
+
+	orgID := uuid.New()
+	ownerID := uuid.New()
+	repoID := uuid.New()
+	seedRepositoryFixtures(t, db, orgID, ownerID, repoID, "alice", "demo")
+
+	if _, err := db.Exec(`UPDATE repositories SET visibility = ? WHERE id = ?`, entity.VisibilityPublic, repoID.String()); err != nil {
+		t.Fatalf("update visibility: %v", err)
+	}
+
+	found, err := repo.GetByOwnerLoginAndName(context.Background(), "alice", "demo", uuid.Nil)
+	if err != nil {
+		t.Fatalf("GetByOwnerLoginAndName: %v", err)
+	}
+	if found == nil {
+		t.Fatal("expected public repository without auth")
+	}
+}
+
+func TestGetByOwnerLoginAndName_CollaboratorAccess(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	repo := repository.NewRepositoryRepository(db)
+
+	orgID := uuid.New()
+	ownerID := uuid.New()
+	collaboratorID := uuid.New()
+	repoID := uuid.New()
+	seedRepositoryFixtures(t, db, orgID, ownerID, repoID, "alice", "demo")
+
+	now := time.Now().UTC()
+	if _, err := db.Exec(
+		`INSERT INTO users (id, login, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)`,
+		collaboratorID.String(), "bob", "bob@example.com", "hash", now,
+	); err != nil {
+		t.Fatalf("insert collaborator user: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO repository_collaborators (repository_id, user_id, permission) VALUES (?, ?, ?)`,
+		repoID.String(), collaboratorID.String(), "read",
+	); err != nil {
+		t.Fatalf("insert collaborator: %v", err)
+	}
+
+	found, err := repo.GetByOwnerLoginAndName(context.Background(), "alice", "demo", collaboratorID)
+	if err != nil {
+		t.Fatalf("GetByOwnerLoginAndName: %v", err)
+	}
+	if found == nil {
+		t.Fatal("expected collaborator to access private repository")
+	}
+}
+
+func TestGetByOwnerLoginAndName_InternalOrgMember(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	repo := repository.NewRepositoryRepository(db)
+
+	orgID := uuid.New()
+	ownerID := uuid.New()
+	memberID := uuid.New()
+	repoID := uuid.New()
+	seedRepositoryFixtures(t, db, orgID, ownerID, repoID, "alice", "demo")
+
+	now := time.Now().UTC()
+	if _, err := db.Exec(`UPDATE repositories SET visibility = ? WHERE id = ?`, entity.VisibilityInternal, repoID.String()); err != nil {
+		t.Fatalf("update visibility: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO users (id, login, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)`,
+		memberID.String(), "carol", "carol@example.com", "hash", now,
+	); err != nil {
+		t.Fatalf("insert org member user: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO memberships (organization_id, user_id, role) VALUES (?, ?, ?)`,
+		orgID.String(), memberID.String(), "member",
+	); err != nil {
+		t.Fatalf("insert membership: %v", err)
+	}
+
+	found, err := repo.GetByOwnerLoginAndName(context.Background(), "alice", "demo", memberID)
+	if err != nil {
+		t.Fatalf("GetByOwnerLoginAndName: %v", err)
+	}
+	if found == nil {
+		t.Fatal("expected org member to access internal repository")
 	}
 }
 
@@ -241,7 +343,22 @@ func TestUpdateDiskPath_InvalidPath(t *testing.T) {
 	repoID := uuid.New()
 	seedRepositoryFixtures(t, db, orgID, ownerID, repoID, "alice", "demo")
 
-	err := repo.UpdateDiskPath(context.Background(), repoID, "../etc/passwd")
+	err := repo.UpdateDiskPath(context.Background(), ownerID, repoID, "../etc/passwd")
+	if !errors.Is(err, repository.ErrInvalidDiskPath) {
+		t.Fatalf("expected ErrInvalidDiskPath, got %v", err)
+	}
+}
+
+func TestUpdateDiskPath_OutsideBaseDir(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	repo := repository.NewRepositoryRepository(db)
+
+	orgID := uuid.New()
+	ownerID := uuid.New()
+	repoID := uuid.New()
+	seedRepositoryFixtures(t, db, orgID, ownerID, repoID, "alice", "demo")
+
+	err := repo.UpdateDiskPath(context.Background(), ownerID, repoID, "/etc/passwd")
 	if !errors.Is(err, repository.ErrInvalidDiskPath) {
 		t.Fatalf("expected ErrInvalidDiskPath, got %v", err)
 	}
@@ -256,8 +373,8 @@ func TestUpdateDiskPath(t *testing.T) {
 	repoID := uuid.New()
 	seedRepositoryFixtures(t, db, orgID, ownerID, repoID, "alice", "demo")
 
-	const diskPath = "/data/alice/demo.git"
-	if err := repo.UpdateDiskPath(context.Background(), repoID, diskPath); err != nil {
+	const diskPath = "/data/repos/alice/demo.git"
+	if err := repo.UpdateDiskPath(context.Background(), ownerID, repoID, diskPath); err != nil {
 		t.Fatalf("UpdateDiskPath: %v", err)
 	}
 
@@ -274,9 +391,25 @@ func TestUpdateDiskPath_NotFound(t *testing.T) {
 	db := newRepositoryTestDB(t)
 	repo := repository.NewRepositoryRepository(db)
 
-	err := repo.UpdateDiskPath(context.Background(), uuid.New(), "/data/missing.git")
+	err := repo.UpdateDiskPath(context.Background(), ownerID, uuid.New(), "/data/repos/missing.git")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestUpdateDiskPath_Forbidden(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	repo := repository.NewRepositoryRepository(db)
+
+	orgID := uuid.New()
+	ownerID := uuid.New()
+	otherUserID := uuid.New()
+	repoID := uuid.New()
+	seedRepositoryFixtures(t, db, orgID, ownerID, repoID, "alice", "demo")
+
+	err := repo.UpdateDiskPath(context.Background(), otherUserID, repoID, "/data/repos/alice/demo.git")
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
 	}
 }
 
@@ -289,7 +422,7 @@ func TestSetIsEmpty(t *testing.T) {
 	repoID := uuid.New()
 	seedRepositoryFixtures(t, db, orgID, ownerID, repoID, "alice", "demo")
 
-	if err := repo.SetIsEmpty(context.Background(), repoID, false); err != nil {
+	if err := repo.SetIsEmpty(context.Background(), ownerID, repoID, false); err != nil {
 		t.Fatalf("SetIsEmpty: %v", err)
 	}
 
@@ -306,7 +439,7 @@ func TestSetIsEmpty_NotFound(t *testing.T) {
 	db := newRepositoryTestDB(t)
 	repo := repository.NewRepositoryRepository(db)
 
-	err := repo.SetIsEmpty(context.Background(), uuid.New(), false)
+	err := repo.SetIsEmpty(context.Background(), ownerID, uuid.New(), false)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}

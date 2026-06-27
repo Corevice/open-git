@@ -5,6 +5,8 @@ DROP INDEX IF EXISTS idx_ssh_keys_user_id;
 DROP TABLE IF EXISTS ssh_keys;
 
 -- SQLite does not support DROP COLUMN on older versions; recreate the table instead.
+-- Disable FK checks so dependent tables do not block repositories rollback.
+PRAGMA foreign_keys = OFF;
 CREATE TABLE repositories_old (
     id TEXT PRIMARY KEY,
     organization_id TEXT NOT NULL REFERENCES organizations(id),
@@ -25,3 +27,5 @@ DROP TABLE repositories;
 ALTER TABLE repositories_old RENAME TO repositories;
 
 CREATE INDEX idx_repositories_organization_id ON repositories(organization_id);
+
+PRAGMA foreign_keys = ON;
