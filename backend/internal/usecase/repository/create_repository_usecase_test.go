@@ -10,6 +10,7 @@ import (
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/google/uuid"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/usecase/repository"
 )
@@ -83,13 +84,31 @@ func (m *mockRepositoryRepo) Delete(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
+type mockUserRepo struct{}
+
+func (m *mockUserRepo) Create(context.Context, *domain.User) error {
+	return nil
+}
+
+func (m *mockUserRepo) GetByID(context.Context, int64) (*domain.User, error) {
+	return nil, errors.New("not found")
+}
+
+func (m *mockUserRepo) GetByLogin(context.Context, string) (*domain.User, error) {
+	return nil, errors.New("not found")
+}
+
+func (m *mockUserRepo) GetByEmail(context.Context, string) (*domain.User, error) {
+	return nil, errors.New("not found")
+}
+
 func TestDuplicateName(t *testing.T) {
 	repos := &mockRepositoryRepo{
 		byOwnerAndName: map[string]*entity.Repository{
 			repoKey(testOwnerID, "existing"): {OwnerID: testOwnerID, Name: "existing"},
 		},
 	}
-	uc := repository.NewCreateRepositoryUsecase(repos, t.TempDir())
+	uc := repository.NewCreateRepositoryUsecase(repos, &mockUserRepo{}, t.TempDir())
 
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
@@ -104,7 +123,7 @@ func TestDuplicateName(t *testing.T) {
 
 func TestInvalidName(t *testing.T) {
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
-	uc := repository.NewCreateRepositoryUsecase(repos, t.TempDir())
+	uc := repository.NewCreateRepositoryUsecase(repos, &mockUserRepo{}, t.TempDir())
 
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
@@ -120,9 +139,9 @@ func TestInvalidName(t *testing.T) {
 func TestValidCreate(t *testing.T) {
 	gitRoot := t.TempDir()
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
-	uc := repository.NewCreateRepositoryUsecase(repos, gitRoot)
+	uc := repository.NewCreateRepositoryUsecase(repos, &mockUserRepo{}, gitRoot)
 
-	repo, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
+	result, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
 		OwnerLogin:     "alice",
 		OrganizationID: testOrgID,
@@ -133,6 +152,7 @@ func TestValidCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	repo := result.Repository
 	if repo.Name != "my-repo" {
 		t.Fatalf("expected name my-repo, got %s", repo.Name)
 	}
@@ -156,7 +176,7 @@ func TestValidCreate(t *testing.T) {
 func TestCreateRepositoryInitsBareRepo(t *testing.T) {
 	gitRoot := t.TempDir()
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
-	uc := repository.NewCreateRepositoryUsecase(repos, gitRoot)
+	uc := repository.NewCreateRepositoryUsecase(repos, &mockUserRepo{}, gitRoot)
 
 	ownerLogin := "alice"
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{

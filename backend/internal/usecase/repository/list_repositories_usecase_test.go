@@ -69,6 +69,16 @@ func (m *listMockUserRepo) GetByEmail(context.Context, string) (*domain.User, er
 	return nil, errors.New("not found")
 }
 
+type listMockMembershipRepo struct{}
+
+func (m *listMockMembershipRepo) HasReadAccess(_ context.Context, userID, _ uuid.UUID) (bool, error) {
+	return userID != uuid.Nil, nil
+}
+
+func (m *listMockMembershipRepo) HasWriteAccess(context.Context, uuid.UUID, uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 func TestListRepositoriesUsecase_FiltersPrivate(t *testing.T) {
 	ownerID := testOwnerID
 	publicRepo := &entity.Repository{
@@ -94,9 +104,9 @@ func TestListRepositoriesUsecase_FiltersPrivate(t *testing.T) {
 			"alice": {ID: 1, Login: "alice"},
 		},
 	}
-	uc := repository.NewListRepositoriesUsecase(repos, users)
+	uc := repository.NewListRepositoriesUsecase(repos, users, &listMockMembershipRepo{})
 
-	visible, total, err := uc.Execute(context.Background(), repository.ListRepositoriesInput{
+	result, err := uc.Execute(context.Background(), repository.ListRepositoriesInput{
 		RequestUserID: uuid.Nil,
 		OwnerLogin:    "alice",
 		Page:          1,
@@ -105,17 +115,17 @@ func TestListRepositoriesUsecase_FiltersPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if total != 1 {
-		t.Fatalf("expected total 1, got %d", total)
+	if result.Total != 1 {
+		t.Fatalf("expected total 1, got %d", result.Total)
 	}
-	if len(visible) != 1 {
-		t.Fatalf("expected 1 visible repository, got %d", len(visible))
+	if len(result.Repositories) != 1 {
+		t.Fatalf("expected 1 visible repository, got %d", len(result.Repositories))
 	}
-	if visible[0].Name != "public-repo" {
-		t.Fatalf("expected public-repo, got %s", visible[0].Name)
+	if result.Repositories[0].Name != "public-repo" {
+		t.Fatalf("expected public-repo, got %s", result.Repositories[0].Name)
 	}
 
-	visibleAsOwner, totalAsOwner, err := uc.Execute(context.Background(), repository.ListRepositoriesInput{
+	resultAsOwner, err := uc.Execute(context.Background(), repository.ListRepositoriesInput{
 		RequestUserID: ownerID,
 		OwnerLogin:    "alice",
 		Page:          1,
@@ -124,10 +134,10 @@ func TestListRepositoriesUsecase_FiltersPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error for owner: %v", err)
 	}
-	if totalAsOwner != 2 {
-		t.Fatalf("expected total 2 for owner, got %d", totalAsOwner)
+	if resultAsOwner.Total != 2 {
+		t.Fatalf("expected total 2 for owner, got %d", resultAsOwner.Total)
 	}
-	if len(visibleAsOwner) != 2 {
-		t.Fatalf("expected 2 visible repositories for owner, got %d", len(visibleAsOwner))
+	if len(resultAsOwner.Repositories) != 2 {
+		t.Fatalf("expected 2 visible repositories for owner, got %d", len(resultAsOwner.Repositories))
 	}
 }

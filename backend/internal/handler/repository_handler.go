@@ -18,26 +18,31 @@ import (
 )
 
 type RepositoryHandler struct {
-	create *repoUC.CreateRepositoryUsecase
-	list   *repoUC.ListRepositoriesUsecase
-	get    *repoUC.GetRepositoryUsecase
-	repos   repo.IRepositoryRepository
-	gitRoot string
+	create    *repoUC.CreateRepositoryUsecase
+	list      *repoUC.ListRepositoriesUsecase
+	get       *repoUC.GetRepositoryUsecase
+	repos     repo.IRepositoryRepository
+	users     repo.IUserRepository
+	reposRoot string
 }
+
+const maxRepositoryPerPage = 100
 
 func NewRepositoryHandler(
 	create *repoUC.CreateRepositoryUsecase,
 	list *repoUC.ListRepositoriesUsecase,
 	get *repoUC.GetRepositoryUsecase,
 	repos repo.IRepositoryRepository,
-	gitRoot string,
+	users repo.IUserRepository,
+	reposRoot string,
 ) *RepositoryHandler {
 	return &RepositoryHandler{
-		create:  create,
-		list:    list,
-		get:     get,
-		repos:   repos,
-		gitRoot: gitRoot,
+		create:    create,
+		list:      list,
+		get:       get,
+		repos:     repos,
+		users:     users,
+		reposRoot: reposRoot,
 	}
 }
 
@@ -77,7 +82,7 @@ type repositoryResponse struct {
 }
 
 func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
-	userID, err := middleware.GetUserUUID(c)
+	userID, ownerLogin, err := h.resolveAuthenticatedOwner(c)
 	if err != nil {
 		return err
 	}
@@ -89,6 +94,7 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 
 	result, err := h.create.Execute(c.Request().Context(), repoUC.CreateRepositoryInput{
 		OwnerID:        userID,
+		OwnerLogin:     ownerLogin,
 		OrganizationID: userID,
 		Name:           req.Name,
 		Private:        req.Private,
@@ -108,7 +114,7 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 }
 
 func (h *RepositoryHandler) ListRepositories(c echo.Context) error {
-	userID, err := middleware.GetUserUUID(c)
+	userID, ownerLogin, err := h.resolveAuthenticatedOwner(c)
 	if err != nil {
 		return err
 	}
@@ -117,6 +123,7 @@ func (h *RepositoryHandler) ListRepositories(c echo.Context) error {
 
 	result, err := h.list.Execute(c.Request().Context(), repoUC.ListRepositoriesInput{
 		RequestUserID:  userID,
+		OwnerLogin:     ownerLogin,
 		OrganizationID: userID,
 		Page:           page,
 		PerPage:        perPage,
@@ -218,14 +225,14 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 	diskPath := repository.DiskPath
 	ownerLogin := c.Param("owner")
 
-	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
-	}
-
-	if diskPath != "" && isSafeRepositoryDiskPath(h.gitRoot, ownerLogin, repository.Name, diskPath) {
+	if diskPath != "" && isSafeRepositoryDiskPath(h.reposRoot, ownerLogin, repository.Name, diskPath) {
 		if err := os.RemoveAll(diskPath); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository files"})
 		}
+	}
+
+	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -258,15 +265,19 @@ func normalizeRepositoryPagination(c echo.Context) (int, int) {
 	if perPage < 1 {
 		perPage = 30
 	}
+	if perPage > maxRepositoryPerPage {
+		perPage = maxRepositoryPerPage
+	}
 	return page, perPage
 }
 
-func isSafeRepositoryDiskPath(gitRoot, ownerLogin, repoName, diskPath string) bool {
-	if diskPath == "" || strings.Contains(diskPath, "..") {
+func isSafeRepositoryDiskPath(reposRoot, ownerLogin, repoName, diskPath string) bool {
+	if diskPath == "" {
 		return false
 	}
 
-	expectedPath := filepath.Join(gitRoot, ownerLogin, repoName+".git")
+	cleanReposRoot := filepath.Clean(reposRoot)
+	expectedPath := filepath.Join(cleanReposRoot, ownerLogin, repoName+".git")
 	cleanExpected := filepath.Clean(expectedPath)
 	cleanDiskPath := filepath.Clean(diskPath)
 
@@ -274,7 +285,7 @@ func isSafeRepositoryDiskPath(gitRoot, ownerLogin, repoName, diskPath string) bo
 		return false
 	}
 
-	rel, err := filepath.Rel(filepath.Clean(gitRoot), cleanDiskPath)
+	rel, err := filepath.Rel(cleanReposRoot, cleanDiskPath)
 	if err != nil {
 		return false
 	}
@@ -283,6 +294,25 @@ func isSafeRepositoryDiskPath(gitRoot, ownerLogin, repoName, diskPath string) bo
 	}
 
 	return true
+}
+
+func (h *RepositoryHandler) resolveAuthenticatedOwner(c echo.Context) (uuid.UUID, string, error) {
+	userIDInt, err := middleware.GetUserID(c)
+	if err != nil {
+		return uuid.Nil, "", err
+	}
+
+	userID := middleware.Int64ToUUID(userIDInt)
+	if h.users == nil {
+		return userID, "", nil
+	}
+
+	user, err := h.users.GetByID(c.Request().Context(), userIDInt)
+	if err != nil || user == nil || user.Login == "" {
+		return userID, "", nil
+	}
+
+	return userID, user.Login, nil
 }
 
 func toRepositoryResponses(repositories []*entity.Repository, ownerLogin string) []repositoryResponse {

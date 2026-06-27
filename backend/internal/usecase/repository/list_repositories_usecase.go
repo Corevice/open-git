@@ -11,6 +11,8 @@ import (
 	repo "github.com/open-git/backend/internal/repository"
 )
 
+const userUUIDPrefixLen = 8
+
 const maxRepositoriesPerOrg = 1000
 
 var ErrOwnerNotFound = errors.New("owner not found")
@@ -51,7 +53,7 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 
 	orgID := input.OrganizationID
 	if orgID == uuid.Nil {
-		if input.RequestUserID != uuid.Nil && int64FromUUID(input.RequestUserID) == owner.ID {
+		if requestUserID, ok := userIDFromUUID(input.RequestUserID); ok && requestUserID == owner.ID {
 			orgID = input.RequestUserID
 		} else {
 			orgID = uuidFromInt64(owner.ID)
@@ -104,7 +106,10 @@ func (u *ListRepositoriesUsecase) resolveOwner(ctx context.Context, input ListRe
 	if input.OwnerLogin != "" {
 		owner, err := u.users.GetByLogin(ctx, input.OwnerLogin)
 		if err != nil {
-			return nil, "", ErrOwnerNotFound
+			if errors.Is(err, domain.ErrNotFound) {
+				return nil, "", ErrOwnerNotFound
+			}
+			return nil, "", err
 		}
 		if owner == nil {
 			return nil, "", ErrOwnerNotFound
@@ -116,9 +121,17 @@ func (u *ListRepositoriesUsecase) resolveOwner(ctx context.Context, input ListRe
 		return nil, "", ErrOwnerNotFound
 	}
 
-	owner, err := u.users.GetByID(ctx, int64FromUUID(input.OrganizationID))
-	if err != nil {
+	userID, ok := userIDFromUUID(input.OrganizationID)
+	if !ok {
 		return nil, "", ErrOwnerNotFound
+	}
+
+	owner, err := u.users.GetByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, "", ErrOwnerNotFound
+		}
+		return nil, "", err
 	}
 	if owner == nil {
 		return nil, "", ErrOwnerNotFound
@@ -137,18 +150,35 @@ func (u *ListRepositoriesUsecase) canViewRepository(ctx context.Context, request
 	return err == nil && hasAccess
 }
 
+func isUserUUID(id uuid.UUID) bool {
+	for i := 0; i < userUUIDPrefixLen; i++ {
+		if id[i] != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func userIDFromUUID(id uuid.UUID) (int64, bool) {
+	if id == uuid.Nil || !isUserUUID(id) {
+		return 0, false
+	}
+	return int64(binary.BigEndian.Uint64(id[userUUIDPrefixLen:])), true
+}
+
 func int64FromUUID(id uuid.UUID) int64 {
-	if id == uuid.Nil {
+	userID, ok := userIDFromUUID(id)
+	if !ok {
 		return 0
 	}
-	return int64(binary.BigEndian.Uint64(id[8:]))
+	return userID
 }
 
 func uuidFromInt64(id int64) uuid.UUID {
-	if id == 0 {
+	if id <= 0 {
 		return uuid.Nil
 	}
 	var u uuid.UUID
-	binary.BigEndian.PutUint64(u[8:], uint64(id))
+	binary.BigEndian.PutUint64(u[userUUIDPrefixLen:], uint64(id))
 	return u
 }
