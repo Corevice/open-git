@@ -47,7 +47,7 @@ func (s *stubSSHKeyStore) Delete(_ context.Context, _, _ uuid.UUID) error {
 	return nil
 }
 
-const validSSHPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKL3abqSPbG0TJrDKIvHCLv7Iy test@example.com"
+const validSSHPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOzRANdrmNo46uGr2ky5ETd7ObwPSeqqxgc/K27LwS1P test@example.com"
 
 func newSSHKeyEcho(t *testing.T, store *stubSSHKeyStore, userID uuid.UUID) *echo.Echo {
 	t.Helper()

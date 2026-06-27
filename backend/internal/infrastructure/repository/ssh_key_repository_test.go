@@ -34,7 +34,7 @@ CREATE TABLE ssh_keys (
 );
 `
 
-const testAuthorizedKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKL3abqSPbG0TJrDKIvHCLv7Iy test@example.com"
+const testAuthorizedKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOzRANdrmNo46uGr2ky5ETd7ObwPSeqqxgc/K27LwS1P test@example.com"
 
 func newSSHKeyTestDB(t *testing.T) *sqlx.DB {
 	t.Helper()
@@ -55,7 +55,7 @@ func insertTestUser(t *testing.T, db *sqlx.DB, id uuid.UUID) {
 	t.Helper()
 	_, err := db.Exec(
 		`INSERT INTO users (id, login, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)`,
-		id.String(), "testuser", "test@example.com", "hash", time.Now().UTC(),
+		id.String(), "user-"+id.String()[:8], id.String()+"@example.com", "hash", time.Now().UTC(),
 	)
 	if err != nil {
 		t.Fatalf("insert user: %v", err)
