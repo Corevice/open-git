@@ -19,13 +19,16 @@ type User struct {
 }
 
 type AccessToken struct {
-	ID        int64
-	UserID    int64
-	TokenHash string
-	Scopes    []string
-	ExpiresAt *time.Time
-	RevokedAt *time.Time
-	CreatedAt time.Time
+	ID             int64
+	UserID         int64
+	Name           string
+	TokenHash      string
+	TokenLastEight string
+	Scopes         []string
+	ExpiresAt      *time.Time
+	LastUsedAt     *time.Time
+	RevokedAt      *time.Time
+	CreatedAt      time.Time
 }
 
 type Repository struct {

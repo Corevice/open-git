@@ -18,6 +18,7 @@ type IAccessTokenRepository interface {
 	ListByUserID(ctx context.Context, userID int64) ([]*domain.AccessToken, error)
 	Revoke(ctx context.Context, tokenID, userID int64) error
 	FindByTokenHash(ctx context.Context, tokenHash string) (*domain.AccessToken, error)
+	UpdateLastUsedAt(ctx context.Context, tokenID int64) error
 }
 
 type IRepositoryRepository interface {
