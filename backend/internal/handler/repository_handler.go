@@ -48,7 +48,7 @@ func (h *RepositoryHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.Mi
 	g.GET("/orgs/:org/repos", h.ListOrg, authMiddleware)
 	g.POST("/orgs/:org/repos", h.CreateForOrg, authMiddleware, repoScope)
 	g.GET("/repos/:owner/:repo", h.GetRepository, middleware.OptionalAuth())
-	g.PATCH("/repos/:owner/:repo", h.UpdateVisibility, authMiddleware, repoScope)
+	g.PATCH("/repos/:owner/:repo", h.UpdateRepository, authMiddleware, repoScope)
 	g.DELETE("/repos/:owner/:repo", h.DeleteRepository, authMiddleware, repoScope)
 }
 
@@ -61,8 +61,9 @@ type createRepositoryRequest struct {
 	LicenseTemplate   string `json:"license_template"`
 }
 
-type updateVisibilityRequest struct {
-	Private *bool `json:"private"`
+type updateRepositoryRequest struct {
+	Private *bool   `json:"private"`
+	Name    *string `json:"name"`
 }
 
 type repositoryOwnerResponse struct {
@@ -291,7 +292,7 @@ func (h *RepositoryHandler) GetRepository(c echo.Context) error {
 	return c.JSON(http.StatusOK, toRepositoryResponse(repository))
 }
 
-func (h *RepositoryHandler) UpdateVisibility(c echo.Context) error {
+func (h *RepositoryHandler) UpdateRepository(c echo.Context) error {
 	userID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return err
@@ -302,21 +303,51 @@ func (h *RepositoryHandler) UpdateVisibility(c echo.Context) error {
 		return err
 	}
 
-	var req updateVisibilityRequest
-	if err := c.Bind(&req); err != nil || req.Private == nil {
+	var req updateRepositoryRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid request"})
+	}
+	if req.Private == nil && req.Name == nil {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid request"})
 	}
 
-	visibility := entity.VisibilityPublic
-	if *req.Private {
-		visibility = entity.VisibilityPrivate
+	ctx := c.Request().Context()
+
+	if req.Name != nil {
+		name := *req.Name
+		if err := (&entity.Repository{Name: name}).ValidateName(); err != nil {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": err.Error()})
+		}
+
+		existing, err := h.repos.GetByOwnerAndName(ctx, repository.OwnerID, name)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to update repository"})
+		}
+		if existing != nil && existing.ID != repository.ID {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "Repository name already exists"})
+		}
+
+		if err := h.repos.UpdateName(ctx, repository.ID, name); err != nil {
+			if errors.Is(err, repoUC.ErrDuplicateName) {
+				return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "Repository name already exists"})
+			}
+			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to update repository"})
+		}
+		repository.Name = name
 	}
 
-	if err := h.repos.UpdateVisibility(c.Request().Context(), repository.ID, visibility); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to update repository"})
+	if req.Private != nil {
+		visibility := entity.VisibilityPublic
+		if *req.Private {
+			visibility = entity.VisibilityPrivate
+		}
+
+		if err := h.repos.UpdateVisibility(ctx, repository.ID, visibility); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to update repository"})
+		}
+		repository.Visibility = visibility
 	}
 
-	repository.Visibility = visibility
 	return c.JSON(http.StatusOK, toRepositoryResponse(repository))
 }
 

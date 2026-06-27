@@ -24,12 +24,14 @@ func NewTokenHandler(tokens repository.IAccessTokenRepository, issue *authUC.Iss
 }
 
 type createTokenRequest struct {
+	Note      string   `json:"note"`
 	Scopes    []string `json:"scopes"`
 	ExpiresAt *string  `json:"expires_at,omitempty"`
 }
 
 type tokenResponse struct {
 	ID        int64    `json:"id"`
+	Note      string   `json:"note,omitempty"`
 	Scopes    []string `json:"scopes"`
 	ExpiresAt *string  `json:"expires_at,omitempty"`
 	RevokedAt *string  `json:"revoked_at,omitempty"`
@@ -80,6 +82,7 @@ func (h *TokenHandler) Create(c echo.Context) error {
 
 	out, err := h.issue.Execute(c.Request().Context(), authUC.IssuePATInput{
 		UserID:    userID,
+		Note:      req.Note,
 		Scopes:    req.Scopes,
 		ExpiresAt: expiresAt,
 	})
@@ -114,6 +117,7 @@ func (h *TokenHandler) Revoke(c echo.Context) error {
 func toTokenResponse(t *domain.AccessToken) tokenResponse {
 	resp := tokenResponse{
 		ID:     t.ID,
+		Note:   t.Note,
 		Scopes: t.Scopes,
 	}
 	if t.ExpiresAt != nil {
