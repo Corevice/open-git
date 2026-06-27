@@ -20,17 +20,23 @@ import (
 
 	gossh "github.com/gliderlabs/ssh"
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/open-git/backend/internal/config"
 	"github.com/open-git/backend/internal/domain"
+	"github.com/open-git/backend/internal/domain/entity"
+	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/handler"
 	appmiddleware "github.com/open-git/backend/internal/middleware"
 	"github.com/open-git/backend/internal/infrastructure/database"
 	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
+	repo "github.com/open-git/backend/internal/repository"
+	authUC "github.com/open-git/backend/internal/usecase/auth"
+	issueusecase "github.com/open-git/backend/internal/usecase/issue"
+	repoUC "github.com/open-git/backend/internal/usecase/repository"
 )
 
 var (
@@ -89,23 +95,10 @@ func main() {
 	e.GET("/readyz", readyzHandler(db))
 	e.GET("/version", versionHandler)
 
-	sqlxDB := sqlx.NewDb(db, cfg.DBType)
-	registerHandlers(e, cfg, sqlxDB)
-
-	hostKey, err := loadOrGenerateHostKey(cfg.SSHHostKeyPath)
+	sshServer, err := registerHandlers(e, cfg, db)
 	if err != nil {
-		log.Fatalf("load ssh host key: %v", err)
+		log.Fatalf("register handlers: %v", err)
 	}
-
-	sshKeyRepo := infrarepo.NewSSHKeyRepository(sqlxDB)
-	repoResolver := &gitSSHRepoResolver{gitRoot: cfg.GitDataRoot}
-	sshSrv := sshinfra.NewSSHServer(cfg.GitDataRoot, sshKeyRepo, repoResolver, hostKey)
-	go func() {
-		log.Printf("ssh server listening on %s", cfg.SSHListenAddr)
-		if err := sshSrv.Start(cfg.SSHListenAddr); err != nil && !errors.Is(err, gossh.ErrServerClosed) {
-			log.Fatalf("start ssh server: %v", err)
-		}
-	}()
 
 	go func() {
 		if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
@@ -119,20 +112,173 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := sshSrv.Close(); err != nil {
-		log.Printf("shutdown ssh server: %v", err)
+	if sshServer != nil {
+		if err := sshServer.Close(); err != nil {
+			log.Printf("shutdown ssh server: %v", err)
+		}
 	}
 	if err := e.Shutdown(ctx); err != nil {
 		log.Fatalf("shutdown server: %v", err)
 	}
 }
 
-type gitSSHRepoResolver struct {
+type gitResolver struct {
+	repos   repo.IRepositoryRepository
 	gitRoot string
 }
 
-func (r *gitSSHRepoResolver) Resolve(_ context.Context, ownerLogin, repoName string) (string, uuid.UUID, error) {
-	return filepath.Join(r.gitRoot, ownerLogin, repoName+".git"), uuid.Nil, nil
+func (r *gitResolver) Resolve(ctx context.Context, ownerLogin, repoName string) (*handler.ResolvedGitRepository, error) {
+	repoName = strings.TrimSuffix(repoName, ".git")
+	if strings.Contains(ownerLogin, "..") || strings.Contains(repoName, "..") {
+		return nil, domain.ErrNotFound
+	}
+	repository, err := r.repos.GetByOwnerLoginAndName(ctx, ownerLogin, repoName)
+	if err != nil {
+		return nil, err
+	}
+	if repository == nil {
+		return nil, domain.ErrNotFound
+	}
+
+	return &handler.ResolvedGitRepository{
+		ID:             repository.ID,
+		OrganizationID: repository.OrganizationID,
+		OwnerID:        appmiddleware.UUIDToInt64(repository.OwnerID),
+		Name:           repository.Name,
+		Visibility:     repository.Visibility,
+		DiskPath:       filepath.Join(r.gitRoot, ownerLogin, repoName+".git"),
+	}, nil
+}
+
+type gitMembershipAdapter struct {
+	memberships membershipRoleLookup
+}
+
+type membershipRoleLookup interface {
+	GetRole(ctx context.Context, orgID, userID uuid.UUID) (string, error)
+}
+
+func (a *gitMembershipAdapter) HasReadAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error) {
+	_, err := a.memberships.GetRole(ctx, organizationID, appmiddleware.Int64ToUUID(userID))
+	if errors.Is(err, domain.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *gitMembershipAdapter) HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error) {
+	role, err := a.memberships.GetRole(ctx, organizationID, appmiddleware.Int64ToUUID(userID))
+	if errors.Is(err, domain.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return role == entity.RoleOwner || role == entity.RoleAdmin, nil
+}
+
+type legacyMembershipRepoAdapter struct {
+	inner membershipRoleLookup
+}
+
+func (a *legacyMembershipRepoAdapter) HasReadAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
+	_, err := a.inner.GetRole(ctx, organizationID, userID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *legacyMembershipRepoAdapter) HasWriteAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error) {
+	role, err := a.inner.GetRole(ctx, organizationID, userID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return role == entity.RoleOwner || role == entity.RoleAdmin, nil
+}
+
+type legacyUserRepoAdapter struct {
+	users domainrepo.IUserRepository
+}
+
+func (a *legacyUserRepoAdapter) Create(ctx context.Context, user *domain.User) error {
+	entityUser := domainUserToEntity(user)
+	if err := a.users.Create(ctx, entityUser); err != nil {
+		return err
+	}
+	user.ID = uuidToInt64(entityUser.ID)
+	return nil
+}
+
+func (a *legacyUserRepoAdapter) GetByID(ctx context.Context, id int64) (*domain.User, error) {
+	entityUser, err := a.users.GetByID(ctx, appmiddleware.Int64ToUUID(id))
+	if err != nil {
+		return nil, err
+	}
+	return entityUserToDomain(entityUser), nil
+}
+
+func (a *legacyUserRepoAdapter) GetByLogin(ctx context.Context, login string) (*domain.User, error) {
+	entityUser, err := a.users.GetByLogin(ctx, login)
+	if err != nil {
+		return nil, err
+	}
+	return entityUserToDomain(entityUser), nil
+}
+
+func (a *legacyUserRepoAdapter) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
+	entityUser, err := a.users.GetByEmail(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	return entityUserToDomain(entityUser), nil
+}
+
+type gitSSHInfraResolver struct {
+	resolver handler.GitRepositoryResolver
+}
+
+func (r *gitSSHInfraResolver) Resolve(ctx context.Context, ownerLogin, repoName string) (string, uuid.UUID, error) {
+	resolved, err := r.resolver.Resolve(ctx, ownerLogin, repoName)
+	if err != nil {
+		return "", uuid.Nil, err
+	}
+	return resolved.DiskPath, appmiddleware.Int64ToUUID(resolved.OwnerID), nil
+}
+
+func entityUserToDomain(user *entity.User) *domain.User {
+	if user == nil {
+		return nil
+	}
+	return &domain.User{
+		ID:           appmiddleware.UUIDToInt64(user.ID),
+		Login:        user.Login,
+		Email:        user.Email,
+		PasswordHash: user.PasswordHash,
+		CreatedAt:    user.CreatedAt,
+	}
+}
+
+func domainUserToEntity(user *domain.User) *entity.User {
+	entityUser := &entity.User{
+		Login:        user.Login,
+		Email:        user.Email,
+		PasswordHash: user.PasswordHash,
+		CreatedAt:    user.CreatedAt,
+	}
+	if user.ID != 0 {
+		entityUser.ID = appmiddleware.Int64ToUUID(user.ID)
+	}
+	return entityUser
 }
 
 func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
@@ -164,6 +310,131 @@ func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
 	}
 
 	return gossh.NewSignerFromKey(privateKey)
+}
+
+func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SSHServer, error) {
+	sqlxDB := sqlx.NewDb(db, cfg.DBType)
+
+	entityUserRepo := infrarepo.NewUserRepository(sqlxDB)
+	userRepo := &legacyUserRepoAdapter{users: entityUserRepo}
+	tokenRepo := infrarepo.NewAccessTokenRepository(sqlxDB)
+	repoRepo := infrarepo.NewRepositoryRepository(sqlxDB)
+	sshKeyRepo := infrarepo.NewSSHKeyRepository(sqlxDB)
+	membershipRepo := infrarepo.NewMembershipRepository(sqlxDB)
+	legacyMembershipRepo := &legacyMembershipRepoAdapter{inner: membershipRepo}
+	issueRepo := infrarepo.NewIssueRepository(sqlxDB)
+
+	realAuthMiddleware := appmiddleware.AuthMiddleware(tokenRepo)
+	realGitBasicAuth := appmiddleware.GitBasicAuthMiddleware(tokenRepo)
+	realOptionalGitAuth := appmiddleware.OptionalGitAuth(tokenRepo)
+
+	repoGitResolver := &gitResolver{repos: repoRepo, gitRoot: cfg.GitDataRoot}
+	membershipAdapter := &gitMembershipAdapter{memberships: membershipRepo}
+
+	registerUC := authUC.NewRegisterUserUsecase(userRepo)
+	loginUC := authUC.NewLoginUsecase(userRepo, cfg.JWTSecret)
+	authHandler := handler.NewAuthHandler(registerUC, loginUC)
+
+	createRepoUC := repoUC.NewCreateRepositoryUsecase(repoRepo)
+	getRepoUC := repoUC.NewGetRepositoryUsecase(repoRepo, userRepo, legacyMembershipRepo)
+	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, repoRepo)
+
+	contentHandler := handler.NewContentHandler(repoGitResolver)
+
+	issuePATUC := authUC.NewIssuePATUsecase(tokenRepo)
+	revokePATUC := authUC.NewRevokePATUsecase(tokenRepo)
+	tokenHandler := handler.NewTokenHandler(tokenRepo, issuePATUC, revokePATUC)
+
+	resolveRepo := func(c echo.Context, owner, name string) (*entity.Repository, error) {
+		return getRepoUC.Execute(c.Request().Context(), repoUC.GetRepositoryInput{
+			RequestUserID: appmiddleware.UserUUIDFromContext(c),
+			OwnerLogin:    owner,
+			Name:          name,
+		})
+	}
+
+	listIssuesUC := issueusecase.NewListIssuesUsecase(issueRepo)
+	issueHandler := handler.NewIssueHandler(nil, listIssuesUC, nil, resolveRepo)
+	pullRequestHandler := handler.NewPullRequestHandler(nil, nil, nil, resolveRepo)
+	oauthHandler := handler.NewOAuthHandler(nil, nil)
+
+	gitHTTPHandler := handler.NewGitHTTPHandler(
+		cfg.GitDataRoot,
+		repoGitResolver,
+		membershipAdapter,
+		nil,
+		realGitBasicAuth,
+	)
+	sshKeyHandler := handler.NewSSHKeyHandler(sshKeyRepo)
+
+	api := e.Group("")
+	e.POST("/register", authHandler.Register)
+	e.POST("/login", authHandler.Login)
+
+	tokens := api.Group("/user/tokens", realAuthMiddleware)
+	tokens.GET("", tokenHandler.List)
+	tokens.POST("", tokenHandler.Create)
+	tokens.DELETE("/:id", tokenHandler.Revoke)
+
+	keys := api.Group("/user/keys", realAuthMiddleware)
+	keys.GET("", sshKeyHandler.List)
+	keys.POST("", sshKeyHandler.Add)
+	keys.DELETE("/:key_id", sshKeyHandler.Delete)
+
+	repositoryHandler.RegisterRoutes(api, realAuthMiddleware)
+	contentHandler.RegisterRoutes(api)
+	issueHandler.RegisterRoutes(api, realAuthMiddleware)
+	pullRequestHandler.RegisterRoutes(api, realAuthMiddleware)
+	oauthHandler.RegisterRoutes(api, realAuthMiddleware)
+	e.GET("/:owner/:repo.git/info/refs", gitHTTPHandler.InfoRefs, realOptionalGitAuth)
+	e.POST("/:owner/:repo.git/git-upload-pack", gitHTTPHandler.UploadPack, realOptionalGitAuth)
+	e.POST("/:owner/:repo.git/git-receive-pack", gitHTTPHandler.ReceivePack, realGitBasicAuth)
+
+	v3 := e.Group("/api/v3")
+	v3.Use(appmiddleware.GitHubCompatHeaders())
+	v3.Use(appmiddleware.RateLimitMiddleware(5000))
+
+	repositoryHandler.RegisterRoutes(v3, realAuthMiddleware)
+	contentHandler.RegisterRoutes(v3)
+	issueHandler.RegisterRoutes(v3, realAuthMiddleware)
+	pullRequestHandler.RegisterRoutes(v3, realAuthMiddleware)
+
+	v3Tokens := v3.Group("/user/tokens", realAuthMiddleware)
+	v3Tokens.GET("", tokenHandler.List)
+	v3Tokens.POST("", tokenHandler.Create)
+	v3Tokens.DELETE("/:id", tokenHandler.Revoke)
+
+	v3Keys := v3.Group("/user/keys", realAuthMiddleware)
+	v3Keys.GET("", sshKeyHandler.List)
+	v3Keys.POST("", sshKeyHandler.Add)
+	v3Keys.DELETE("/:key_id", sshKeyHandler.Delete)
+
+	var sshServer *sshinfra.SSHServer
+	if cfg.SSHEnabled {
+		hostKey, err := loadOrGenerateHostKey(cfg.SSHHostKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("load ssh host key: %w", err)
+		}
+
+		sshListenAddr := cfg.SSHPort
+		if !strings.HasPrefix(sshListenAddr, ":") {
+			sshListenAddr = ":" + sshListenAddr
+		}
+
+		sshServer = sshinfra.NewSSHServer(
+			cfg.GitDataRoot,
+			sshKeyRepo,
+			&gitSSHInfraResolver{resolver: repoGitResolver},
+			hostKey,
+		)
+		go func() {
+			log.Printf("ssh server listening on %s", sshListenAddr)
+			if err := sshServer.Start(sshListenAddr); err != nil && !errors.Is(err, gossh.ErrServerClosed) {
+				log.Printf("ssh server stopped: %v", err)
+			}
+		}()
+	}
+	return sshServer, nil
 }
 
 func corsAllowedOrigins() []string {
@@ -286,60 +557,4 @@ func versionHandler(c echo.Context) error {
 		"commit":    commit,
 		"buildTime": buildTime,
 	})
-}
-
-func registerHandlers(e *echo.Echo, _ config.Config, sqlxDB *sqlx.DB) {
-	// TODO: wire infrastructure repositories and usecases before serving production traffic.
-	authHandler := handler.NewAuthHandler(nil, nil)
-	repositoryHandler := handler.NewRepositoryHandler(nil, nil, nil)
-	contentHandler := handler.NewContentHandler(nil)
-	tokenHandler := handler.NewTokenHandler(nil, nil, nil)
-	issueHandler := handler.NewIssueHandler(nil, nil, nil, nil)
-	pullRequestHandler := handler.NewPullRequestHandler(nil, nil, nil, nil)
-	oauthHandler := handler.NewOAuthHandler(nil, nil)
-	gitHTTPHandler := handler.NewGitHTTPHandler("", nil, nil, nil, nil)
-	sshKeyRepo := infrarepo.NewSSHKeyRepository(sqlxDB)
-	sshKeyHandler := handler.NewSSHKeyHandler(sshKeyRepo)
-
-	// TODO: replace stub auth middleware with appMiddleware.AuthMiddleware once token repository is wired.
-	authMiddleware := func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			return echo.NewHTTPError(http.StatusUnauthorized, "auth not wired")
-		}
-	}
-
-	api := e.Group("")
-	e.POST("/register", authHandler.Register)
-	e.POST("/login", authHandler.Login)
-
-	tokens := api.Group("/user/tokens", authMiddleware)
-	tokens.GET("", tokenHandler.List)
-	tokens.POST("", tokenHandler.Create)
-	tokens.DELETE("/:id", tokenHandler.Revoke)
-
-	keys := api.Group("/user/keys", authMiddleware)
-	keys.GET("", sshKeyHandler.List)
-	keys.POST("", sshKeyHandler.Add)
-	keys.DELETE("/:key_id", sshKeyHandler.Delete)
-
-	repositoryHandler.RegisterRoutes(api, authMiddleware)
-	contentHandler.RegisterRoutes(api)
-	issueHandler.RegisterRoutes(api, authMiddleware)
-	pullRequestHandler.RegisterRoutes(api, authMiddleware)
-	oauthHandler.RegisterRoutes(api, authMiddleware)
-	gitHTTPHandler.RegisterRoutes(e)
-
-	v3 := e.Group("/api/v3")
-	v3.Use(appmiddleware.GitHubCompatHeaders())
-	v3.Use(appmiddleware.RateLimitMiddleware(5000))
-
-	repositoryHandler.RegisterRoutes(v3, authMiddleware)
-	contentHandler.RegisterRoutes(v3)
-	issueHandler.RegisterRoutes(v3, authMiddleware)
-	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
-
-	v3Tokens := v3.Group("/user/tokens", authMiddleware)
-	v3Tokens.GET("", tokenHandler.List)
-	v3Tokens.POST("", tokenHandler.Create)
-	v3Tokens.DELETE("/:id", tokenHandler.Revoke)
 }

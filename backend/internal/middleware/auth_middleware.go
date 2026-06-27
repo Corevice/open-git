@@ -130,6 +130,11 @@ func Int64ToUUID(id int64) uuid.UUID {
 	return u
 }
 
+// UUIDToInt64 is the inverse of Int64ToUUID (lower 64 bits of the UUID).
+func UUIDToInt64(id uuid.UUID) int64 {
+	return int64(binary.BigEndian.Uint64(id[8:]))
+}
+
 func GetScopes(c echo.Context) []string {
 	v := c.Get(scopesContextKey)
 	if v == nil {

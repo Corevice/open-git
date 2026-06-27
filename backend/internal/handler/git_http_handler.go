@@ -21,6 +21,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
+	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
 )
 
@@ -30,6 +31,7 @@ type ResolvedGitRepository struct {
 	OrganizationID uuid.UUID
 	OwnerID        int64
 	Name           string
+	Visibility     string
 	DiskPath       string
 }
 
@@ -38,8 +40,9 @@ type GitRepositoryResolver interface {
 	Resolve(ctx context.Context, ownerLogin, repoName string) (*ResolvedGitRepository, error)
 }
 
-// GitMembershipAccess checks organization write permission.
+// GitMembershipAccess checks organization read/write permission.
 type GitMembershipAccess interface {
+	HasReadAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
 	HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
 }
 
@@ -117,6 +120,17 @@ func (h *GitHTTPHandler) InfoRefs(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if service == transport.ReceivePackService.String() {
+		userID, err := middleware.GetUserID(c)
+		if err != nil {
+			return err
+		}
+		if err := h.ensureWriteAccess(c.Request().Context(), userID, repo); err != nil {
+			return err
+		}
+	} else if err := h.ensureReadAccess(c, repo); err != nil {
+		return err
+	}
 
 	contentType := "application/x-git-upload-pack-advertisement"
 	if service == transport.ReceivePackService.String() {
@@ -170,6 +184,9 @@ func (h *GitHTTPHandler) UploadPack(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.ensureReadAccess(c, repo); err != nil {
+		return err
+	}
 	if err := infragit.ServeUploadPack(c.Response().Writer, c.Request(), repo.DiskPath); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": err.Error()})
 	}
@@ -208,6 +225,37 @@ func (h *GitHTTPHandler) ReceivePack(c echo.Context) error {
 	c.Request().Body = io.NopCloser(bytes.NewReader(body))
 	if err := infragit.ServeReceivePack(c.Response().Writer, c.Request(), repo.DiskPath); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": err.Error()})
+	}
+	return nil
+}
+
+const gitWWWAuthenticateHeader = `Basic realm="OpenGit"`
+
+func (h *GitHTTPHandler) ensureReadAccess(c echo.Context, repo *ResolvedGitRepository) error {
+	if repo.Visibility != entity.VisibilityPrivate {
+		return nil
+	}
+	userID := middleware.UserIDFromContext(c)
+	if userID == 0 {
+		c.Response().Header().Set("WWW-Authenticate", gitWWWAuthenticateHeader)
+		return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
+	}
+	return h.ensureReadAccessForUser(c.Request().Context(), userID, repo)
+}
+
+func (h *GitHTTPHandler) ensureReadAccessForUser(ctx context.Context, userID int64, repo *ResolvedGitRepository) error {
+	if repo.OwnerID != 0 && repo.OwnerID == userID {
+		return nil
+	}
+	if h.memberships == nil {
+		return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "read access required"})
+	}
+	ok, err := h.memberships.HasReadAccess(ctx, userID, repo.OrganizationID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to check permissions"})
+	}
+	if !ok {
+		return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "read access required"})
 	}
 	return nil
 }
