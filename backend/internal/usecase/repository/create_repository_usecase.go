@@ -3,8 +3,11 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,8 +17,10 @@ import (
 )
 
 var (
-	ErrDuplicateName = errors.New("repository name already exists")
-	ErrInvalidName   = errors.New("invalid repository name")
+	ErrDuplicateName        = errors.New("repository name already exists")
+	ErrInvalidName          = errors.New("invalid repository name")
+	ErrOwnerLoginRequired   = errors.New("owner login is required for auto init")
+	ErrGitDataRootNotConfig = errors.New("git data root is not configured")
 )
 
 var repoNameRegex = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
@@ -97,8 +102,38 @@ func NewCreateRepositoryUsecase(repos repo.IRepositoryRepository, opts ...Create
 	}
 }
 
+func isSafePathSegment(s string) bool {
+	return s != "" &&
+		!strings.Contains(s, "/") &&
+		!strings.Contains(s, "\\") &&
+		!strings.Contains(s, "..")
+}
+
+func resolveGitPath(gitDataRoot, ownerLogin, name string) (string, error) {
+	if !isSafePathSegment(ownerLogin) || !isSafePathSegment(name) {
+		return "", ErrInvalidName
+	}
+
+	gitPath := filepath.Join(gitDataRoot, ownerLogin, name+".git")
+	absPath, err := filepath.Abs(gitPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve git path: %w", err)
+	}
+	absRoot, err := filepath.Abs(gitDataRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolve git data root: %w", err)
+	}
+
+	rootPrefix := absRoot + string(os.PathSeparator)
+	if absPath != absRoot && !strings.HasPrefix(absPath, rootPrefix) {
+		return "", ErrInvalidName
+	}
+
+	return gitPath, nil
+}
+
 func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepositoryInput) (*entity.Repository, error) {
-	if !repoNameRegex.MatchString(input.Name) {
+	if !repoNameRegex.MatchString(input.Name) || strings.Contains(input.Name, "..") {
 		return nil, ErrInvalidName
 	}
 
@@ -127,27 +162,42 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 	}
 
 	if input.AutoInit {
-		gitDataRoot := input.GitDataRoot
+		gitDataRoot := u.gitDataRoot
 		if gitDataRoot == "" {
-			gitDataRoot = u.gitDataRoot
+			_ = u.repos.Delete(ctx, repository.ID)
+			return nil, ErrGitDataRootNotConfig
 		}
+
 		ownerLogin := input.OwnerLogin
 		if ownerLogin == "" && u.users != nil {
 			user, err := u.users.GetByID(ctx, input.OwnerID)
 			if err != nil {
+				_ = u.repos.Delete(ctx, repository.ID)
 				return nil, err
 			}
 			if user != nil {
 				ownerLogin = user.Login
 			}
 		}
-		gitPath := filepath.Join(gitDataRoot, ownerLogin, input.Name+".git")
+		if ownerLogin == "" {
+			_ = u.repos.Delete(ctx, repository.ID)
+			return nil, ErrOwnerLoginRequired
+		}
+
+		gitPath, err := resolveGitPath(gitDataRoot, ownerLogin, input.Name)
+		if err != nil {
+			_ = u.repos.Delete(ctx, repository.ID)
+			return nil, err
+		}
+
 		if err := u.gitInit.AutoInitRepository(gitPath, gitinfra.AutoInitOpts{
 			Readme:            input.Name,
 			GitIgnoreTemplate: input.GitIgnoreTemplate,
 			LicenseTemplate:   input.LicenseTemplate,
 		}); err != nil {
-			return nil, err
+			_ = u.repos.Delete(ctx, repository.ID)
+			_ = os.RemoveAll(gitPath)
+			return nil, fmt.Errorf("auto init repository: %w", err)
 		}
 		repository.GitPath = gitPath
 		if repository.OwnerLogin == "" {

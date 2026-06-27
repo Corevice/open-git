@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	testOwnerID   = uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	testOrgID     = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	testOwnerID    = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	testOrgID      = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	testOwnerLogin = "testuser"
 )
 
@@ -22,6 +22,7 @@ type mockRepositoryRepo struct {
 	byOwnerAndName map[string]*entity.Repository
 	created        []*entity.Repository
 	createErr      error
+	deletedIDs     []uuid.UUID
 }
 
 func repoKey(ownerID uuid.UUID, name string) string {
@@ -83,7 +84,16 @@ func (m *mockRepositoryRepo) UpdateName(context.Context, uuid.UUID, string) erro
 	return nil
 }
 
-func (m *mockRepositoryRepo) Delete(context.Context, uuid.UUID) error {
+func (m *mockRepositoryRepo) Delete(_ context.Context, id uuid.UUID) error {
+	m.deletedIDs = append(m.deletedIDs, id)
+	if m.byOwnerAndName != nil {
+		for key, repo := range m.byOwnerAndName {
+			if repo.ID == id {
+				delete(m.byOwnerAndName, key)
+				break
+			}
+		}
+	}
 	return nil
 }
 
@@ -130,6 +140,68 @@ func TestInvalidName(t *testing.T) {
 	})
 	if !errors.Is(err, repository.ErrInvalidName) {
 		t.Fatalf("expected ErrInvalidName, got %v", err)
+	}
+}
+
+func TestInvalidNameWithDotDot(t *testing.T) {
+	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
+	uc := repository.NewCreateRepositoryUsecase(repos, repository.WithGitDataRoot("/data/git"))
+
+	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
+		OwnerID:        testOwnerID,
+		OrganizationID: testOrgID,
+		Name:           "..",
+	})
+	if !errors.Is(err, repository.ErrInvalidName) {
+		t.Fatalf("expected ErrInvalidName, got %v", err)
+	}
+}
+
+func TestAutoInitRequiresOwnerLogin(t *testing.T) {
+	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
+	gitInit := &mockGitInitService{}
+	uc := repository.NewCreateRepositoryUsecase(repos, repository.WithGitDataRoot("/data/git"), repository.WithGitInitService(gitInit))
+
+	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
+		OwnerID:        testOwnerID,
+		OrganizationID: testOrgID,
+		Name:           "my-repo",
+		AutoInit:       true,
+	})
+	if !errors.Is(err, repository.ErrOwnerLoginRequired) {
+		t.Fatalf("expected ErrOwnerLoginRequired, got %v", err)
+	}
+	if gitInit.called {
+		t.Fatal("expected git init service not to be called")
+	}
+	if len(repos.deletedIDs) != 1 {
+		t.Fatalf("expected repository to be deleted on owner login error, got %d deletes", len(repos.deletedIDs))
+	}
+}
+
+func TestAutoInitFailureDeletesRepository(t *testing.T) {
+	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
+	gitInit := &mockGitInitService{err: errors.New("init failed")}
+	uc := repository.NewCreateRepositoryUsecase(repos, repository.WithGitDataRoot("/data/git"), repository.WithGitInitService(gitInit))
+
+	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
+		OwnerID:        testOwnerID,
+		OrganizationID: testOrgID,
+		Name:           "my-repo",
+		AutoInit:       true,
+		OwnerLogin:     testOwnerLogin,
+	})
+	if err == nil {
+		t.Fatal("expected auto init error")
+	}
+	if !gitInit.called {
+		t.Fatal("expected git init service to be called")
+	}
+	if len(repos.deletedIDs) != 1 {
+		t.Fatalf("expected repository to be deleted on auto init failure, got %d deletes", len(repos.deletedIDs))
+	}
+	if len(repos.created) != 1 {
+		t.Fatal("expected one create attempt")
 	}
 }
 

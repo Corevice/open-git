@@ -18,7 +18,27 @@ type AutoInitOpts struct {
 	LicenseTemplate   string
 }
 
+func validateBareRepoPath(bareRepoPath string) error {
+	if bareRepoPath == "" {
+		return fmt.Errorf("bare repo path is required")
+	}
+	if strings.Contains(bareRepoPath, "..") {
+		return fmt.Errorf("bare repo path must not contain ..")
+	}
+	return nil
+}
+
 func AutoInitRepository(bareRepoPath string, opts AutoInitOpts) error {
+	if err := validateBareRepoPath(bareRepoPath); err != nil {
+		return err
+	}
+
+	if _, err := os.Stat(bareRepoPath); err == nil {
+		return fmt.Errorf("bare repo path already exists: %s", bareRepoPath)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("check bare repo path: %w", err)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(bareRepoPath), 0o755); err != nil {
 		return fmt.Errorf("create bare repo parent dir: %w", err)
 	}
@@ -116,7 +136,28 @@ func gitignoreContent(template string) string {
 func licenseContent(template string) string {
 	switch strings.ToLower(strings.TrimSpace(template)) {
 	case "mit":
-		return "MIT License\n\nCopyright (c) OpenHub\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n"
+		return `MIT License
+
+Copyright (c) OpenHub
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+`
 	default:
 		return fmt.Sprintf("%s license template\n", template)
 	}

@@ -57,7 +57,7 @@ type createRepositoryRequest struct {
 	Private           bool   `json:"private"`
 	Description       string `json:"description"`
 	AutoInit          bool   `json:"auto_init"`
-	GitignoreTemplate string `json:"gitignore_template"`
+	GitIgnoreTemplate string `json:"gitignore_template"`
 	LicenseTemplate   string `json:"license_template"`
 }
 
@@ -213,7 +213,7 @@ func (h *RepositoryHandler) CreateForOrg(c echo.Context) error {
 		Private:           req.Private,
 		Description:       req.Description,
 		AutoInit:          req.AutoInit,
-		GitIgnoreTemplate: req.GitignoreTemplate,
+		GitIgnoreTemplate: req.GitIgnoreTemplate,
 		LicenseTemplate:   req.LicenseTemplate,
 		OwnerLogin:        org.Login,
 	})
@@ -253,7 +253,7 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 		Private:           req.Private,
 		Description:       req.Description,
 		AutoInit:          req.AutoInit,
-		GitIgnoreTemplate: req.GitignoreTemplate,
+		GitIgnoreTemplate: req.GitIgnoreTemplate,
 		LicenseTemplate:   req.LicenseTemplate,
 	})
 	if err != nil {
