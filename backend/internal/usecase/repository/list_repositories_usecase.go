@@ -2,32 +2,40 @@ package repository
 
 import (
 	"context"
+	"encoding/binary"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain/entity"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
+var ErrOwnerNotFound = errors.New("owner not found")
+
 type ListRepositoriesInput struct {
-	OrganizationID uuid.UUID
-	RequestUserID  uuid.UUID
-	Page           int
-	PerPage        int
+	RequestUserID uuid.UUID
+	OwnerLogin    string
+	Page          int
+	PerPage       int
 }
 
 type ListRepositoriesUsecase struct {
-	repos       repo.IRepositoryRepository
-	memberships repo.IMembershipRepository
+	repos repo.IRepositoryRepository
+	users repo.IUserRepository
 }
 
-func NewListRepositoriesUsecase(
-	repos repo.IRepositoryRepository,
-	memberships repo.IMembershipRepository,
-) *ListRepositoriesUsecase {
-	return &ListRepositoriesUsecase{repos: repos, memberships: memberships}
+func NewListRepositoriesUsecase(repos repo.IRepositoryRepository, users repo.IUserRepository) *ListRepositoriesUsecase {
+	return &ListRepositoriesUsecase{repos: repos, users: users}
 }
 
-func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListRepositoriesInput) ([]*entity.Repository, error) {
+func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListRepositoriesInput) ([]*entity.Repository, int, error) {
+	owner, err := u.users.GetByLogin(ctx, input.OwnerLogin)
+	if err != nil || owner == nil {
+		return nil, 0, ErrOwnerNotFound
+	}
+
+	orgID := int64ToUUID(owner.ID)
+
 	page := input.Page
 	if page < 1 {
 		page = 1
@@ -37,10 +45,12 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 		perPage = 30
 	}
 
-	repositories, err := u.repos.ListByOrg(ctx, input.OrganizationID, page, perPage)
+	repositories, err := u.repos.ListByOrg(ctx, orgID, page, perPage)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
+
+	isOwner := input.RequestUserID != uuid.Nil && input.RequestUserID == orgID
 
 	visible := make([]*entity.Repository, 0, len(repositories))
 	for _, r := range repositories {
@@ -48,15 +58,19 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 			visible = append(visible, r)
 			continue
 		}
-		if input.RequestUserID == uuid.Nil {
-			continue
+		if isOwner || (input.RequestUserID != uuid.Nil && input.RequestUserID == r.OwnerID) {
+			visible = append(visible, r)
 		}
-		hasAccess, err := u.memberships.HasReadAccess(ctx, input.RequestUserID, r.OrganizationID)
-		if err != nil || !hasAccess {
-			continue
-		}
-		visible = append(visible, r)
 	}
 
-	return visible, nil
+	return visible, len(visible), nil
+}
+
+func int64ToUUID(id int64) uuid.UUID {
+	if id == 0 {
+		return uuid.Nil
+	}
+	var u uuid.UUID
+	binary.BigEndian.PutUint64(u[8:], uint64(id))
+	return u
 }

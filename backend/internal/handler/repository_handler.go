@@ -3,6 +3,8 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"os"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -15,25 +17,33 @@ import (
 
 type RepositoryHandler struct {
 	create *repoUC.CreateRepositoryUsecase
+	list   *repoUC.ListRepositoriesUsecase
 	get    *repoUC.GetRepositoryUsecase
 	repos  repo.IRepositoryRepository
+	users  repo.IUserRepository
 }
 
 func NewRepositoryHandler(
 	create *repoUC.CreateRepositoryUsecase,
+	list *repoUC.ListRepositoriesUsecase,
 	get *repoUC.GetRepositoryUsecase,
 	repos repo.IRepositoryRepository,
+	users repo.IUserRepository,
 ) *RepositoryHandler {
 	return &RepositoryHandler{
 		create: create,
+		list:   list,
 		get:    get,
 		repos:  repos,
+		users:  users,
 	}
 }
 
 func (h *RepositoryHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.MiddlewareFunc) {
 	repoScope := middleware.RequireScope("repo")
 	g.POST("/user/repos", h.CreateRepository, authMiddleware, repoScope)
+	g.GET("/user/repos", h.ListRepositories, authMiddleware)
+	g.GET("/users/:owner/repos", h.ListOwnerRepos, middleware.OptionalAuth())
 	g.GET("/repos/:owner/:repo", h.GetRepository, middleware.OptionalAuth())
 	g.PATCH("/repos/:owner/:repo", h.UpdateVisibility, authMiddleware, repoScope)
 	g.DELETE("/repos/:owner/:repo", h.DeleteRepository, authMiddleware, repoScope)
@@ -70,6 +80,16 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 		return err
 	}
 
+	intUserID, err := middleware.GetUserID(c)
+	if err != nil {
+		return err
+	}
+
+	user, err := h.users.GetByID(c.Request().Context(), intUserID)
+	if err != nil || user == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to resolve user"})
+	}
+
 	var req createRepositoryRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid request"})
@@ -77,6 +97,7 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 
 	repository, err := h.create.Execute(c.Request().Context(), repoUC.CreateRepositoryInput{
 		OwnerID:        userID,
+		OwnerLogin:     user.Login,
 		OrganizationID: userID,
 		Name:           req.Name,
 		Private:        req.Private,
@@ -92,7 +113,81 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to create repository"})
 	}
 
-	return c.JSON(http.StatusCreated, toRepositoryResponse(repository))
+	return c.JSON(http.StatusCreated, toRepositoryResponse(repository, user.Login))
+}
+
+func (h *RepositoryHandler) ListRepositories(c echo.Context) error {
+	userID, err := middleware.GetUserUUID(c)
+	if err != nil {
+		return err
+	}
+
+	intUserID, err := middleware.GetUserID(c)
+	if err != nil {
+		return err
+	}
+
+	user, err := h.users.GetByID(c.Request().Context(), intUserID)
+	if err != nil || user == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to resolve user"})
+	}
+
+	page, _ := strconv.Atoi(c.QueryParam("page"))
+	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
+
+	repositories, total, err := h.list.Execute(c.Request().Context(), repoUC.ListRepositoriesInput{
+		RequestUserID: userID,
+		OwnerLogin:    user.Login,
+		Page:          page,
+		PerPage:       perPage,
+	})
+	if err != nil {
+		if errors.Is(err, repoUC.ErrOwnerNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to list repositories"})
+	}
+
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 30
+	}
+	setPaginationHeaders(c, page, perPage, total)
+
+	return c.JSON(http.StatusOK, toRepositoryResponses(repositories, user.Login))
+}
+
+func (h *RepositoryHandler) ListOwnerRepos(c echo.Context) error {
+	requestUserID := middleware.UserUUIDFromContext(c)
+	ownerLogin := c.Param("owner")
+
+	page, _ := strconv.Atoi(c.QueryParam("page"))
+	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
+
+	repositories, total, err := h.list.Execute(c.Request().Context(), repoUC.ListRepositoriesInput{
+		RequestUserID: requestUserID,
+		OwnerLogin:    ownerLogin,
+		Page:          page,
+		PerPage:       perPage,
+	})
+	if err != nil {
+		if errors.Is(err, repoUC.ErrOwnerNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to list repositories"})
+	}
+
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 30
+	}
+	setPaginationHeaders(c, page, perPage, total)
+
+	return c.JSON(http.StatusOK, toRepositoryResponses(repositories, ownerLogin))
 }
 
 func (h *RepositoryHandler) GetRepository(c echo.Context) error {
@@ -110,7 +205,7 @@ func (h *RepositoryHandler) GetRepository(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to get repository"})
 	}
 
-	return c.JSON(http.StatusOK, toRepositoryResponse(repository))
+	return c.JSON(http.StatusOK, toRepositoryResponse(repository, c.Param("owner")))
 }
 
 func (h *RepositoryHandler) UpdateVisibility(c echo.Context) error {
@@ -139,7 +234,7 @@ func (h *RepositoryHandler) UpdateVisibility(c echo.Context) error {
 	}
 
 	repository.Visibility = visibility
-	return c.JSON(http.StatusOK, toRepositoryResponse(repository))
+	return c.JSON(http.StatusOK, toRepositoryResponse(repository, c.Param("owner")))
 }
 
 func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
@@ -153,8 +248,14 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 		return err
 	}
 
+	diskPath := repository.DiskPath
+
 	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
+	}
+
+	if diskPath != "" {
+		_ = os.RemoveAll(diskPath)
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -178,8 +279,18 @@ func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID uuid.U
 	return repository, nil
 }
 
-func toRepositoryResponse(r *entity.Repository) repositoryResponse {
-	ownerLogin := "unknown"
+func toRepositoryResponses(repositories []*entity.Repository, ownerLogin string) []repositoryResponse {
+	responses := make([]repositoryResponse, 0, len(repositories))
+	for _, r := range repositories {
+		responses = append(responses, toRepositoryResponse(r, ownerLogin))
+	}
+	return responses
+}
+
+func toRepositoryResponse(r *entity.Repository, ownerLogin string) repositoryResponse {
+	if ownerLogin == "" {
+		ownerLogin = "unknown"
+	}
 	return repositoryResponse{
 		ID:            r.ID.String(),
 		Name:          r.Name,

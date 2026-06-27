@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
+	gogit "github.com/go-git/go-git/v5"
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/usecase/repository"
@@ -20,6 +23,8 @@ type mockRepositoryRepo struct {
 	byOwnerAndName map[string]*entity.Repository
 	created        []*entity.Repository
 	createErr      error
+	diskPaths      map[uuid.UUID]string
+	deleted        []uuid.UUID
 }
 
 func repoKey(ownerID uuid.UUID, name string) string {
@@ -65,7 +70,16 @@ func (m *mockRepositoryRepo) UpdateVisibility(context.Context, uuid.UUID, string
 	return nil
 }
 
-func (m *mockRepositoryRepo) Delete(context.Context, uuid.UUID) error {
+func (m *mockRepositoryRepo) UpdateDiskPath(_ context.Context, id uuid.UUID, diskPath string) error {
+	if m.diskPaths == nil {
+		m.diskPaths = map[uuid.UUID]string{}
+	}
+	m.diskPaths[id] = diskPath
+	return nil
+}
+
+func (m *mockRepositoryRepo) Delete(_ context.Context, id uuid.UUID) error {
+	m.deleted = append(m.deleted, id)
 	return nil
 }
 
@@ -75,10 +89,11 @@ func TestDuplicateName(t *testing.T) {
 			repoKey(testOwnerID, "existing"): {OwnerID: testOwnerID, Name: "existing"},
 		},
 	}
-	uc := repository.NewCreateRepositoryUsecase(repos)
+	uc := repository.NewCreateRepositoryUsecase(repos, t.TempDir())
 
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
+		OwnerLogin:     "alice",
 		OrganizationID: testOrgID,
 		Name:           "existing",
 	})
@@ -89,10 +104,11 @@ func TestDuplicateName(t *testing.T) {
 
 func TestInvalidName(t *testing.T) {
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
-	uc := repository.NewCreateRepositoryUsecase(repos)
+	uc := repository.NewCreateRepositoryUsecase(repos, t.TempDir())
 
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
+		OwnerLogin:     "alice",
 		OrganizationID: testOrgID,
 		Name:           "invalid name!",
 	})
@@ -102,11 +118,13 @@ func TestInvalidName(t *testing.T) {
 }
 
 func TestValidCreate(t *testing.T) {
+	gitRoot := t.TempDir()
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
-	uc := repository.NewCreateRepositoryUsecase(repos)
+	uc := repository.NewCreateRepositoryUsecase(repos, gitRoot)
 
 	repo, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
+		OwnerLogin:     "alice",
 		OrganizationID: testOrgID,
 		Name:           "my-repo",
 		Private:        true,
@@ -132,5 +150,31 @@ func TestValidCreate(t *testing.T) {
 	}
 	if len(repos.created) != 1 {
 		t.Fatal("expected repository to be created")
+	}
+}
+
+func TestCreateRepositoryInitsBareRepo(t *testing.T) {
+	gitRoot := t.TempDir()
+	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
+	uc := repository.NewCreateRepositoryUsecase(repos, gitRoot)
+
+	ownerLogin := "alice"
+	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
+		OwnerID:        testOwnerID,
+		OwnerLogin:     ownerLogin,
+		OrganizationID: testOrgID,
+		Name:           "my-repo",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	diskPath := filepath.Join(gitRoot, ownerLogin, "my-repo.git")
+	if _, err := os.Stat(diskPath); err != nil {
+		t.Fatalf("expected bare repo directory at %s: %v", diskPath, err)
+	}
+
+	if _, err := gogit.PlainOpen(diskPath); err != nil {
+		t.Fatalf("expected valid bare git repo: %v", err)
 	}
 }

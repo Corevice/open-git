@@ -3,11 +3,13 @@ package repository
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"regexp"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain/entity"
+	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
@@ -20,6 +22,7 @@ var repoNameRegex = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
 
 type CreateRepositoryInput struct {
 	OwnerID        uuid.UUID
+	OwnerLogin     string
 	OrganizationID uuid.UUID
 	Name           string
 	Private        bool
@@ -27,11 +30,12 @@ type CreateRepositoryInput struct {
 }
 
 type CreateRepositoryUsecase struct {
-	repos repo.IRepositoryRepository
+	repos   repo.IRepositoryRepository
+	gitRoot string
 }
 
-func NewCreateRepositoryUsecase(repos repo.IRepositoryRepository) *CreateRepositoryUsecase {
-	return &CreateRepositoryUsecase{repos: repos}
+func NewCreateRepositoryUsecase(repos repo.IRepositoryRepository, gitRoot string) *CreateRepositoryUsecase {
+	return &CreateRepositoryUsecase{repos: repos, gitRoot: gitRoot}
 }
 
 func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepositoryInput) (*entity.Repository, error) {
@@ -61,5 +65,17 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 		return nil, err
 	}
 
+	diskPath := filepath.Join(u.gitRoot, input.OwnerLogin, repository.Name+".git")
+	if err := infragit.InitBare(diskPath); err != nil {
+		_ = u.repos.Delete(ctx, repository.ID)
+		return nil, err
+	}
+
+	if err := u.repos.UpdateDiskPath(ctx, repository.ID, diskPath); err != nil {
+		_ = u.repos.Delete(ctx, repository.ID)
+		return nil, err
+	}
+
+	repository.DiskPath = diskPath
 	return repository, nil
 }
