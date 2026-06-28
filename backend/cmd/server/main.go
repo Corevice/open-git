@@ -356,6 +356,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	entityUserRepo := infrarepo.NewUserRepository(sqlxDB)
 	userRepo := &legacyUserRepoAdapter{users: entityUserRepo}
 	repoRepo := infrarepo.NewRepositoryRepository(sqlxDB)
+	collaboratorRepo := infrarepo.NewRepositoryCollaboratorRepository(sqlxDB)
 	membershipRepo := infrarepo.NewMembershipRepository(sqlxDB)
 	legacyMembershipRepo := &legacyMembershipRepoAdapter{inner: membershipRepo}
 	orgRepo := infraDB.NewOrganizationRepository(db)
@@ -598,9 +599,11 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		repoGitResolver,
 		membershipAdapter,
 		nil,
+		collaboratorRepo,
 		realGitBasicAuth,
 	)
 	sshKeyHandler := handler.NewSSHKeyHandler(sshKeyRepo)
+	collaboratorHandler := handler.NewCollaboratorHandler(repoGitResolver, repoRepo, collaboratorRepo, entityUserRepo)
 
 	api := e.Group("")
 	e.POST("/register", authHandler.Register, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
@@ -617,6 +620,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	repositoryHandler.RegisterRoutes(api, authMiddleware)
+	collaboratorHandler.RegisterRoutes(api, authMiddleware)
 	contentHandler.RegisterRoutes(api)
 	issueHandler.RegisterRoutes(api, authMiddleware)
 	pullRequestHandler.RegisterRoutes(api, authMiddleware)
@@ -638,6 +642,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	orgHandler.RegisterRoutes(v3, authMiddleware)
 	orgAuditLogHandler.RegisterRoutes(v3, authMiddleware)
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
+	collaboratorHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
 	issueHandler.RegisterRoutes(v3, authMiddleware)
 	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
