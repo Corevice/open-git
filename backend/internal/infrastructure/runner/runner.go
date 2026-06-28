@@ -5,8 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/open-git/backend/internal/domain/entity"
 )
@@ -65,10 +67,14 @@ func (r *DockerActRunner) ExecuteJob(
 	logFn func(offset int64, chunk string),
 ) error {
 	workflowYAML := buildWorkflowYAML(job, steps)
-	args := []string{"--workflow", "/dev/stdin", "--job", job.Name}
-	for key, value := range secrets {
-		args = append(args, "--input", key+"="+value)
+
+	secretFile, err := writeSecretsFile(secrets)
+	if err != nil {
+		return fmt.Errorf("write secrets file: %w", err)
 	}
+	defer os.Remove(secretFile)
+
+	args := []string{"--workflow", "/dev/stdin", "--job", job.Name, "--secret-file", secretFile}
 
 	cmd := exec.CommandContext(ctx, r.ActPath, args...)
 	cmd.Stdin = strings.NewReader(workflowYAML)
@@ -92,23 +98,39 @@ func (r *DockerActRunner) ExecuteJob(
 	}
 
 	var offset int64
+	var offsetMu sync.Mutex
 	streamLines := func(reader io.Reader) error {
 		scanner := bufio.NewScanner(reader)
 		for scanner.Scan() {
 			line := MaskSecrets(scanner.Text(), secretValues)
+			offsetMu.Lock()
 			logFn(offset, line)
 			offset++
+			offsetMu.Unlock()
 		}
 		return scanner.Err()
 	}
 
-	if err := streamLines(stdout); err != nil {
+	var wg sync.WaitGroup
+	var stdoutErr, stderrErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		stdoutErr = streamLines(stdout)
+	}()
+	go func() {
+		defer wg.Done()
+		stderrErr = streamLines(stderr)
+	}()
+	wg.Wait()
+
+	if stdoutErr != nil {
 		_ = cmd.Process.Kill()
-		return fmt.Errorf("read act stdout: %w", err)
+		return fmt.Errorf("read act stdout: %w", stdoutErr)
 	}
-	if err := streamLines(stderr); err != nil {
+	if stderrErr != nil {
 		_ = cmd.Process.Kill()
-		return fmt.Errorf("read act stderr: %w", err)
+		return fmt.Errorf("read act stderr: %w", stderrErr)
 	}
 
 	if err := cmd.Wait(); err != nil {
@@ -117,11 +139,35 @@ func (r *DockerActRunner) ExecuteJob(
 	return nil
 }
 
+func writeSecretsFile(secrets map[string]string) (string, error) {
+	f, err := os.CreateTemp("", "act-secrets-*")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	for key, value := range secrets {
+		if _, err := fmt.Fprintf(f, "%s=%s\n", key, value); err != nil {
+			f.Close()
+			os.Remove(path)
+			return "", err
+		}
+	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
 func buildWorkflowYAML(job *entity.WorkflowJob, steps []*Step) string {
 	var b strings.Builder
-	b.WriteString("on: workflow_dispatch\njobs:\n")
-	b.WriteString("  ")
-	b.WriteString(job.Name)
+	b.WriteString("on: workflow_dispatch\njobs:\n  ")
+	b.WriteString(yamlQuoteKey(job.Name))
 	b.WriteString(":\n    runs-on: ubuntu-latest\n    steps:\n")
 	for _, step := range steps {
 		b.WriteString("      - name: ")
@@ -131,6 +177,14 @@ func buildWorkflowYAML(job *entity.WorkflowJob, steps []*Step) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func yamlQuoteKey(s string) string {
+	if s == "" || strings.ContainsAny(s, ":{}[]&*#?|-<>!=@\\\"',") ||
+		strings.HasPrefix(s, " ") || strings.HasSuffix(s, " ") {
+		return fmt.Sprintf("%q", s)
+	}
+	return s
 }
 
 func strconvQuote(s string) string {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -15,7 +14,10 @@ import (
 	"github.com/open-git/backend/internal/infrastructure/runner"
 )
 
-const defaultJobTimeoutMinutes = 360
+const (
+	defaultJobTimeoutMinutes = 360
+	conclusionTimedOut       = "timed_out"
+)
 
 type workflowStepRepository interface {
 	ListByJobID(ctx context.Context, orgID, jobID string) ([]*runner.Step, error)
@@ -30,12 +32,12 @@ type secretProvider interface {
 }
 
 type WorkflowJobExecHandler struct {
-	jobRepo    domainrepo.IWorkflowJobRepository
-	stepRepo   workflowStepRepository
-	logRepo    domainrepo.IJobLogRepository
-	runner     runner.Runner
-	enqueuer   workflowScheduleEnqueuer
-	secrets    secretProvider
+	jobRepo  domainrepo.IWorkflowJobRepository
+	stepRepo workflowStepRepository
+	logRepo  domainrepo.IJobLogRepository
+	runner   runner.Runner
+	enqueuer workflowScheduleEnqueuer
+	secrets  secretProvider
 }
 
 func NewWorkflowJobExecHandler(
@@ -86,7 +88,7 @@ func (e *asynqScheduleEnqueuer) EnqueueSchedule(ctx context.Context, payload Wor
 func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task *asynq.Task) error {
 	var payload WorkflowJobExecPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-		return fmt.Errorf("unmarshal workflow job exec payload: %w: %w", err, asynq.SkipRetry)
+		return fmt.Errorf("unmarshal workflow job exec payload: %v: %w", err, asynq.SkipRetry)
 	}
 	if payload.JobID == "" || payload.RunID == "" || payload.OrgID == "" {
 		return fmt.Errorf("workflow job exec payload missing identifiers: %w", asynq.SkipRetry)
@@ -95,6 +97,12 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 	job, err := h.jobRepo.GetByID(ctx, payload.OrgID, payload.JobID)
 	if err != nil {
 		return fmt.Errorf("load workflow job: %w", err)
+	}
+	if job.OrganizationID != payload.OrgID {
+		return fmt.Errorf("job organization mismatch: %w", asynq.SkipRetry)
+	}
+	if job.RepositoryID == "" {
+		return fmt.Errorf("job repository id missing: %w", asynq.SkipRetry)
 	}
 
 	steps, err := h.stepRepo.ListByJobID(ctx, payload.OrgID, payload.JobID)
@@ -118,15 +126,19 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 		}
 	}
 
-	logFn := h.buildLogCallback(execCtx, payload, job)
+	logFn, logErrFn := h.buildLogCallback(execCtx, payload, job)
 	runErr := h.runner.ExecuteJob(execCtx, job, steps, secretMap, logFn)
+	if logErr := logErrFn(); logErr != nil {
+		return fmt.Errorf("append job log lines: %w", logErr)
+	}
 
 	status, conclusion := entity.WorkflowJobStatusCompleted, conclusionSuccess
 	if runErr != nil {
-		status = entity.WorkflowJobStatusFailed
 		if errors.Is(execCtx.Err(), context.DeadlineExceeded) {
-			conclusion = fmt.Sprintf("job timed out after %d minutes", timeoutMinutes)
+			status = entity.WorkflowJobStatusFailed
+			conclusion = conclusionTimedOut
 		} else {
+			status = entity.WorkflowJobStatusFailed
 			conclusion = conclusionFailure
 		}
 	}
@@ -150,7 +162,8 @@ func (h *WorkflowJobExecHandler) buildLogCallback(
 	ctx context.Context,
 	payload WorkflowJobExecPayload,
 	job *entity.WorkflowJob,
-) func(offset int64, chunk string) {
+) (func(offset int64, chunk string), func() error) {
+	var appendErr error
 	return func(offset int64, chunk string) {
 		if h.logRepo == nil {
 			return
@@ -165,17 +178,14 @@ func (h *WorkflowJobExecHandler) buildLogCallback(
 			Text:           chunk,
 			CreatedAt:      time.Now().UTC(),
 		}
-		_ = h.logRepo.AppendLines(ctx, []*entity.JobLogLine{line})
+		if err := h.logRepo.AppendLines(ctx, []*entity.JobLogLine{line}); err != nil && appendErr == nil {
+			appendErr = err
+		}
+	}, func() error {
+		return appendErr
 	}
 }
 
-func jobTimeoutMinutes(job *entity.WorkflowJob) int {
-	if job == nil {
-		return defaultJobTimeoutMinutes
-	}
-	field := reflect.ValueOf(job).Elem().FieldByName("TimeoutMinutes")
-	if field.IsValid() && field.Kind() == reflect.Int && field.Int() > 0 {
-		return int(field.Int())
-	}
+func jobTimeoutMinutes(_ *entity.WorkflowJob) int {
 	return defaultJobTimeoutMinutes
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 
 	"github.com/hibiken/asynq"
 
@@ -106,7 +105,7 @@ func (e *asynqJobExecEnqueuer) EnqueueJobExec(ctx context.Context, payload Workf
 func (h *WorkflowScheduleHandler) HandleWorkflowSchedule(ctx context.Context, task *asynq.Task) error {
 	var payload WorkflowSchedulePayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-		return fmt.Errorf("unmarshal workflow schedule payload: %w: %w", err, asynq.SkipRetry)
+		return fmt.Errorf("unmarshal workflow schedule payload: %v: %w", err, asynq.SkipRetry)
 	}
 	if payload.RunID == "" || payload.OrgID == "" {
 		return fmt.Errorf("workflow schedule payload missing identifiers: %w", asynq.SkipRetry)
@@ -211,31 +210,27 @@ func allJobsTerminal(jobs []*schedulableJob) bool {
 }
 
 func computeRunConclusion(jobs []*schedulableJob) (status, conclusion string) {
-	status = runStatusCompleted
-	conclusion = conclusionSuccess
+	hasFailure := false
+	hasCancelled := false
 
 	for _, job := range jobs {
 		if job.Conclusion == conclusionFailure || job.Status == entity.WorkflowJobStatusFailed {
-			return runStatusCompleted, conclusionFailure
+			hasFailure = true
 		}
 		if job.Conclusion == conclusionCancelled || job.Status == "cancelled" {
-			return runStatusCompleted, conclusionCancelled
+			hasCancelled = true
 		}
 	}
-	return status, conclusion
+
+	if hasFailure {
+		return runStatusCompleted, conclusionFailure
+	}
+	if hasCancelled {
+		return runStatusCompleted, conclusionCancelled
+	}
+	return runStatusCompleted, conclusionSuccess
 }
 
-func workflowJobNeeds(job *entity.WorkflowJob) []string {
-	if job == nil {
-		return nil
-	}
-	field := reflect.ValueOf(job).Elem().FieldByName("Needs")
-	if !field.IsValid() || field.Kind() != reflect.Slice {
-		return nil
-	}
-	out := make([]string, field.Len())
-	for i := 0; i < field.Len(); i++ {
-		out[i] = field.Index(i).String()
-	}
-	return out
+func workflowJobNeeds(_ *entity.WorkflowJob) []string {
+	return nil
 }

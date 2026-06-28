@@ -139,6 +139,58 @@ func TestScheduleHandler_AnyJobFailed_ConclusionIsFailure(t *testing.T) {
 	}
 }
 
+func TestScheduleHandler_DependencyCycle_MarksRunFailure(t *testing.T) {
+	jobRepo := &mockScheduleJobRepo{
+		jobs: []*schedulableJob{
+			{ID: "job-a", Name: "A", Status: entity.WorkflowJobStatusQueued, Needs: []string{"B"}},
+			{ID: "job-b", Name: "B", Status: entity.WorkflowJobStatusQueued, Needs: []string{"A"}},
+		},
+	}
+	runRepo := &mockScheduleRunRepo{}
+	enqueuer := &mockJobExecEnqueuer{}
+
+	handler := NewWorkflowScheduleHandlerWithEnqueuer(jobRepo, runRepo, enqueuer)
+
+	task, err := newScheduleTask(WorkflowSchedulePayload{RunID: "run-1", OrgID: "org-1"})
+	if err != nil {
+		t.Fatalf("newScheduleTask: %v", err)
+	}
+
+	if err := handler.HandleWorkflowSchedule(context.Background(), task); err != nil {
+		t.Fatalf("HandleWorkflowSchedule: %v", err)
+	}
+
+	if len(enqueuer.payloads) != 0 {
+		t.Fatalf("expected no enqueued jobs for cycle, got %d", len(enqueuer.payloads))
+	}
+	if !runRepo.conclusionUpdate.called {
+		t.Fatal("expected run conclusion update for dependency cycle")
+	}
+	if runRepo.conclusionUpdate.conclusion != conclusionFailure {
+		t.Fatalf("expected failure conclusion for cycle, got %q", runRepo.conclusionUpdate.conclusion)
+	}
+}
+
+func TestComputeRunConclusion_FailureOverCancelled(t *testing.T) {
+	_, conclusion := computeRunConclusion([]*schedulableJob{
+		{Conclusion: conclusionCancelled, Status: "cancelled"},
+		{Conclusion: conclusionFailure, Status: entity.WorkflowJobStatusFailed},
+	})
+	if conclusion != conclusionFailure {
+		t.Fatalf("expected failure conclusion, got %q", conclusion)
+	}
+}
+
+func TestComputeRunConclusion_CancelledWhenNoFailure(t *testing.T) {
+	_, conclusion := computeRunConclusion([]*schedulableJob{
+		{Conclusion: conclusionSuccess, Status: entity.WorkflowJobStatusCompleted},
+		{Conclusion: conclusionCancelled, Status: "cancelled"},
+	})
+	if conclusion != conclusionCancelled {
+		t.Fatalf("expected cancelled conclusion, got %q", conclusion)
+	}
+}
+
 func newScheduleTask(payload WorkflowSchedulePayload) (*asynq.Task, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
