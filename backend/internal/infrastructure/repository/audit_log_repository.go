@@ -210,51 +210,40 @@ func (r *sqlxAuditLogRepository) ListByOrg(ctx context.Context, opts domainrepo.
 	}
 	offset := (page - 1) * perPage
 
-	where := "WHERE organization_id = :org_id"
-	args := map[string]any{
-		"org_id": opts.OrgID,
-	}
+	where := "WHERE organization_id = ?"
+	args := []any{opts.OrgID}
 
 	if opts.Action != "" {
-		where += " AND action = :action"
-		args["action"] = opts.Action
+		where += " AND action = ?"
+		args = append(args, opts.Action)
 	}
 	if opts.ActorID != nil {
-		where += " AND actor_id = :actor_id"
-		args["actor_id"] = *opts.ActorID
+		where += " AND actor_id = ?"
+		args = append(args, *opts.ActorID)
 	}
 	if opts.Since != nil {
-		where += " AND created_at >= :since"
-		args["since"] = *opts.Since
+		where += " AND created_at >= ?"
+		args = append(args, *opts.Since)
 	}
 	if opts.Until != nil {
-		where += " AND created_at <= :until"
-		args["until"] = *opts.Until
+		where += " AND created_at <= ?"
+		args = append(args, *opts.Until)
 	}
 
 	countQuery := "SELECT COUNT(*) FROM audit_logs " + where
-	countRows, err := r.db.NamedQueryContext(ctx, countQuery, args)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer countRows.Close()
+	countQuery = r.db.Rebind(countQuery)
 
 	var total int64
-	if countRows.Next() {
-		if err := countRows.Scan(&total); err != nil {
-			return nil, 0, err
-		}
-	}
-	if err := countRows.Err(); err != nil {
+	if err := r.db.QueryRowxContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
 	selectColumns := "id, organization_id, actor_id, actor_login, action, target_type, target_id, metadata, ip_address, created_at"
-	listQuery := "SELECT " + selectColumns + " FROM audit_logs " + where + " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
-	args["limit"] = perPage
-	args["offset"] = offset
+	listQuery := "SELECT " + selectColumns + " FROM audit_logs " + where + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+	listQuery = r.db.Rebind(listQuery)
+	listArgs := append(append([]any{}, args...), perPage, offset)
 
-	rows, err := r.db.NamedQueryContext(ctx, listQuery, args)
+	rows, err := r.db.QueryxContext(ctx, listQuery, listArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
