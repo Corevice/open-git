@@ -73,8 +73,10 @@ type repositoryOwnerResponse struct {
 
 type repositoryResponse struct {
 	ID            string                  `json:"id"`
+	NodeID        string                  `json:"node_id"`
 	Name          string                  `json:"name"`
 	FullName      string                  `json:"full_name"`
+	HTMLURL       string                  `json:"html_url"`
 	Private       bool                    `json:"private"`
 	Description   string                  `json:"description"`
 	DefaultBranch string                  `json:"default_branch"`
@@ -114,7 +116,7 @@ func (h *RepositoryHandler) List(c echo.Context) error {
 
 	resp := make([]repositoryResponse, 0, len(repositories))
 	for _, r := range repositories {
-		resp = append(resp, toRepositoryResponse(r))
+		resp = append(resp, toRepositoryResponse(r, c.Request().Host))
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -169,7 +171,7 @@ func (h *RepositoryHandler) ListOrg(c echo.Context) error {
 
 	resp := make([]repositoryResponse, 0, len(repositories))
 	for _, r := range repositories {
-		resp = append(resp, toRepositoryResponse(r))
+		resp = append(resp, toRepositoryResponse(r, c.Request().Host))
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -232,7 +234,7 @@ func (h *RepositoryHandler) CreateForOrg(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to record audit log"})
 	}
 
-	return c.JSON(http.StatusCreated, toRepositoryResponse(repository))
+	return c.JSON(http.StatusCreated, toRepositoryResponse(repository, c.Request().Host))
 }
 
 func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
@@ -271,7 +273,7 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to record audit log"})
 	}
 
-	return c.JSON(http.StatusCreated, toRepositoryResponse(repository))
+	return c.JSON(http.StatusCreated, toRepositoryResponse(repository, c.Request().Host))
 }
 
 func (h *RepositoryHandler) GetRepository(c echo.Context) error {
@@ -289,7 +291,7 @@ func (h *RepositoryHandler) GetRepository(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to get repository"})
 	}
 
-	return c.JSON(http.StatusOK, toRepositoryResponse(repository))
+	return c.JSON(http.StatusOK, toRepositoryResponse(repository, c.Request().Host))
 }
 
 func (h *RepositoryHandler) UpdateRepository(c echo.Context) error {
@@ -348,7 +350,7 @@ func (h *RepositoryHandler) UpdateRepository(c echo.Context) error {
 		repository.Visibility = visibility
 	}
 
-	return c.JSON(http.StatusOK, toRepositoryResponse(repository))
+	return c.JSON(http.StatusOK, toRepositoryResponse(repository, c.Request().Host))
 }
 
 func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
@@ -405,12 +407,14 @@ func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID uuid.U
 	return repository, nil
 }
 
-func toRepositoryResponse(r *entity.Repository) repositoryResponse {
+func toRepositoryResponse(r *entity.Repository, host string) repositoryResponse {
 	ownerLogin := r.OwnerLogin
 	return repositoryResponse{
 		ID:            r.ID.String(),
+		NodeID:        RepoNodeID(r.ID),
 		Name:          r.Name,
 		FullName:      ownerLogin + "/" + r.Name,
+		HTMLURL:       "https://" + host + "/" + ownerLogin + "/" + r.Name,
 		Private:       r.Visibility == entity.VisibilityPrivate,
 		Description:   r.Description,
 		DefaultBranch: r.DefaultBranch,
