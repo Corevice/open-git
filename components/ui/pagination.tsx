@@ -21,7 +21,7 @@ export function Pagination({
     <nav className="flex items-center gap-2" aria-label="Pagination">
       <Link
         href={`${basePath}?page=${page - 1}`}
-        aria-disabled={!hasPrev}
+        aria-disabled={hasPrev ? undefined : "true"}
         className={cn(
           "inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-medium hover:bg-slate-100",
           !hasPrev && "pointer-events-none opacity-50",
@@ -31,7 +31,7 @@ export function Pagination({
       </Link>
       <Link
         href={`${basePath}?page=${page + 1}`}
-        aria-disabled={!hasNext}
+        aria-disabled={hasNext ? undefined : "true"}
         className={cn(
           "inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-medium hover:bg-slate-100",
           !hasNext && "pointer-events-none opacity-50",
