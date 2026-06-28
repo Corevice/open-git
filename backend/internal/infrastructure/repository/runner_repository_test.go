@@ -52,6 +52,7 @@ func TestRunnerRepository_CreateAndGetByID(t *testing.T) {
 	repo := repository.NewRunnerRepository(db)
 
 	orgID := uuid.New()
+	lastSeen := time.Now().UTC()
 	runner := &entity.Runner{
 		OrganizationID: orgID,
 		Name:           "linux-runner",
@@ -60,7 +61,7 @@ func TestRunnerRepository_CreateAndGetByID(t *testing.T) {
 		Arch:           "amd64",
 		RunnerType:     "official",
 		Status:         "online",
-		LastSeenAt:     time.Now().UTC(),
+		LastSeenAt:     &lastSeen,
 		Ephemeral:      false,
 	}
 	if err := repo.Create(context.Background(), runner); err != nil {
@@ -145,7 +146,7 @@ func TestRunnerRepository_UpdateStatusChangesStatusAndLastSeenAt(t *testing.T) {
 	if got.Status != "online" {
 		t.Fatalf("status = %q, want online", got.Status)
 	}
-	if !got.LastSeenAt.Equal(lastSeen) {
+	if got.LastSeenAt == nil || !got.LastSeenAt.Equal(lastSeen) {
 		t.Fatalf("last_seen_at = %v, want %v", got.LastSeenAt, lastSeen)
 	}
 }

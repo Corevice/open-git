@@ -48,12 +48,16 @@ func newWorkflowJobTestDB(t *testing.T) *sqlx.DB {
 	return sqlx.NewDb(db, "sqlite3")
 }
 
+func workflowRunID(id uuid.UUID) *uuid.UUID {
+	return &id
+}
+
 func TestWorkflowJobRepository_Create(t *testing.T) {
 	db := newWorkflowJobTestDB(t)
 	repo := repository.NewWorkflowJobRepository(db)
 
 	job := &entity.WorkflowJob{
-		RunID:              uuid.New(),
+		WorkflowRunID:      workflowRunID(uuid.New()),
 		OrganizationID:     uuid.New(),
 		RepositoryID:       uuid.New(),
 		Name:               "build",
@@ -86,7 +90,7 @@ func TestWorkflowJobRepository_AcquireForRunnerSuccess(t *testing.T) {
 	runnerID := uuid.New()
 	job := &entity.WorkflowJob{
 		ID:                 jobID,
-		RunID:              uuid.New(),
+		WorkflowRunID:      workflowRunID(uuid.New()),
 		OrganizationID:     uuid.New(),
 		RepositoryID:       uuid.New(),
 		Name:               "test",
@@ -131,7 +135,7 @@ func TestWorkflowJobRepository_AcquireForRunnerLockVersionConflict(t *testing.T)
 	runnerID := uuid.New()
 	job := &entity.WorkflowJob{
 		ID:                 jobID,
-		RunID:              uuid.New(),
+		WorkflowRunID:      workflowRunID(uuid.New()),
 		OrganizationID:     uuid.New(),
 		RepositoryID:       uuid.New(),
 		Name:               "test",
@@ -166,7 +170,7 @@ func TestWorkflowJobRepository_CancelSetsStatusCancelled(t *testing.T) {
 	jobID := uuid.New()
 	job := &entity.WorkflowJob{
 		ID:             jobID,
-		RunID:          uuid.New(),
+		WorkflowRunID:  workflowRunID(uuid.New()),
 		OrganizationID: uuid.New(),
 		RepositoryID:   uuid.New(),
 		Name:           "cancel-me",
@@ -196,7 +200,7 @@ func TestWorkflowJobRepository_CompleteSetsStatusConclusionFinishedAt(t *testing
 	jobID := uuid.New()
 	job := &entity.WorkflowJob{
 		ID:             jobID,
-		RunID:          uuid.New(),
+		WorkflowRunID:  workflowRunID(uuid.New()),
 		OrganizationID: uuid.New(),
 		RepositoryID:   uuid.New(),
 		Name:           "complete-me",
@@ -237,28 +241,28 @@ func TestWorkflowJobRepository_ListQueuedReturnsOnlyQueuedJobsForOrg(t *testing.
 
 	jobs := []*entity.WorkflowJob{
 		{
-			RunID:          runID,
+			WorkflowRunID:  workflowRunID(runID),
 			OrganizationID: orgA,
 			RepositoryID:   repoID,
 			Name:           "queued-a1",
 			Status:         entity.WorkflowJobStatusQueued,
 		},
 		{
-			RunID:          runID,
+			WorkflowRunID:  workflowRunID(runID),
 			OrganizationID: orgA,
 			RepositoryID:   repoID,
 			Name:           "queued-a2",
 			Status:         entity.WorkflowJobStatusQueued,
 		},
 		{
-			RunID:          runID,
+			WorkflowRunID:  workflowRunID(runID),
 			OrganizationID: orgA,
 			RepositoryID:   repoID,
 			Name:           "in-progress-a",
 			Status:         entity.WorkflowJobStatusInProgress,
 		},
 		{
-			RunID:          runID,
+			WorkflowRunID:  workflowRunID(runID),
 			OrganizationID: orgB,
 			RepositoryID:   repoID,
 			Name:           "queued-b",

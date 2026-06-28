@@ -166,10 +166,10 @@ func (r *sqlxWorkflowJobRepository) ListQueued(ctx context.Context, orgID uuid.U
 }
 
 func workflowJobRunID(job *entity.WorkflowJob) uuid.UUID {
-	if job.RunID != uuid.Nil {
-		return job.RunID
+	if job.WorkflowRunID != nil && *job.WorkflowRunID != uuid.Nil {
+		return *job.WorkflowRunID
 	}
-	return job.WorkflowRunID
+	return uuid.Nil
 }
 
 func workflowJobAssignedRunnerID(job *entity.WorkflowJob) *uuid.UUID {
@@ -214,8 +214,9 @@ func scanWorkflowJobRow(scanner workflowJobScanner) (*entity.WorkflowJob, error)
 		return nil, err
 	}
 
-	job.RunID = runID
-	job.WorkflowRunID = runID
+	if runID != uuid.Nil {
+		job.WorkflowRunID = &runID
+	}
 	if assignedRunnerID.Valid {
 		parsed, err := uuid.Parse(assignedRunnerID.String)
 		if err != nil {

@@ -198,7 +198,8 @@ func scanRunnerRow(scanner runnerScanner) (*entity.Runner, error) {
 		return nil, err
 	}
 	if lastSeenAt.Valid {
-		runner.LastSeenAt = lastSeenAt.Time
+		t := lastSeenAt.Time
+		runner.LastSeenAt = &t
 	}
 	runner.Ephemeral = ephemeral
 	if labelsJSON != "" {
