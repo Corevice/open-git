@@ -64,7 +64,7 @@ func TestDiffGoldenTypeChanged(t *testing.T) {
 
 func TestGoldenPath(t *testing.T) {
 	got := compat.GoldenPath("GET", "/user")
-	want := "testdata/golden/GET_user.json"
+	want := "../../testdata/golden/GET_user.json"
 	if got != want {
 		t.Fatalf("GoldenPath()=%q, want %q", got, want)
 	}
