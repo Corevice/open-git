@@ -124,10 +124,6 @@ func newAuditLogTestDB(t *testing.T) *sqlx.DB {
 		_ = db.Close()
 		t.Fatalf("run migrations: %v", err)
 	}
-	if _, err := db.Exec(`ALTER TABLE audit_logs ADD COLUMN ip_address TEXT NOT NULL DEFAULT ''`); err != nil {
-		_ = db.Close()
-		t.Fatalf("add ip_address column: %v", err)
-	}
 	t.Cleanup(func() { _ = db.Close() })
 	return sqlx.NewDb(db, "sqlite3")
 }

@@ -20,7 +20,7 @@ var (
 	_ domainrepo.AuditLogRepository  = (*sqlxAuditLogRepository)(nil)
 )
 
-func NewAuditLogRepository(db *sqlx.DB) domainrepo.IAuditLogRepository {
+func NewAuditLogRepository(db *sqlx.DB) domainrepo.AuditLogRepository {
 	return &sqlxAuditLogRepository{db: db}
 }
 
