@@ -26,6 +26,7 @@ import (
 	echoMiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/open-git/backend/internal/compat"
 	"github.com/open-git/backend/internal/config"
@@ -92,6 +93,7 @@ func main() {
 	e.HTTPErrorHandler = newHTTPErrorHandler()
 
 	e.Use(echoMiddleware.RequestID())
+	e.Use(middleware.SecurityHeadersMiddleware())
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.StructuredRecover())
 	e.Use(echoMiddleware.CORSWithConfig(echoMiddleware.CORSConfig{
@@ -598,7 +600,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	v3 := e.Group("/api/v3")
 	v3.Use(middleware.GitHubCompatHeaders())
-	v3.Use(middleware.RateLimitMiddleware(5000))
+	v3.Use(middleware.RateLimitMiddleware(5000, 60))
 	v3.Use(middleware.GitHubCommonHeadersMiddleware())
 
 	userHandler.RegisterRoutes(v3, authMiddleware)
@@ -625,6 +627,29 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3Keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	v1 := e.Group("/api/v1")
+
+	var healthMinioClient *minio.Client
+	if cfg.MinioEndpoint != "" {
+		client, minioErr := minio.New(cfg.MinioEndpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(os.Getenv("MINIO_ACCESS_KEY"), os.Getenv("MINIO_SECRET_KEY"), ""),
+			Secure: getenvBool("MINIO_USE_TLS", false),
+		})
+		if minioErr != nil {
+			return nil, fmt.Errorf("init health minio client: %w", minioErr)
+		}
+		healthMinioClient = client
+	}
+
+	var healthRedisClient *redis.Client
+	if cfg.RedisAddr != "" {
+		healthRedisClient = redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+	}
+
+	apiV1HealthHandler := handler.NewAPIV1HealthHandler(sqlxDB, healthMinioClient, healthRedisClient)
+	apiV1VersionHandler := handler.NewAPIV1VersionHandler()
+	v1.GET("/health", apiV1HealthHandler.Handle)
+	v1.GET("/version", apiV1VersionHandler.Handle)
+
 	compatHandler.RegisterRoutes(v1, authMiddleware)
 	mcpVerificationHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
