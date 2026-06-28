@@ -69,6 +69,22 @@ func (m *handlerIssueRepo) Count(_ context.Context, _ repository.ListIssuesFilte
 
 func (m *handlerIssueRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) { return 0, nil }
 
+type handlerCommentRepo struct{}
+
+func (m *handlerCommentRepo) Create(_ context.Context, _ *entity.Comment) error { return nil }
+
+func (m *handlerCommentRepo) GetByID(_ context.Context, _ uuid.UUID) (*entity.Comment, error) {
+	return nil, nil
+}
+
+func (m *handlerCommentRepo) ListByIssue(_ context.Context, _ uuid.UUID, _, _ int) ([]*entity.Comment, int, error) {
+	return []*entity.Comment{}, 0, nil
+}
+
+func (m *handlerCommentRepo) Update(_ context.Context, _ *entity.Comment) error { return nil }
+
+func (m *handlerCommentRepo) Delete(_ context.Context, _ uuid.UUID) error { return nil }
+
 type handlerAuditLogRepo struct{}
 
 func (m *handlerAuditLogRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID, string, string, uuid.UUID, json.RawMessage) error {
@@ -103,6 +119,8 @@ func newIssueHandlerEcho(t *testing.T, issueRepo *handlerIssueRepo) *echo.Echo {
 	t.Helper()
 
 	listIssuesUC := issueusecase.NewListIssuesUsecase(issueRepo)
+	getIssueUC := issueusecase.NewGetIssueUsecase(issueRepo)
+	listCommentsUC := issueusecase.NewListCommentsUsecase(issueRepo, &handlerCommentRepo{})
 	updateIssueUC := issueusecase.NewUpdateIssueUsecase(issueRepo, nil, nil, &handlerAuditLogRepo{})
 
 	h := handler.NewIssueHandler(
@@ -110,6 +128,10 @@ func newIssueHandlerEcho(t *testing.T, issueRepo *handlerIssueRepo) *echo.Echo {
 		listIssuesUC,
 		nil,
 		updateIssueUC,
+		getIssueUC,
+		listCommentsUC,
+		nil,
+		nil,
 		func(_ echo.Context, _, _ string) (*entity.Repository, error) {
 			return issueTestRepo(), nil
 		},
@@ -274,5 +296,76 @@ func TestListIssuesContainsNodeIDAndHTMLURL(t *testing.T) {
 	}
 	if htmlURL != "https://git.example.com/alice/demo/issues/1" {
 		t.Fatalf("html_url = %q, want https://git.example.com/alice/demo/issues/1", htmlURL)
+	}
+}
+
+func TestGetIssueSuccess(t *testing.T) {
+	issueRepo := &handlerIssueRepo{
+		issues: map[int]*entity.Issue{
+			1: {
+				ID:             issueTestIssueID,
+				RepositoryID:   issueTestRepoID,
+				OrganizationID: issueTestOrgUUID,
+				Number:         1,
+				Title:          "Bug",
+				State:          "open",
+				AuthorLogin:    "alice",
+			},
+		},
+	}
+	e := newIssueHandlerEcho(t, issueRepo)
+
+	req := httptest.NewRequest(http.MethodGet, "/repos/alice/demo/issues/1", nil)
+	req.Host = "git.example.com"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["number"].(float64) != 1 {
+		t.Fatalf("number = %v, want 1", resp["number"])
+	}
+	if resp["title"] != "Bug" {
+		t.Fatalf("title = %v, want Bug", resp["title"])
+	}
+}
+
+func TestListCommentsEmpty(t *testing.T) {
+	issueRepo := &handlerIssueRepo{
+		issues: map[int]*entity.Issue{
+			1: {
+				ID:             issueTestIssueID,
+				RepositoryID:   issueTestRepoID,
+				OrganizationID: issueTestOrgUUID,
+				Number:         1,
+				Title:          "Bug",
+				State:          "open",
+				AuthorLogin:    "alice",
+			},
+		},
+	}
+	e := newIssueHandlerEcho(t, issueRepo)
+
+	req := httptest.NewRequest(http.MethodGet, "/repos/alice/demo/issues/1/comments", nil)
+	req.Host = "git.example.com"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp []any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp) != 0 {
+		t.Fatalf("expected empty array, got %d items", len(resp))
 	}
 }

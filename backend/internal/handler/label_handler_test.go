@@ -107,10 +107,12 @@ func newLabelTestEnv(t *testing.T) labelTestEnv {
 	auditRepo := infrarepo.NewAuditLogRepository(db)
 
 	h := handler.NewLabelHandler(
-		labelusecase.NewListLabelsUsecase(labelRepo),
 		labelusecase.NewCreateLabelUsecase(labelRepo),
+		labelusecase.NewListLabelsUsecase(labelRepo),
 		labelusecase.NewUpdateLabelUsecase(labelRepo),
 		labelusecase.NewDeleteLabelUsecase(labelRepo, auditRepo),
+		labelusecase.NewAddIssueLabelsUsecase(labelRepo),
+		labelusecase.NewRemoveIssueLabelUsecase(labelRepo),
 		func(_ echo.Context, _, _ string) (*entity.Repository, error) {
 			return testRepo, nil
 		},

@@ -47,6 +47,8 @@ import (
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
+	labelUC "github.com/open-git/backend/internal/usecase/label"
+	milestoneUC "github.com/open-git/backend/internal/usecase/milestone"
 	mcpusecase "github.com/open-git/backend/internal/usecase/mcp"
 	orgUC "github.com/open-git/backend/internal/usecase/org"
 	prusecase "github.com/open-git/backend/internal/usecase/pr"
@@ -439,7 +441,49 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	updateIssueUC := issueusecase.NewUpdateIssueUsecase(issueRepo, labelRepo, milestoneRepo, issueAuditRepo)
 	createCommentUC := issueusecase.NewCreateCommentUsecase(issueRepo, commentRepo, issueAuditRepo)
 	listIssuesUC := issueusecase.NewListIssuesUsecase(issueRepo)
-	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, createCommentUC, updateIssueUC, resolveRepo)
+	getIssueUC := issueusecase.NewGetIssueUsecase(issueRepo)
+	listCommentsUC := issueusecase.NewListCommentsUsecase(issueRepo, commentRepo)
+	updateCommentUC := issueusecase.NewUpdateCommentUsecase(commentRepo, issueAuditRepo)
+	deleteCommentUC := issueusecase.NewDeleteCommentUsecase(commentRepo, issueAuditRepo)
+	issueHandler := handler.NewIssueHandler(
+		createIssueUC,
+		listIssuesUC,
+		createCommentUC,
+		updateIssueUC,
+		getIssueUC,
+		listCommentsUC,
+		updateCommentUC,
+		deleteCommentUC,
+		resolveRepo,
+	)
+
+	createLabelUC := labelUC.NewCreateLabelUsecase(labelRepo)
+	listLabelsUC := labelUC.NewListLabelsUsecase(labelRepo)
+	updateLabelUC := labelUC.NewUpdateLabelUsecase(labelRepo)
+	deleteLabelUC := labelUC.NewDeleteLabelUsecase(labelRepo, issueAuditRepo)
+	addIssueLabelsUC := labelUC.NewAddIssueLabelsUsecase(labelRepo)
+	removeIssueLabelUC := labelUC.NewRemoveIssueLabelUsecase(labelRepo)
+	labelHandler := handler.NewLabelHandler(
+		createLabelUC,
+		listLabelsUC,
+		updateLabelUC,
+		deleteLabelUC,
+		addIssueLabelsUC,
+		removeIssueLabelUC,
+		resolveRepo,
+	)
+
+	createMilestoneUC := milestoneUC.NewCreateMilestoneUsecase(milestoneRepo, issueAuditRepo)
+	listMilestonesUC := milestoneUC.NewListMilestonesUsecase(milestoneRepo)
+	updateMilestoneUC := milestoneUC.NewUpdateMilestoneUsecase(milestoneRepo)
+	deleteMilestoneUC := milestoneUC.NewDeleteMilestoneUsecase(milestoneRepo, issueAuditRepo)
+	milestoneHandler := handler.NewMilestoneHandler(
+		createMilestoneUC,
+		listMilestonesUC,
+		updateMilestoneUC,
+		deleteMilestoneUC,
+		resolveRepo,
+	)
 
 	gitSvc := infragit.NewGitServiceAdapter()
 	prRepo := infrarepo.NewPullRequestRepository(sqlxDB)
@@ -619,6 +663,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	repositoryHandler.RegisterRoutes(api, authMiddleware)
 	contentHandler.RegisterRoutes(api)
 	issueHandler.RegisterRoutes(api, authMiddleware)
+	labelHandler.RegisterRoutes(api, authMiddleware)
+	milestoneHandler.RegisterRoutes(api, authMiddleware)
 	pullRequestHandler.RegisterRoutes(api, authMiddleware)
 	oauthHandler.RegisterRoutes(api, authMiddleware)
 	api.GET("/rate_limit", rateLimitHandler.Get)
@@ -640,6 +686,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
 	issueHandler.RegisterRoutes(v3, authMiddleware)
+	labelHandler.RegisterRoutes(v3, authMiddleware)
+	milestoneHandler.RegisterRoutes(v3, authMiddleware)
 	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
 	branchProtectionHandler.RegisterRoutes(v3, authMiddleware)
 	webhookHandler.RegisterRoutes(v3, authMiddleware)

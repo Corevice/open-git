@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
@@ -15,11 +17,15 @@ import (
 )
 
 type IssueHandler struct {
-	createIssueUC   *issueusecase.CreateIssueUsecase
-	listIssuesUC    *issueusecase.ListIssuesUsecase
-	createCommentUC *issueusecase.CreateCommentUsecase
-	updateIssueUC   *issueusecase.UpdateIssueUsecase
-	resolveRepo     func(c echo.Context, owner, repo string) (*entity.Repository, error)
+	createIssueUC    *issueusecase.CreateIssueUsecase
+	listIssuesUC     *issueusecase.ListIssuesUsecase
+	createCommentUC  *issueusecase.CreateCommentUsecase
+	updateIssueUC    *issueusecase.UpdateIssueUsecase
+	getIssueUC       *issueusecase.GetIssueUsecase
+	listCommentsUC   *issueusecase.ListCommentsUsecase
+	updateCommentUC  *issueusecase.UpdateCommentUsecase
+	deleteCommentUC  *issueusecase.DeleteCommentUsecase
+	resolveRepo      func(c echo.Context, owner, repo string) (*entity.Repository, error)
 }
 
 func NewIssueHandler(
@@ -27,6 +33,10 @@ func NewIssueHandler(
 	listIssuesUC *issueusecase.ListIssuesUsecase,
 	createCommentUC *issueusecase.CreateCommentUsecase,
 	updateIssueUC *issueusecase.UpdateIssueUsecase,
+	getIssueUC *issueusecase.GetIssueUsecase,
+	listCommentsUC *issueusecase.ListCommentsUsecase,
+	updateCommentUC *issueusecase.UpdateCommentUsecase,
+	deleteCommentUC *issueusecase.DeleteCommentUsecase,
 	resolveRepo func(c echo.Context, owner, repo string) (*entity.Repository, error),
 ) *IssueHandler {
 	return &IssueHandler{
@@ -34,6 +44,10 @@ func NewIssueHandler(
 		listIssuesUC:    listIssuesUC,
 		createCommentUC: createCommentUC,
 		updateIssueUC:   updateIssueUC,
+		getIssueUC:      getIssueUC,
+		listCommentsUC:  listCommentsUC,
+		updateCommentUC: updateCommentUC,
+		deleteCommentUC: deleteCommentUC,
 		resolveRepo:     resolveRepo,
 	}
 }
@@ -42,8 +56,12 @@ func (h *IssueHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	repoScope := middleware.RequireScope("repo")
 	g.GET("/repos/:owner/:repo/issues", h.ListIssues, auth, repoScope)
 	g.POST("/repos/:owner/:repo/issues", h.CreateIssue, auth, repoScope)
+	g.GET("/repos/:owner/:repo/issues/:number", h.GetIssue, auth, repoScope)
 	g.PATCH("/repos/:owner/:repo/issues/:number", h.UpdateIssue, auth, repoScope)
+	g.GET("/repos/:owner/:repo/issues/:number/comments", h.ListComments, auth, repoScope)
 	g.POST("/repos/:owner/:repo/issues/:number/comments", h.CreateComment, auth, repoScope)
+	g.PATCH("/repos/:owner/:repo/issues/:number/comments/:comment_id", h.UpdateComment, auth, repoScope)
+	g.DELETE("/repos/:owner/:repo/issues/:number/comments/:comment_id", h.DeleteComment, auth, repoScope)
 }
 
 type createIssueRequest struct {
@@ -59,6 +77,10 @@ type updateIssueRequest struct {
 	State string  `json:"state"`
 	Title *string `json:"title"`
 	Body  *string `json:"body"`
+}
+
+type updateCommentRequest struct {
+	Body string `json:"body"`
 }
 
 func (h *IssueHandler) ListIssues(c echo.Context) error {
@@ -176,6 +198,68 @@ func (h *IssueHandler) UpdateIssue(c echo.Context) error {
 	return c.JSON(http.StatusOK, toIssueResponse(issue, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
+func (h *IssueHandler) GetIssue(c echo.Context) error {
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+
+	number, err := strconv.Atoi(c.Param("number"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid issue number")
+	}
+
+	issue, err := h.getIssueUC.Execute(c.Request().Context(), issueusecase.GetIssueInput{
+		RepositoryID: repo.ID,
+		IssueNumber:  number,
+	})
+	if err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
+		return err
+	}
+
+	return c.JSON(http.StatusOK, toIssueResponse(issue, c.Param("owner"), c.Param("repo"), c.Request().Host))
+}
+
+func (h *IssueHandler) ListComments(c echo.Context) error {
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+
+	actor, err := middleware.GetActor(c)
+	if err != nil {
+		return err
+	}
+
+	number, err := strconv.Atoi(c.Param("number"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid issue number")
+	}
+
+	page, _ := strconv.Atoi(c.QueryParam("page"))
+	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
+
+	output, err := h.listCommentsUC.Execute(c.Request().Context(), issueusecase.ListCommentsInput{
+		OrganizationID: actor.OrganizationID,
+		RepositoryID:   repo.ID,
+		IssueNumber:    number,
+		Page:           page,
+		PerPage:        perPage,
+	})
+	if err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
+		return err
+	}
+
+	setPaginationHeaders(c, output.Page, output.PerPage, output.Total)
+	return c.JSON(http.StatusOK, toCommentResponses(output.Comments, c.Param("owner"), c.Param("repo"), c.Request().Host))
+}
+
 func (h *IssueHandler) CreateComment(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
@@ -211,7 +295,84 @@ func (h *IssueHandler) CreateComment(c echo.Context) error {
 		return err
 	}
 
-	return c.JSON(http.StatusCreated, toCommentResponse(comment))
+	return c.JSON(http.StatusCreated, toCommentResponse(comment, c.Param("owner"), c.Param("repo"), c.Request().Host))
+}
+
+func (h *IssueHandler) UpdateComment(c echo.Context) error {
+	_, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+
+	actor, err := middleware.GetActor(c)
+	if err != nil {
+		return err
+	}
+
+	commentID, err := strconv.ParseInt(c.Param("comment_id"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid comment id")
+	}
+
+	var req updateCommentRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	comment, err := h.updateCommentUC.Execute(c.Request().Context(), issueusecase.UpdateCommentInput{
+		CommentID:      middleware.Int64ToUUID(commentID),
+		OrganizationID: actor.OrganizationID,
+		ActorID:        actor.UserID,
+		Body:           req.Body,
+	})
+	if err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
+		if errors.Is(err, domain.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "Forbidden"})
+		}
+		if errors.Is(err, apperror.ErrValidation) {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, err.Error())
+		}
+		return err
+	}
+
+	return c.JSON(http.StatusOK, toCommentResponse(comment, c.Param("owner"), c.Param("repo"), c.Request().Host))
+}
+
+func (h *IssueHandler) DeleteComment(c echo.Context) error {
+	_, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+
+	actor, err := middleware.GetActor(c)
+	if err != nil {
+		return err
+	}
+
+	commentID, err := strconv.ParseInt(c.Param("comment_id"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid comment id")
+	}
+
+	err = h.deleteCommentUC.Execute(c.Request().Context(), issueusecase.DeleteCommentInput{
+		CommentID:      middleware.Int64ToUUID(commentID),
+		OrganizationID: actor.OrganizationID,
+		ActorID:        actor.UserID,
+	})
+	if err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
+		if errors.Is(err, domain.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "Forbidden"})
+		}
+		return err
+	}
+
+	return c.NoContent(http.StatusNoContent)
 }
 
 func splitLabels(raw string) []string {
@@ -283,8 +444,13 @@ type issueResponse struct {
 }
 
 type commentResponse struct {
-	ID   uuid.UUID `json:"id"`
-	Body string    `json:"body"`
+	ID        int64             `json:"id"`
+	NodeID    string            `json:"node_id"`
+	Body      string            `json:"body"`
+	User      issueUserResponse `json:"user"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+	URL       string            `json:"url"`
 }
 
 func toIssueResponse(issue *entity.Issue, owner, repoName, host string) issueResponse {
@@ -310,9 +476,25 @@ func toIssueResponses(issues []*entity.Issue, owner, repoName, host string) []is
 	return result
 }
 
-func toCommentResponse(comment *entity.Comment) commentResponse {
+func CommentNodeID(id uuid.UUID) string { return NodeID("IssueComment", id.String()) }
+
+func toCommentResponse(comment *entity.Comment, owner, repoName, host string) commentResponse {
+	commentID := middleware.UUIDToInt64(comment.ID)
 	return commentResponse{
-		ID:   comment.ID,
-		Body: comment.Body,
+		ID:        commentID,
+		NodeID:    CommentNodeID(comment.ID),
+		Body:      comment.Body,
+		User:      issueUserResponse{Login: comment.AuthorLogin},
+		CreatedAt: comment.CreatedAt,
+		UpdatedAt: comment.UpdatedAt,
+		URL:       "https://" + host + "/repos/" + owner + "/" + repoName + "/issues/comments/" + strconv.FormatInt(commentID, 10),
 	}
+}
+
+func toCommentResponses(comments []*entity.Comment, owner, repoName, host string) []commentResponse {
+	result := make([]commentResponse, 0, len(comments))
+	for _, comment := range comments {
+		result = append(result, toCommentResponse(comment, owner, repoName, host))
+	}
+	return result
 }
