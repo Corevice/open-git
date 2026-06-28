@@ -1,9 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import {
+  SecurityAccessDenied,
+  SecurityPageLayout,
+} from "@/components/admin/SecurityPageLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,12 +19,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import {
+  checkClientOrgAdminAccess,
+  datetimeLocalToIso,
+  genericActionError,
+  getSecurityApiBase,
+  maskIpAddress,
+  resolveOrgLogin,
+  sanitizeAuditSearchPhrase,
+} from "@/lib/admin/security";
 import { useAuth } from "@/lib/auth";
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  "";
 
 type OrgAuditLogEntry = {
   id: string;
@@ -47,19 +54,12 @@ const ACTION_OPTIONS = [
   { value: "settings.update", label: "settings.update" },
 ] as const;
 
-function requireAdminRole(token: string | null, router: ReturnType<typeof useRouter>): boolean {
-  if (!token) {
-    router.push("/login");
-    return false;
-  }
-  return true;
-}
-
 export default function SecurityAuditLogPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { token } = useAuth();
   const toast = useToast();
+  const apiBase = getSecurityApiBase();
 
   const [org, setOrg] = useState("");
   const [entries, setEntries] = useState<OrgAuditLogEntry[]>([]);
@@ -75,59 +75,59 @@ export default function SecurityAuditLogPage() {
   const orgParam = searchParams.get("org");
 
   const loadAuditLog = useCallback(async () => {
-    if (!requireAdminRole(token, router)) {
-      return;
-    }
-
     setLoading(true);
     setError(null);
     setAccessDenied(false);
 
+    const access = await checkClientOrgAdminAccess({
+      token,
+      orgParam,
+      onUnauthenticated: () => {
+        router.push("/login");
+      },
+    });
+
+    if (access.status === "unauthenticated") {
+      setLoading(false);
+      return;
+    }
+
+    if (access.status === "access_denied") {
+      setAccessDenied(true);
+      setEntries([]);
+      setLoading(false);
+      return;
+    }
+
+    if (access.status === "error") {
+      setError(access.message);
+      setLoading(false);
+      return;
+    }
+
+    const resolvedOrg = access.org;
+    setOrg(resolvedOrg);
+
     try {
-      let resolvedOrg = orgParam ?? "";
-      if (!resolvedOrg) {
-        const orgsResponse = await fetch(`${API_BASE}/api/v3/user/orgs`, {
-          headers: {
-            Accept: "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          cache: "no-store",
-        });
-
-        if (orgsResponse.status === 401) {
-          router.push("/login");
-          return;
-        }
-
-        if (!orgsResponse.ok) {
-          throw new Error(`Failed to load organizations (${orgsResponse.status})`);
-        }
-
-        const orgs = (await orgsResponse.json()) as { login: string }[];
-        if (orgs.length === 0) {
-          throw new Error("No organization found");
-        }
-        resolvedOrg = orgs[0].login;
-      }
-
-      setOrg(resolvedOrg);
-
       const params = new URLSearchParams({ per_page: "50" });
-      if (phrase.trim()) {
-        params.set("phrase", phrase.trim());
+      const sanitizedPhrase = sanitizeAuditSearchPhrase(phrase);
+      if (sanitizedPhrase) {
+        params.set("phrase", sanitizedPhrase);
       }
       if (action) {
-        params.set("include", action);
+        params.set("action", action);
       }
-      if (after) {
-        params.set("after", new Date(after).toISOString());
+      const afterIso = datetimeLocalToIso(after);
+      if (afterIso) {
+        params.set("after", afterIso);
       }
-      if (before) {
-        params.set("before", new Date(before).toISOString());
+      const beforeIso = datetimeLocalToIso(before);
+      if (beforeIso) {
+        params.set("before", beforeIso);
       }
 
       const response = await fetch(
-        `${API_BASE}/api/v3/orgs/${encodeURIComponent(resolvedOrg)}/audit-log?${params.toString()}`,
+        `${apiBase}/api/v3/orgs/${encodeURIComponent(resolvedOrg)}/audit-log?${params.toString()}`,
         {
           headers: {
             Accept: "application/json",
@@ -149,45 +149,73 @@ export default function SecurityAuditLogPage() {
       }
 
       if (!response.ok) {
-        throw new Error(`Failed to load audit log (${response.status})`);
+        throw new Error(genericActionError("load audit log"));
       }
 
       const data = (await response.json()) as OrgAuditLogEntry[];
       setEntries(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load audit log.");
+    } catch {
+      setError(genericActionError("load audit log"));
     } finally {
       setLoading(false);
     }
-  }, [token, router, orgParam, phrase, action, after, before]);
+  }, [token, router, orgParam, phrase, action, after, before, apiBase]);
 
   useEffect(() => {
-    loadAuditLog();
+    void loadAuditLog();
   }, [loadAuditLog]);
 
   const handleExport = async () => {
-    if (!requireAdminRole(token, router) || !org) {
+    if (!token) {
+      router.push("/login");
       return;
     }
 
     setExporting(true);
     try {
+      let resolvedOrg = org;
+      if (!resolvedOrg) {
+        const orgResult = await resolveOrgLogin(token, orgParam);
+        if (!orgResult.ok) {
+          toast.error(orgResult.message);
+          return;
+        }
+        resolvedOrg = orgResult.org;
+        setOrg(resolvedOrg);
+      }
+
+      const access = await checkClientOrgAdminAccess({
+        token,
+        orgParam: resolvedOrg,
+        onUnauthenticated: () => {
+          router.push("/login");
+        },
+      });
+
+      if (access.status !== "ok") {
+        toast.error("Admin access is required to export audit logs.");
+        return;
+      }
+
       const params = new URLSearchParams({ format: "csv" });
-      if (phrase.trim()) {
-        params.set("phrase", phrase.trim());
+      const sanitizedPhrase = sanitizeAuditSearchPhrase(phrase);
+      if (sanitizedPhrase) {
+        params.set("phrase", sanitizedPhrase);
       }
       if (action) {
-        params.set("include", action);
+        params.set("action", action);
       }
-      if (after) {
-        params.set("after", new Date(after).toISOString());
+      const afterIso = datetimeLocalToIso(after);
+      if (afterIso) {
+        params.set("after", afterIso);
       }
-      if (before) {
-        params.set("before", new Date(before).toISOString());
+      const beforeIso = datetimeLocalToIso(before);
+      if (beforeIso) {
+        params.set("before", beforeIso);
       }
 
       const response = await fetch(
-        `${API_BASE}/api/v3/orgs/${encodeURIComponent(org)}/audit-log/export?${params.toString()}`,
+        `${apiBase}/api/v3/orgs/${encodeURIComponent(resolvedOrg)}/audit-log/export?${params.toString()}`,
         {
           headers: {
             Accept: "application/json",
@@ -207,15 +235,13 @@ export default function SecurityAuditLogPage() {
       }
 
       if (!response.ok) {
-        throw new Error(`Failed to export audit log (${response.status})`);
+        throw new Error(genericActionError("export audit log"));
       }
 
       const data = (await response.json()) as ExportResponse;
       toast.success(`Export job queued: ${data.job_id}`);
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to export audit log.",
-      );
+    } catch {
+      toast.error(genericActionError("export audit log"));
     } finally {
       setExporting(false);
     }
@@ -223,166 +249,124 @@ export default function SecurityAuditLogPage() {
 
   if (accessDenied) {
     return (
-      <div className="min-h-screen bg-[#f6f8fa]">
-        <header className="sticky top-0 z-50 flex h-16 items-center justify-between border-b border-[#d1d9e0] bg-white/85 px-6 backdrop-blur">
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-2 text-lg font-extrabold"
-          >
-            <span className="text-xl">🐙</span>
-            <span>OpenHub</span>
-          </Link>
-        </header>
-        <div className="mx-auto max-w-[1200px] px-6 py-6">
-          <h1 className="mb-4 text-2xl font-semibold">Security Audit Log</h1>
-          <div className="rounded-md border border-[#d0d7de] bg-white p-6">
-            <p className="text-sm font-semibold text-[#cf222e]">Access Denied</p>
-            <p className="mt-2 text-sm text-[#656d76]">
-              You do not have permission to view the audit log. Admin access is
-              required.
-            </p>
-          </div>
-        </div>
-      </div>
+      <SecurityAccessDenied
+        title="Security Audit Log"
+        breadcrumbSuffix="Audit log"
+      />
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#f6f8fa]">
-      <header className="sticky top-0 z-50 flex h-16 items-center justify-between border-b border-[#d1d9e0] bg-white/85 px-6 backdrop-blur">
-        <Link
-          href="/dashboard"
-          className="flex items-center gap-2 text-lg font-extrabold"
-        >
-          <span className="text-xl">🐙</span>
-          <span>OpenHub</span>
-        </Link>
-        <Link
-          href="/admin/security"
-          className="rounded-md px-3 py-1.5 text-sm hover:bg-[#f6f8fa]"
-        >
-          ← Security dashboard
-        </Link>
-      </header>
-
-      <div className="mx-auto max-w-[1200px] px-6 py-6">
-        <div className="mb-4 text-sm text-[#656d76]">
-          <Link href="/dashboard" className="text-[#0969da]">
-            Dashboard
-          </Link>{" "}
-          /{" "}
-          <Link href="/admin/security" className="text-[#0969da]">
-            Admin / Security
-          </Link>{" "}
-          / Audit log
+    <SecurityPageLayout
+      title="Security Audit Log"
+      breadcrumbSuffix="Audit log"
+      backHref="/admin/security"
+      backLabel="← Security dashboard"
+    >
+      <form
+        className="mb-4 grid gap-4 rounded-md border border-[#d0d7de] bg-white p-4 md:grid-cols-2 lg:grid-cols-5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void loadAuditLog();
+        }}
+      >
+        <div className="space-y-2 lg:col-span-2">
+          <Label htmlFor="phrase">Search phrase</Label>
+          <Input
+            id="phrase"
+            value={phrase}
+            onChange={(event) => setPhrase(event.target.value)}
+            placeholder="Search actions, actors, targets…"
+          />
         </div>
-        <h1 className="mb-6 text-2xl font-semibold">Security Audit Log</h1>
+        <div className="space-y-2">
+          <Label htmlFor="action-filter">Action</Label>
+          <select
+            id="action-filter"
+            value={action}
+            onChange={(event) => setAction(event.target.value)}
+            className="flex h-10 w-full rounded-md border border-[#d0d7de] bg-white px-3 py-2 text-sm"
+          >
+            {ACTION_OPTIONS.map((option) => (
+              <option key={option.value || "all"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="after">After</Label>
+          <Input
+            id="after"
+            type="datetime-local"
+            value={after}
+            onChange={(event) => setAfter(event.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="before">Before</Label>
+          <Input
+            id="before"
+            type="datetime-local"
+            value={before}
+            onChange={(event) => setBefore(event.target.value)}
+          />
+        </div>
+        <div className="flex items-end gap-2 md:col-span-2 lg:col-span-5">
+          <Button type="submit" disabled={loading}>
+            Search
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={exporting || loading}
+            onClick={() => {
+              void handleExport();
+            }}
+          >
+            Export CSV
+          </Button>
+        </div>
+      </form>
 
-        <form
-          className="mb-4 grid gap-4 rounded-md border border-[#d0d7de] bg-white p-4 md:grid-cols-2 lg:grid-cols-5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            loadAuditLog();
-          }}
-        >
-          <div className="space-y-2 lg:col-span-2">
-            <Label htmlFor="phrase">Search phrase</Label>
-            <Input
-              id="phrase"
-              value={phrase}
-              onChange={(event) => setPhrase(event.target.value)}
-              placeholder="Search actions, actors, targets…"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="action-filter">Action</Label>
-            <select
-              id="action-filter"
-              value={action}
-              onChange={(event) => setAction(event.target.value)}
-              className="flex h-10 w-full rounded-md border border-[#d0d7de] bg-white px-3 py-2 text-sm"
-            >
-              {ACTION_OPTIONS.map((option) => (
-                <option key={option.value || "all"} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="after">After</Label>
-            <Input
-              id="after"
-              type="datetime-local"
-              value={after}
-              onChange={(event) => setAfter(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="before">Before</Label>
-            <Input
-              id="before"
-              type="datetime-local"
-              value={before}
-              onChange={(event) => setBefore(event.target.value)}
-            />
-          </div>
-          <div className="flex items-end gap-2 md:col-span-2 lg:col-span-5">
-            <Button type="submit" disabled={loading}>
-              Search
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={exporting || !org}
-              onClick={() => {
-                void handleExport();
-              }}
-            >
-              Export CSV
-            </Button>
-          </div>
-        </form>
-
-        <div className="overflow-hidden rounded-md border border-[#d0d7de] bg-white">
-          {loading ? (
-            <p className="p-4 text-sm text-[#656d76]">Loading…</p>
-          ) : error ? (
-            <p className="p-4 text-sm text-[#cf222e]">{error}</p>
-          ) : entries.length === 0 ? (
-            <p className="p-4 text-sm text-[#656d76]">No audit log entries found.</p>
-          ) : (
-            <TableRoot>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Actor</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>IP address</TableHead>
-                  <TableHead>Created at</TableHead>
+      <div className="overflow-hidden rounded-md border border-[#d0d7de] bg-white">
+        {loading ? (
+          <p className="p-4 text-sm text-[#656d76]">Loading…</p>
+        ) : error ? (
+          <p className="p-4 text-sm text-[#cf222e]">{error}</p>
+        ) : entries.length === 0 ? (
+          <p className="p-4 text-sm text-[#656d76]">No audit log entries found.</p>
+        ) : (
+          <TableRoot>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Actor</TableHead>
+                <TableHead>Action</TableHead>
+                <TableHead>IP address</TableHead>
+                <TableHead>Created at</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {entries.map((entry) => (
+                <TableRow key={entry.id}>
+                  <TableCell className="font-mono text-xs">
+                    {entry.actor_login}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {entry.action}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {maskIpAddress(entry.ip_address)}
+                  </TableCell>
+                  <TableCell className="text-xs text-[#656d76]">
+                    {entry.created_at}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {entries.map((entry) => (
-                  <TableRow key={entry.id}>
-                    <TableCell className="font-mono text-xs">
-                      {entry.actor_login}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {entry.action}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {entry.ip_address ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-xs text-[#656d76]">
-                      {entry.created_at}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </TableRoot>
-          )}
-        </div>
+              ))}
+            </TableBody>
+          </TableRoot>
+        )}
       </div>
-    </div>
+    </SecurityPageLayout>
   );
 }
