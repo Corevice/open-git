@@ -217,6 +217,12 @@ func (r *sqlxRepositoryRepository) UpdateName(ctx context.Context, id uuid.UUID,
 	return err
 }
 
+func (r *sqlxRepositoryRepository) UpdateDefaultBranch(ctx context.Context, id uuid.UUID, branch string) error {
+	const query = `UPDATE repositories SET default_branch = $1 WHERE id = $2`
+	_, err := r.DB.ExecContext(ctx, query, branch, id)
+	return err
+}
+
 func (r *sqlxRepositoryRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	const query = `DELETE FROM repositories WHERE id = $1`
 	_, err := r.DB.ExecContext(ctx, query, id)
