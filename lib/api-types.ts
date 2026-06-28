@@ -184,3 +184,25 @@ export interface ScanJob {
   finished_at: string | null;
   error: string | null;
 }
+
+export interface DocSection {
+  slug: string;
+  title: string;
+  order: number;
+}
+
+export interface DocSectionContent {
+  slug: string;
+  title: string;
+  content_markdown: string;
+  updated_at: string;
+  edit_url: string;
+}
+
+export interface Contributor {
+  login: string;
+  id: number;
+  avatar_url: string;
+  contributions: number;
+  type: string;
+}
