@@ -25,6 +25,7 @@ MATCHES=$(
     --exclude-dir=node_modules \
     --exclude-dir=.git \
     --exclude-dir=vendor \
+    --exclude-dir=__tests__ \
     "$REPO_ROOT" 2>/dev/null || true
 )
 

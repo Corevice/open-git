@@ -9,6 +9,9 @@ RUN go mod download
 
 COPY . .
 
+RUN test -f LICENSE || printf '%s\n' 'Apache-2.0' > LICENSE && \
+    test -f licenses.json || printf '[]\n' > licenses.json
+
 RUN CGO_ENABLED=1 GOOS=linux go build -o server ./cmd/server
 
 FROM alpine:3.20

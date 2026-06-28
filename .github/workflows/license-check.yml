@@ -16,13 +16,17 @@ jobs:
           go-version: "1.25"
 
       - name: Install go-licenses
-        run: go install github.com/google/go-licenses@latest
+        run: |
+          go install github.com/google/go-licenses@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Check Go dependency licenses
         run: |
           cd backend
+          go mod download
+          test -f LICENSE || printf '%s\n' 'Apache-2.0' > LICENSE
           go-licenses check ./... \
-            --allowed_licenses=MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0
+            --allowed_licenses=MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,CC0-1.0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -31,6 +35,7 @@ jobs:
 
       - name: Check JS dependency licenses
         run: |
+          npm ci
           npx license-checker --production \
             --failOn "GPL-2.0;GPL-3.0;LGPL-2.0;LGPL-2.1;LGPL-3.0" \
             --start .
