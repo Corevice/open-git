@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain/entity"
@@ -72,8 +73,10 @@ func (h *IssueHandler) ListIssues(c echo.Context) error {
 		return err
 	}
 
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
+	page, perPage, err := middleware.ParsePaginationParams(c)
+	if err != nil {
+		return err
+	}
 
 	output, err := h.listIssuesUC.Execute(c.Request().Context(), issueusecase.ListIssuesInput{
 		OrganizationID: actor.OrganizationID,
@@ -87,7 +90,9 @@ func (h *IssueHandler) ListIssues(c echo.Context) error {
 		return err
 	}
 
-	setPaginationHeaders(c, output.Page, output.PerPage, output.Total)
+	if link := middleware.BuildAbsoluteLinkHeader(c, output.Page, output.PerPage, output.Total); link != "" {
+		c.Response().Header().Set("Link", link)
+	}
 	return c.JSON(http.StatusOK, toIssueResponses(output.Issues, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
@@ -271,15 +276,24 @@ type issueUserResponse struct {
 	Login string `json:"login"`
 }
 
+type issueLabelResponse struct {
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
 type issueResponse struct {
-	ID      uuid.UUID         `json:"id"`
-	Number  int               `json:"number"`
-	Title   string            `json:"title"`
-	Body    string            `json:"body"`
-	State   string            `json:"state"`
-	NodeID  string            `json:"node_id"`
-	HTMLURL string            `json:"html_url"`
-	User    issueUserResponse `json:"user"`
+	ID        int64                `json:"id"`
+	Number    int                  `json:"number"`
+	Title     string               `json:"title"`
+	Body      string               `json:"body"`
+	State     string               `json:"state"`
+	NodeID    string               `json:"node_id"`
+	HTMLURL   string               `json:"html_url"`
+	URL       string               `json:"url"`
+	CreatedAt time.Time            `json:"created_at"`
+	UpdatedAt time.Time            `json:"updated_at"`
+	Labels    []issueLabelResponse `json:"labels"`
+	User      issueUserResponse    `json:"user"`
 }
 
 type commentResponse struct {
@@ -288,14 +302,25 @@ type commentResponse struct {
 }
 
 func toIssueResponse(issue *entity.Issue, owner, repoName, host string) issueResponse {
+	labels := make([]issueLabelResponse, 0, len(issue.Labels))
+	for _, l := range issue.Labels {
+		labels = append(labels, issueLabelResponse{
+			Name:  l.Name,
+			Color: l.Color,
+		})
+	}
 	return issueResponse{
-		ID:      issue.ID,
-		Number:  issue.Number,
-		Title:   issue.Title,
-		Body:    issue.Body,
-		State:   issue.State,
-		NodeID:  IssueNodeID(issue.ID),
-		HTMLURL: "https://" + host + "/" + owner + "/" + repoName + "/issues/" + strconv.Itoa(issue.Number),
+		ID:        middleware.UUIDToInt64(issue.ID),
+		Number:    issue.Number,
+		Title:     issue.Title,
+		Body:      issue.Body,
+		State:     issue.State,
+		NodeID:    IssueNodeID(issue.ID),
+		HTMLURL:   "https://" + host + "/" + owner + "/" + repoName + "/issues/" + strconv.Itoa(issue.Number),
+		URL:       "https://" + host + "/api/v3/repos/" + owner + "/" + repoName + "/issues/" + strconv.Itoa(issue.Number),
+		CreatedAt: issue.CreatedAt,
+		UpdatedAt: issue.UpdatedAt,
+		Labels:    labels,
 		User: issueUserResponse{
 			Login: issue.AuthorLogin,
 		},

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -241,6 +242,7 @@ func TestListIssuesContainsNodeIDAndHTMLURL(t *testing.T) {
 				Title:        "Bug",
 				State:        "open",
 				AuthorLogin:  "alice",
+				CreatedAt:    time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 			},
 		},
 	}
@@ -274,5 +276,11 @@ func TestListIssuesContainsNodeIDAndHTMLURL(t *testing.T) {
 	}
 	if htmlURL != "https://git.example.com/alice/demo/issues/1" {
 		t.Fatalf("html_url = %q, want https://git.example.com/alice/demo/issues/1", htmlURL)
+	}
+	if _, ok := item["id"].(float64); !ok {
+		t.Fatalf("id = %v (%T), want numeric", item["id"], item["id"])
+	}
+	if _, ok := item["created_at"]; !ok {
+		t.Fatalf("created_at missing from response: %v", item)
 	}
 }
