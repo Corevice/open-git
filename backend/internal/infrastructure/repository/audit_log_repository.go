@@ -65,6 +65,7 @@ func AuditLogRowToEntity(row AuditLogRow) (*entity.AuditLog, error) {
 		Action:         row.Action,
 		TargetType:     row.TargetType,
 		TargetID:       row.TargetID,
+		IPAddress:      row.IPAddress,
 		Metadata:       metadata,
 		CreatedAt:      row.CreatedAt,
 	}, nil
@@ -93,12 +94,8 @@ func (r *sqlxAuditLogRepository) Create(ctx context.Context, log *entity.AuditLo
 		VALUES (:id, :organization_id, :actor_id, :actor_login, :action, :target_type, :target_id, :metadata, :ip_address, :user_agent, :created_at)
 	`
 
-	ipAddress := ""
 	userAgent := ""
 	if log.Metadata != nil {
-		if v, ok := log.Metadata["ip_address"].(string); ok {
-			ipAddress = v
-		}
 		if v, ok := log.Metadata["user_agent"].(string); ok {
 			userAgent = v
 		}
@@ -113,7 +110,7 @@ func (r *sqlxAuditLogRepository) Create(ctx context.Context, log *entity.AuditLo
 		"target_type":     log.TargetType,
 		"target_id":       log.TargetID,
 		"metadata":        string(metaJSON),
-		"ip_address":      ipAddress,
+		"ip_address":      log.IPAddress,
 		"user_agent":      userAgent,
 		"created_at":      log.CreatedAt,
 	})
@@ -146,7 +143,7 @@ func (r *sqlxAuditLogRepository) InsertAuditLog(
 
 func (r *sqlxAuditLogRepository) List(ctx context.Context, orgID uuid.UUID, action string, page, perPage int) ([]*entity.AuditLog, int, error) {
 	baseQuery := `
-		SELECT id, organization_id, actor_id, actor_login, action, target_type, target_id, metadata, created_at
+		SELECT id, organization_id, actor_id, actor_login, action, target_type, target_id, metadata, ip_address, user_agent, created_at
 		FROM audit_logs
 		WHERE organization_id = :org_id
 	`

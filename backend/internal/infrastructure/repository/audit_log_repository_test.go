@@ -132,6 +132,7 @@ func TestAuditLogRowToEntity(t *testing.T) {
 				TargetType:     "repository",
 				TargetID:       "repo-123",
 				Metadata:       `{"visibility":"private"}`,
+				IPAddress:      "192.168.1.10",
 				CreatedAt:      createdAt,
 			},
 			want: &entity.AuditLog{
@@ -142,6 +143,7 @@ func TestAuditLogRowToEntity(t *testing.T) {
 				Action:         "repo.destroy",
 				TargetType:     "repository",
 				TargetID:       "repo-123",
+				IPAddress:      "192.168.1.10",
 				Metadata:       map[string]any{"visibility": "private"},
 				CreatedAt:      createdAt,
 			},
@@ -224,6 +226,9 @@ func TestAuditLogRowToEntity(t *testing.T) {
 			if got.TargetType != tt.want.TargetType || got.TargetID != tt.want.TargetID {
 				t.Fatalf("unexpected target: %+v", got)
 			}
+			if got.IPAddress != tt.want.IPAddress {
+				t.Fatalf("ipAddress: got %q, want %q", got.IPAddress, tt.want.IPAddress)
+			}
 			if !got.CreatedAt.Equal(tt.want.CreatedAt) {
 				t.Fatalf("createdAt: got %v, want %v", got.CreatedAt, tt.want.CreatedAt)
 			}
@@ -237,5 +242,41 @@ func TestAuditLogRowToEntity(t *testing.T) {
 				t.Fatalf("metadata: got %v, want %v", got.Metadata, tt.want.Metadata)
 			}
 		})
+	}
+}
+
+func TestAuditLogRepository_IPAddressRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	setupAuditLogSearchColumns(t, db)
+	orgID, actorID := seedAuditLogSearchFixtures(t, db)
+	repo := repository.NewAuditLogRepository(db)
+	ctx := context.Background()
+
+	log := &entity.AuditLog{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		ActorID:        actorID,
+		ActorLogin:     "alice",
+		Action:         "settings.update",
+		TargetType:     "system_setting",
+		TargetID:       "site.name",
+		IPAddress:      "203.0.113.42",
+		Metadata:       map[string]any{"key": "site.name"},
+		CreatedAt:      time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC),
+	}
+
+	if err := repo.Create(ctx, log); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	logs, total, err := repo.List(ctx, orgID, "", 1, 10)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if total != 1 || len(logs) != 1 {
+		t.Fatalf("expected 1 log, got total=%d len=%d", total, len(logs))
+	}
+	if logs[0].IPAddress != "203.0.113.42" {
+		t.Fatalf("IPAddress: got %q, want %q", logs[0].IPAddress, "203.0.113.42")
 	}
 }
