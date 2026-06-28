@@ -61,13 +61,13 @@ type createImportRequest struct {
 }
 
 type importJobResponse struct {
-	JobID     string                 `json:"job_id"`
-	Status    string                 `json:"status"`
-	Phase     string                 `json:"phase,omitempty"`
-	Progress  entity.ImportProgress  `json:"progress,omitempty"`
-	Error     *string                `json:"error"`
-	CreatedAt string                 `json:"created_at,omitempty"`
-	UpdatedAt string                 `json:"updated_at,omitempty"`
+	JobID     string                `json:"job_id"`
+	Status    string                `json:"status"`
+	Phase     string                `json:"phase,omitempty"`
+	Progress  entity.ImportProgress `json:"progress,omitempty"`
+	Error     *string               `json:"error"`
+	CreatedAt string                `json:"created_at,omitempty"`
+	UpdatedAt string                `json:"updated_at,omitempty"`
 }
 
 func (h *ImportHandler) Create(c echo.Context) error {

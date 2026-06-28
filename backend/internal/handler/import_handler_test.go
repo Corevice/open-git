@@ -171,7 +171,9 @@ func (m *importDomainMembershipRepo) ListByOrg(context.Context, uuid.UUID, int, 
 	return nil, nil
 }
 
-func (m *importDomainMembershipRepo) UpdateRole(context.Context, uuid.UUID, uuid.UUID, string) error { return nil }
+func (m *importDomainMembershipRepo) UpdateRole(context.Context, uuid.UUID, uuid.UUID, string) error {
+	return nil
+}
 
 func (m *importDomainMembershipRepo) Remove(context.Context, uuid.UUID, uuid.UUID) error { return nil }
 
@@ -215,7 +217,9 @@ func (m *importMockRepositoryRepo) CountByOwner(context.Context, uuid.UUID) (int
 	return 0, nil
 }
 
-func (m *importMockRepositoryRepo) UpdateVisibility(context.Context, uuid.UUID, string) error { return nil }
+func (m *importMockRepositoryRepo) UpdateVisibility(context.Context, uuid.UUID, string) error {
+	return nil
+}
 
 func (m *importMockRepositoryRepo) UpdateName(context.Context, uuid.UUID, string) error { return nil }
 
