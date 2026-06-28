@@ -83,3 +83,11 @@ export interface OAuthApp {
   name: string;
   clientId: string;
 }
+
+export interface Review {
+  id: number;
+  state: string;
+  body: string;
+  user: { login: string };
+  submitted_at: string;
+}
