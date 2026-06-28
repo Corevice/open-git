@@ -22,7 +22,7 @@ func (m *updateCommentRepo) Create(_ context.Context, _ *entity.Comment) error {
 	return nil
 }
 
-func (m *updateCommentRepo) ListByIssue(_ context.Context, _ uuid.UUID, _, _ int) ([]*entity.Comment, int, error) {
+func (m *updateCommentRepo) ListByIssue(_ uuid.UUID, _, _ int) ([]*entity.Comment, int, error) {
 	return nil, 0, nil
 }
 

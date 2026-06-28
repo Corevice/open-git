@@ -60,7 +60,7 @@ func (uc *ListCommentsUsecase) Execute(ctx context.Context, input ListCommentsIn
 		perPage = 100
 	}
 
-	comments, total, err := uc.commentRepo.ListByIssue(ctx, issue.ID, page, perPage)
+	comments, total, err := uc.commentRepo.ListByIssue(issue.ID, page, perPage)
 	if err != nil {
 		return nil, err
 	}

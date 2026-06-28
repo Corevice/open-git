@@ -21,7 +21,7 @@ func (m *deleteCommentRepo) Create(_ context.Context, _ *entity.Comment) error {
 	return nil
 }
 
-func (m *deleteCommentRepo) ListByIssue(_ context.Context, _ uuid.UUID, _, _ int) ([]*entity.Comment, int, error) {
+func (m *deleteCommentRepo) ListByIssue(_ uuid.UUID, _, _ int) ([]*entity.Comment, int, error) {
 	return nil, 0, nil
 }
 

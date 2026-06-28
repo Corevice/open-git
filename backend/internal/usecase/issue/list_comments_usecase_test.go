@@ -32,8 +32,20 @@ func (m *listCommentsIssueRepo) NextNumber(_ context.Context, _ uuid.UUID) (int,
 	return 0, nil
 }
 
+func (m *listCommentsIssueRepo) GetByID(_ context.Context, _ uuid.UUID) (*entity.Issue, error) {
+	return nil, nil
+}
+
 func (m *listCommentsIssueRepo) Update(_ context.Context, _ *entity.Issue) error {
 	return nil
+}
+
+func (m *listCommentsIssueRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *listCommentsIssueRepo) Count(_ context.Context, _ repository.ListIssuesFilter) (int, error) {
+	return 0, nil
 }
 
 type listCommentsRepo struct {
@@ -45,7 +57,7 @@ func (m *listCommentsRepo) Create(_ context.Context, _ *entity.Comment) error {
 	return nil
 }
 
-func (m *listCommentsRepo) ListByIssue(_ context.Context, _ uuid.UUID, page, perPage int) ([]*entity.Comment, int, error) {
+func (m *listCommentsRepo) ListByIssue(_ uuid.UUID, page, perPage int) ([]*entity.Comment, int, error) {
 	start := (page - 1) * perPage
 	if start >= len(m.comments) {
 		return []*entity.Comment{}, m.total, nil
