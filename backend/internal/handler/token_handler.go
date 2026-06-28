@@ -1,26 +1,49 @@
 package handler
 
 import (
+	"context"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/domain"
+	"github.com/open-git/backend/internal/domain/entity"
+	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/middleware"
 	"github.com/open-git/backend/internal/repository"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 )
 
-type TokenHandler struct {
-	tokens repository.IAccessTokenRepository
-	issue  *authUC.IssuePATUsecase
-	revoke *authUC.RevokePATUsecase
+type entityUserLookup interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*entity.User, error)
 }
 
-func NewTokenHandler(tokens repository.IAccessTokenRepository, issue *authUC.IssuePATUsecase, revoke *authUC.RevokePATUsecase) *TokenHandler {
-	return &TokenHandler{tokens: tokens, issue: issue, revoke: revoke}
+type TokenHandler struct {
+	tokens   repository.IAccessTokenRepository
+	issue    *authUC.IssuePATUsecase
+	revoke   *authUC.RevokePATUsecase
+	auditLog domainrepo.IAuditLogRepository
+	users    entityUserLookup
+}
+
+func NewTokenHandler(
+	tokens repository.IAccessTokenRepository,
+	issue *authUC.IssuePATUsecase,
+	revoke *authUC.RevokePATUsecase,
+	auditLog domainrepo.IAuditLogRepository,
+	users entityUserLookup,
+) *TokenHandler {
+	return &TokenHandler{
+		tokens:   tokens,
+		issue:    issue,
+		revoke:   revoke,
+		auditLog: auditLog,
+		users:    users,
+	}
 }
 
 type createTokenRequest struct {
@@ -90,6 +113,10 @@ func (h *TokenHandler) Create(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to create token"})
 	}
 
+	userUUID := middleware.Int64ToUUID(userID)
+	tokenUUID := middleware.Int64ToUUID(out.Record.ID)
+	h.recordAudit(c.Request().Context(), userUUID, tokenUUID, "token.create")
+
 	return c.JSON(http.StatusCreated, createTokenResponse{
 		Token: out.Token,
 		Meta:  toTokenResponse(out.Record),
@@ -111,7 +138,43 @@ func (h *TokenHandler) Revoke(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to revoke token"})
 	}
 
+	userUUID := middleware.Int64ToUUID(userID)
+	tokenUUID := middleware.Int64ToUUID(tokenID)
+	h.recordAudit(c.Request().Context(), userUUID, tokenUUID, "token.revoke")
+
 	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *TokenHandler) recordAudit(ctx context.Context, actorID, tokenID uuid.UUID, action string) {
+	login := ""
+	if h.users != nil {
+		user, err := h.users.GetByID(ctx, actorID)
+		if err == nil && user != nil {
+			login = user.Login
+		}
+	}
+
+	metadata := map[string]any{}
+	if login != "" {
+		metadata["actor_login"] = login
+	}
+
+	entry := entity.AuditLog{
+		OrganizationID: actorID,
+		ActorID:        actorID,
+		Action:         action,
+		TargetType:     "token",
+		TargetID:       tokenID.String(),
+		Metadata:       metadata,
+		CreatedAt:      time.Now().UTC(),
+	}
+
+	if h.auditLog == nil {
+		return
+	}
+	if err := h.auditLog.Create(ctx, &entry); err != nil {
+		log.Printf("failed to record audit log: %v", err)
+	}
 }
 
 func toTokenResponse(t *domain.AccessToken) tokenResponse {

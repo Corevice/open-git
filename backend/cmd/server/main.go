@@ -392,7 +392,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	issuePATUC := authUC.NewIssuePATUsecase(tokenRepo)
 	revokePATUC := authUC.NewRevokePATUsecase(tokenRepo)
-	tokenHandler := handler.NewTokenHandler(tokenRepo, issuePATUC, revokePATUC)
+	tokenAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	tokenHandler := handler.NewTokenHandler(tokenRepo, issuePATUC, revokePATUC, tokenAuditRepo, entityUserRepo)
 
 	resolveRepo := func(c echo.Context, owner, name string) (*entity.Repository, error) {
 		return getRepoUC.Execute(c.Request().Context(), repoUC.GetRepositoryInput{
