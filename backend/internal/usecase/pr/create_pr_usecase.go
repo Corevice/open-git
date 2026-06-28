@@ -3,6 +3,7 @@ package pr
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -16,6 +17,17 @@ import (
 )
 
 const maxNumberRetries = 5
+
+type PRMergeableEnqueuePayload struct {
+	GitPath string
+	HeadRef string
+	BaseRef string
+	PRID    uuid.UUID
+}
+
+type PRMergeableEnqueuer interface {
+	Enqueue(ctx context.Context, payload PRMergeableEnqueuePayload) error
+}
 
 type CreatePRInput struct {
 	OrganizationID uuid.UUID
@@ -34,6 +46,7 @@ type CreatePRUsecase struct {
 	gitService     service.GitService
 	txManager      repository.ITransactionManager
 	membershipRepo repository.IMembershipRepository
+	enqueuer       PRMergeableEnqueuer
 }
 
 func NewCreatePRUsecase(
@@ -42,6 +55,7 @@ func NewCreatePRUsecase(
 	gitService service.GitService,
 	txManager repository.ITransactionManager,
 	membershipRepo repository.IMembershipRepository,
+	enqueuer PRMergeableEnqueuer,
 ) *CreatePRUsecase {
 	return &CreatePRUsecase{
 		prRepo:         prRepo,
@@ -49,6 +63,7 @@ func NewCreatePRUsecase(
 		gitService:     gitService,
 		txManager:      txManager,
 		membershipRepo: membershipRepo,
+		enqueuer:       enqueuer,
 	}
 }
 
@@ -123,6 +138,17 @@ func (uc *CreatePRUsecase) Execute(ctx context.Context, input CreatePRInput) (*e
 
 	if created == nil {
 		return nil, errors.New("failed to allocate pull request number")
+	}
+
+	if uc.enqueuer != nil {
+		if err := uc.enqueuer.Enqueue(ctx, PRMergeableEnqueuePayload{
+			GitPath: input.GitPath,
+			HeadRef: input.HeadRef,
+			BaseRef: input.BaseRef,
+			PRID:    created.ID,
+		}); err != nil {
+			slog.Error("failed to enqueue pr mergeable check", "error", err, "pr_id", created.ID)
+		}
 	}
 
 	return created, nil
