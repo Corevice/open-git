@@ -71,3 +71,9 @@ jobs:
         with:
           name: compat-test-results
           path: backend/compat-results.txt
+
+  validate-dashboards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node -e "const fs=require('fs'); const dir='deploy/grafana/dashboards'; fs.readdirSync(dir).filter(f=>f.endsWith('.json')).forEach(f=>{const d=JSON.parse(fs.readFileSync(dir+'/'+f,'utf8'));if(!d.uid||!d.schemaVersion)throw new Error('missing uid/schemaVersion in '+f);if(!d.templating||!d.templating.list.some(v=>v.name==='organization_id'))throw new Error('missing organization_id variable in '+f);console.log('OK',f)})"
