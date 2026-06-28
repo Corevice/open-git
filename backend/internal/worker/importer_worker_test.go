@@ -17,11 +17,129 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/open-git/backend/internal/domain/entity"
-	"github.com/open-git/backend/internal/infrastructure/database"
 	"github.com/open-git/backend/internal/infrastructure/repository"
 )
 
-const importExtraSchema = `
+const importTestSchema = `
+CREATE TABLE organizations (
+	id TEXT PRIMARY KEY,
+	login TEXT NOT NULL UNIQUE,
+	name TEXT NOT NULL,
+	plan_tier TEXT NOT NULL DEFAULT 'free',
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE users (
+	id TEXT PRIMARY KEY,
+	login TEXT NOT NULL UNIQUE,
+	email TEXT NOT NULL UNIQUE,
+	password_hash TEXT NOT NULL,
+	name TEXT,
+	bio TEXT,
+	avatar_url TEXT,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP
+);
+
+CREATE TABLE repositories (
+	id TEXT PRIMARY KEY,
+	organization_id TEXT NOT NULL REFERENCES organizations(id),
+	owner_id TEXT NOT NULL REFERENCES users(id),
+	name TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	git_path TEXT NOT NULL DEFAULT '',
+	owner_login TEXT NOT NULL DEFAULT '',
+	visibility TEXT NOT NULL DEFAULT 'private',
+	default_branch TEXT NOT NULL DEFAULT 'main',
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	UNIQUE(owner_id, name)
+);
+
+CREATE TABLE issues (
+	id TEXT PRIMARY KEY,
+	organization_id TEXT NOT NULL REFERENCES organizations(id),
+	repository_id TEXT NOT NULL REFERENCES repositories(id),
+	number INTEGER NOT NULL,
+	title TEXT NOT NULL,
+	body TEXT NOT NULL DEFAULT '',
+	state TEXT NOT NULL DEFAULT 'open',
+	state_reason TEXT,
+	author_id TEXT NOT NULL REFERENCES users(id),
+	milestone_id TEXT,
+	comments_count INTEGER NOT NULL DEFAULT 0,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	closed_at TIMESTAMP,
+	UNIQUE(repository_id, number)
+);
+
+CREATE TABLE labels (
+	id TEXT PRIMARY KEY,
+	organization_id TEXT NOT NULL REFERENCES organizations(id),
+	repository_id TEXT NOT NULL REFERENCES repositories(id),
+	name TEXT NOT NULL,
+	color TEXT NOT NULL DEFAULT 'ededed',
+	description TEXT NOT NULL DEFAULT '',
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	UNIQUE(repository_id, name)
+);
+
+CREATE TABLE milestones (
+	id TEXT PRIMARY KEY,
+	organization_id TEXT NOT NULL REFERENCES organizations(id),
+	repository_id TEXT NOT NULL REFERENCES repositories(id),
+	number INTEGER NOT NULL DEFAULT 0,
+	title TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	state TEXT NOT NULL DEFAULT 'open',
+	due_on TIMESTAMP,
+	open_issues INTEGER NOT NULL DEFAULT 0,
+	closed_issues INTEGER NOT NULL DEFAULT 0,
+	closed_at TIMESTAMP,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE comments (
+	id TEXT PRIMARY KEY,
+	organization_id TEXT NOT NULL REFERENCES organizations(id),
+	issue_id TEXT NOT NULL REFERENCES issues(id),
+	author_id TEXT NOT NULL REFERENCES users(id),
+	body TEXT NOT NULL DEFAULT '',
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE pull_requests (
+	id TEXT PRIMARY KEY,
+	organization_id TEXT NOT NULL REFERENCES organizations(id),
+	repository_id TEXT NOT NULL REFERENCES repositories(id),
+	number INTEGER NOT NULL,
+	title TEXT NOT NULL DEFAULT '',
+	body TEXT NOT NULL DEFAULT '',
+	draft INTEGER NOT NULL DEFAULT 0,
+	head_ref TEXT NOT NULL,
+	base_ref TEXT NOT NULL,
+	head_sha TEXT NOT NULL DEFAULT '',
+	base_sha TEXT NOT NULL DEFAULT '',
+	state TEXT NOT NULL DEFAULT 'open',
+	merged_at TIMESTAMP,
+	merged_by TEXT REFERENCES users(id),
+	merge_commit_sha TEXT,
+	mergeable INTEGER,
+	mergeable_state TEXT NOT NULL DEFAULT 'unknown',
+	author_id TEXT NOT NULL REFERENCES users(id),
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	UNIQUE(repository_id, number)
+);
+
+CREATE TABLE issue_labels (
+	issue_id TEXT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+	label_id TEXT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+	PRIMARY KEY (issue_id, label_id)
+);
+
 CREATE TABLE IF NOT EXISTS import_jobs (
 	id TEXT PRIMARY KEY,
 	organization_id TEXT NOT NULL REFERENCES organizations(id),
@@ -64,13 +182,9 @@ func newTestImporterDB(t *testing.T) *sqlx.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := database.RunMigrations(db, "sqlite", "../../migrations"); err != nil {
+	if _, err := db.Exec(importTestSchema); err != nil {
 		_ = db.Close()
-		t.Fatalf("run migrations: %v", err)
-	}
-	if _, err := db.Exec(importExtraSchema); err != nil {
-		_ = db.Close()
-		t.Fatalf("create import schema: %v", err)
+		t.Fatalf("create import test schema: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return sqlx.NewDb(db, "sqlite3")
@@ -240,12 +354,9 @@ func TestHandleGitHubImport_CompletesJob(t *testing.T) {
 func TestCheckRateLimitHeaders_ReturnsErrRateLimitExceeded(t *testing.T) {
 	worker := NewImporterWorker(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
-	resp := &http.Response{
-		Header: http.Header{
-			rateLimitRemainingHeader: []string{"0"},
-			rateLimitResetHeader:     []string{"9999999999"},
-		},
-	}
+	resp := &http.Response{Header: make(http.Header)}
+	resp.Header.Set(rateLimitRemainingHeader, "0")
+	resp.Header.Set(rateLimitResetHeader, "9999999999")
 
 	err := worker.checkRateLimitHeaders(context.Background(), resp)
 	if err == nil {
