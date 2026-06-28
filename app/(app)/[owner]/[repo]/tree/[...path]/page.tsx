@@ -1,5 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { use, useEffect, useState } from "react";
+
 import { TreeBranchSelector } from "@/components/repo/BranchSelector";
 import FileTree, { type TreeEntry } from "@/components/repo/FileTree";
 import {
@@ -8,6 +12,7 @@ import {
   decodePathSegments,
   isApiError,
 } from "@/lib/api-client";
+import { useRepoContents } from "@/lib/hooks/useRepoContents";
 import { renderMarkdown } from "@/lib/markdown";
 
 interface RepoMetadata {
@@ -35,6 +40,12 @@ interface BranchItem {
   name: string;
 }
 
+function Skeleton({ className }: { className?: string }) {
+  return (
+    <div className={`animate-pulse rounded bg-[#eaeef2] ${className ?? ""}`} />
+  );
+}
+
 function visibilityLabel(repo: RepoMetadata): string {
   if (repo.visibility) {
     return repo.visibility.charAt(0).toUpperCase() + repo.visibility.slice(1);
@@ -58,69 +69,124 @@ function mapContents(items: ContentItem[]): TreeEntry[] {
   }));
 }
 
-async function fetchReadme(
-  owner: string,
-  repo: string,
-  branch: string,
-  dirPath: string,
-): Promise<string | null> {
-  if (dirPath) return null;
-  try {
-    const data = await apiClient.getContents<ContentItem>(
-      owner,
-      repo,
-      "README.md",
-      branch,
-    );
-    if (!data.content || data.encoding !== "base64") return null;
-    return decodeBase64Content(data.content);
-  } catch (err) {
-    if (isApiError(err) && err.status === 404) return null;
-    throw err;
-  }
-}
-
-export default async function RepoTreePage({
+export default function RepoTreePage({
   params,
 }: {
   params: Promise<{ owner: string; repo: string; path: string[] }>;
 }) {
-  const { owner, repo, path: rawPathSegments } = await params;
+  const { owner, repo, path: rawPathSegments } = use(params);
   const pathSegments = decodePathSegments(rawPathSegments ?? []);
   if (!pathSegments.length) notFound();
 
-  const branch = pathSegments[0];
+  const initialBranch = pathSegments[0];
   const currentPath = pathSegments.slice(1).join("/");
 
-  let metadata: RepoMetadata;
-  try {
-    metadata = await apiClient.getRepo<RepoMetadata>(owner, repo);
-  } catch (err) {
-    if (isApiError(err) && err.status === 404) notFound();
-    throw err;
-  }
+  const [currentRef, setCurrentRef] = useState(initialBranch);
+  const [metadata, setMetadata] = useState<RepoMetadata | null>(null);
+  const [branches, setBranches] = useState<BranchItem[]>([{ name: initialBranch }]);
+  const [readmeHtml, setReadmeHtml] = useState<string | null>(null);
 
-  let contentsRaw: ContentItem[] | ContentItem | null = null;
-  try {
-    contentsRaw = await apiClient.getContents<ContentItem[] | ContentItem>(
-      owner,
-      repo,
-      currentPath,
-      branch,
+  const { data: contentsRaw, isLoading } = useRepoContents(
+    owner,
+    repo,
+    currentPath,
+    currentRef,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMetadata() {
+      try {
+        const repoData = await apiClient.getRepo<RepoMetadata>(owner, repo);
+        if (cancelled) return;
+        setMetadata(repoData);
+      } catch (err) {
+        if (isApiError(err) && err.status === 404) notFound();
+        throw err;
+      }
+    }
+
+    void loadMetadata();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [owner, repo]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadBranches() {
+      try {
+        const branchesRaw = await apiClient.getBranches<BranchItem[]>(owner, repo);
+        if (cancelled) return;
+        setBranches(
+          branchesRaw.length > 0 ? branchesRaw : [{ name: currentRef }],
+        );
+      } catch {
+        if (!cancelled) setBranches([{ name: currentRef }]);
+      }
+    }
+
+    void loadBranches();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [owner, repo, currentRef]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadReadme() {
+      if (currentPath) {
+        setReadmeHtml(null);
+        return;
+      }
+
+      try {
+        const data = await apiClient.getContents<ContentItem>(
+          owner,
+          repo,
+          "README.md",
+          currentRef,
+        );
+        if (cancelled) return;
+        if (!data.content || data.encoding !== "base64") {
+          setReadmeHtml(null);
+          return;
+        }
+        setReadmeHtml(renderMarkdown(decodeBase64Content(data.content)));
+      } catch (err) {
+        if (cancelled) return;
+        if (isApiError(err) && err.status === 404) {
+          setReadmeHtml(null);
+          return;
+        }
+        throw err;
+      }
+    }
+
+    void loadReadme();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [owner, repo, currentPath, currentRef]);
+
+  if (!metadata) {
+    return (
+      <div className="min-h-screen bg-[#f6f8fa] p-6">
+        <div className="max-w-[1280px] mx-auto space-y-3">
+          <Skeleton className="h-8 w-1/3" />
+          <Skeleton className="h-5 w-full" />
+          <Skeleton className="h-5 w-full" />
+          <Skeleton className="h-5 w-full" />
+        </div>
+      </div>
     );
-  } catch (err) {
-    if (!isApiError(err) || err.status !== 404) throw err;
   }
-
-  let branchesRaw: BranchItem[];
-  try {
-    branchesRaw = await apiClient.getBranches<BranchItem[]>(owner, repo);
-  } catch {
-    branchesRaw = [{ name: branch }];
-  }
-
-  const branches = branchesRaw.length > 0 ? branchesRaw : [{ name: branch }];
-  const readmeRaw = await fetchReadme(owner, repo, branch, currentPath);
 
   const contents: ContentItem[] = Array.isArray(contentsRaw)
     ? contentsRaw
@@ -128,7 +194,6 @@ export default async function RepoTreePage({
       ? [contentsRaw]
       : [];
   const entries = mapContents(contents);
-  const readmeHtml = readmeRaw ? renderMarkdown(readmeRaw) : null;
   const pathParts = currentPath ? currentPath.split("/") : [];
 
   return (
@@ -204,7 +269,8 @@ export default async function RepoTreePage({
               repo={repo}
               currentPath={currentPath}
               branches={branches}
-              currentBranch={branch}
+              currentBranch={currentRef}
+              onRefChange={setCurrentRef}
             />
 
             <nav className="flex items-center gap-1 text-sm flex-wrap min-w-0">
@@ -213,10 +279,10 @@ export default async function RepoTreePage({
               </Link>
               <span className="text-[#57606a]">/</span>
               <Link
-                href={`/${owner}/${repo}/tree/${encodeURIComponent(branch)}`}
+                href={`/${owner}/${repo}/tree/${encodeURIComponent(currentRef)}`}
                 className="text-[#0969da] hover:underline no-underline font-mono"
               >
-                {branch}
+                {currentRef}
               </Link>
               {pathParts.map((part, i) => {
                 const sub = pathParts.slice(0, i + 1).join("/");
@@ -228,7 +294,7 @@ export default async function RepoTreePage({
                       <span className="font-mono text-[#24292f]">{part}</span>
                     ) : (
                       <Link
-                        href={`/${owner}/${repo}/tree/${encodeURIComponent(branch)}/${sub
+                        href={`/${owner}/${repo}/tree/${encodeURIComponent(currentRef)}/${sub
                           .split("/")
                           .map(encodeURIComponent)
                           .join("/")}`}
@@ -243,13 +309,21 @@ export default async function RepoTreePage({
             </nav>
           </div>
 
-          <FileTree
-            entries={entries}
-            owner={owner}
-            repo={repo}
-            branch={branch}
-            currentPath={currentPath}
-          />
+          {isLoading ? (
+            <div className="p-4 space-y-3">
+              <Skeleton className="h-5 w-full" />
+              <Skeleton className="h-5 w-full" />
+              <Skeleton className="h-5 w-full" />
+            </div>
+          ) : (
+            <FileTree
+              entries={entries}
+              owner={owner}
+              repo={repo}
+              branch={currentRef}
+              currentPath={currentPath}
+            />
+          )}
         </div>
 
         {readmeHtml && (

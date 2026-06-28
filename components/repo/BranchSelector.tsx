@@ -12,12 +12,23 @@ import {
 interface Props {
   branches: { name: string }[];
   currentBranch: string;
-  onChange: (branch: string) => void;
+  onChange?: (branch: string) => void;
+  onRefChange?: (ref: string) => void;
 }
 
-export default function BranchSelector({ branches, currentBranch, onChange }: Props) {
+export default function BranchSelector({
+  branches,
+  currentBranch,
+  onChange,
+  onRefChange,
+}: Props) {
+  const handleChange = (ref: string) => {
+    onRefChange?.(ref);
+    onChange?.(ref);
+  };
+
   return (
-    <Select value={currentBranch} onValueChange={onChange}>
+    <Select value={currentBranch} onValueChange={handleChange}>
       <SelectTrigger className="w-[180px]">
         <SelectValue placeholder="Select branch" />
       </SelectTrigger>
@@ -39,9 +50,11 @@ function branchNamesSet(branches: { name: string }[]): Set<string> {
 export function RepoRefSelector({
   branches,
   currentBranch,
+  onRefChange,
 }: {
   branches: { name: string }[];
   currentBranch: string;
+  onRefChange?: (ref: string) => void;
 }) {
   const router = useRouter();
   const allowed = branchNamesSet(branches);
@@ -50,8 +63,10 @@ export function RepoRefSelector({
     <BranchSelector
       branches={branches}
       currentBranch={currentBranch}
+      onRefChange={onRefChange}
       onChange={(name) => {
         if (!allowed.has(name)) return;
+        if (onRefChange) return;
         router.push(`?ref=${encodeURIComponent(name)}`);
       }}
     />
@@ -64,12 +79,14 @@ export function TreeBranchSelector({
   currentPath,
   branches,
   currentBranch,
+  onRefChange,
 }: {
   owner: string;
   repo: string;
   currentPath: string;
   branches: { name: string }[];
   currentBranch: string;
+  onRefChange?: (ref: string) => void;
 }) {
   const router = useRouter();
   const allowed = branchNamesSet(branches);
@@ -78,8 +95,10 @@ export function TreeBranchSelector({
     <BranchSelector
       branches={branches}
       currentBranch={currentBranch}
+      onRefChange={onRefChange}
       onChange={(name) => {
         if (!allowed.has(name)) return;
+        if (onRefChange) return;
         if (currentPath) {
           const encodedPath = currentPath
             .split("/")
