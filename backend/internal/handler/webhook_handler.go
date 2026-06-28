@@ -332,6 +332,15 @@ func (h *WebhookHandler) ListDeliveries(c echo.Context) error {
 
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 30
+	}
+	if perPage > 100 {
+		perPage = 100
+	}
 
 	deliveries, total, err := h.listDeliveriesUC.Execute(
 		c.Request().Context(),
@@ -347,12 +356,6 @@ func (h *WebhookHandler) ListDeliveries(c echo.Context) error {
 		return err
 	}
 
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 30
-	}
 	setPaginationHeaders(c, page, perPage, int(total))
 
 	responses := make([]deliverySummaryResponse, 0, len(deliveries))
@@ -438,11 +441,15 @@ func (h *WebhookHandler) PingHook(c echo.Context) error {
 	}
 
 	if h.pingWebhookUC != nil {
-		if _, err := h.pingWebhookUC.Execute(c.Request().Context(), hookID, repo.OrganizationID); err != nil {
+		delivery, err := h.pingWebhookUC.Execute(c.Request().Context(), hookID, repo.OrganizationID)
+		if err != nil {
 			if errors.Is(err, apperror.ErrNotFound) {
 				return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
 			}
 			return err
+		}
+		if delivery == nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to create ping delivery")
 		}
 		return c.NoContent(http.StatusNoContent)
 	}

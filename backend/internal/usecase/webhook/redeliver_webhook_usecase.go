@@ -59,16 +59,12 @@ func (uc *RedeliverWebhookUsecase) Execute(
 	ctx context.Context,
 	deliveryID, webhookID, orgID uuid.UUID,
 ) (*entity.WebhookDelivery, error) {
-	if _, err := uc.webhookRepo.GetByID(ctx, webhookID, orgID); err != nil {
-		return nil, err
-	}
-
-	original, err := uc.deliveryRepo.GetByID(ctx, deliveryID, webhookID, orgID)
+	webhook, err := uc.webhookRepo.GetByID(ctx, webhookID, orgID)
 	if err != nil {
 		return nil, err
 	}
 
-	webhook, err := uc.webhookRepo.GetByID(ctx, webhookID, orgID)
+	original, err := uc.deliveryRepo.GetByID(ctx, deliveryID, webhookID, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -89,6 +85,10 @@ func (uc *RedeliverWebhookUsecase) Execute(
 		CreatedAt:        time.Now().UTC(),
 	}
 
+	if err := uc.deliveryRepo.Create(ctx, delivery); err != nil {
+		return nil, err
+	}
+
 	if err := uc.enqueuer.EnqueueDelivery(ctx, queue.WebhookDeliveryPayload{
 		DeliveryID:     newID.String(),
 		OrganizationID: orgID.String(),
@@ -98,10 +98,6 @@ func (uc *RedeliverWebhookUsecase) Execute(
 		Body:           []byte(original.RequestBody),
 		Attempt:        1,
 	}); err != nil {
-		return nil, err
-	}
-
-	if err := uc.deliveryRepo.Create(ctx, delivery); err != nil {
 		return nil, err
 	}
 

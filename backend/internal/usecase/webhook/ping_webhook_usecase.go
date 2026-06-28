@@ -57,7 +57,6 @@ func (uc *PingWebhookUsecase) Execute(ctx context.Context, webhookID, orgID uuid
 			"config": map[string]string{
 				"url":          webhook.URL,
 				"content_type": webhook.ContentType,
-				"secret":       "",
 			},
 		},
 	})
@@ -77,6 +76,10 @@ func (uc *PingWebhookUsecase) Execute(ctx context.Context, webhookID, orgID uuid
 		CreatedAt:      time.Now().UTC(),
 	}
 
+	if err := uc.deliveryRepo.Create(ctx, delivery); err != nil {
+		return nil, err
+	}
+
 	if err := uc.enqueuer.EnqueueDelivery(ctx, queue.WebhookDeliveryPayload{
 		DeliveryID:     deliveryID.String(),
 		OrganizationID: orgID.String(),
@@ -86,10 +89,6 @@ func (uc *PingWebhookUsecase) Execute(ctx context.Context, webhookID, orgID uuid
 		Body:           body,
 		Attempt:        1,
 	}); err != nil {
-		return nil, err
-	}
-
-	if err := uc.deliveryRepo.Create(ctx, delivery); err != nil {
 		return nil, err
 	}
 
