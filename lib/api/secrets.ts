@@ -1,3 +1,18 @@
+declare module "libsodium-wrappers" {
+  interface LibSodium {
+    ready: Promise<void>;
+    from_base64(input: string): Uint8Array;
+    from_string(input: string): Uint8Array;
+    to_base64(input: Uint8Array): string;
+    crypto_box_seal(
+      message: Uint8Array,
+      publicKey: Uint8Array,
+    ): Uint8Array;
+  }
+  const sodium: LibSodium;
+  export default sodium;
+}
+
 import sodium from "libsodium-wrappers";
 import { API_TOKEN_KEY, ApiError } from "../api";
 import { env } from "../env";
