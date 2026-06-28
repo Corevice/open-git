@@ -1,12 +1,27 @@
 title = "open-git gitleaks config"
 
 [allowlist]
-description = "Allow test fixtures and placeholder env values"
+description = "Allow test fixtures, CI test credentials, and placeholder env values"
 paths = [
   '''backend/testdata''',
-  '''.env.example''',
+  '''\.env\.example$''',
+  '''_test\.go$''',
+  '''\.test\.(ts|tsx)$''',
+  '''__tests__/''',
+  '''e2e/''',
+  '''\.github/workflows/''',
+  '''docker-compose''',
+  '''helm/values\.yaml''',
+  '''helm/templates/''',
 ]
 regexes = [
   '''your_.*_here''',
   '''changeme''',
+  '''change-me-in-production''',
+  '''ghp_xxx''',
+  '''ghp_test''',
+  '''minioadmin''',
+  '''postgres://postgres:postgres@''',
+  '''postgres://user:secret@''',
+  '''Bearer (test|wrong|secret|abc123|xyz|test-bearer-token|test-token)''',
 ]

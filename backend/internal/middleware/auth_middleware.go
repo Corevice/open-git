@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
@@ -24,7 +24,7 @@ const (
 
 type jwtClaims struct {
 	UserID int64 `json:"sub"`
-	jwt.StandardClaims
+	jwt.RegisteredClaims
 }
 
 type githubAuthError struct {
