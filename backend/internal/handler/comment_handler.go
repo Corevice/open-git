@@ -237,7 +237,7 @@ func toIssueCommentResponse(comment *CommentDTO) issueCommentResponse {
 func toIssueCommentResponses(comments []*CommentDTO) []issueCommentResponse {
 	result := make([]issueCommentResponse, 0, len(comments))
 	for _, comment := range comments {
-		result = append(result, toCommentResponse(comment))
+		result = append(result, toIssueCommentResponse(comment))
 	}
 	return result
 }
