@@ -2,30 +2,19 @@
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useMemo, useState } from "react";
 
 import { TreeBranchSelector } from "@/components/repo/BranchSelector";
 import FileTree, { type TreeEntry } from "@/components/repo/FileTree";
+import { RepoPageSkeleton } from "@/components/repo/RepoPageSkeleton";
+import { decodeBase64Content, decodePathSegments } from "@/lib/api-client";
 import {
-  apiClient,
-  decodeBase64Content,
-  decodePathSegments,
-  isApiError,
-} from "@/lib/api-client";
-import { useRepoContents } from "@/lib/hooks/useRepoContents";
+  type RepoMetadata,
+  useRepoBranches,
+  useRepoContents,
+  useRepoMetadata,
+} from "@/lib/hooks/useRepoContents";
 import { renderMarkdown } from "@/lib/markdown";
-
-interface RepoMetadata {
-  name: string;
-  description: string | null;
-  private: boolean;
-  visibility?: string;
-  default_branch: string;
-  stargazers_count: number;
-  watchers_count: number;
-  forks_count: number;
-  owner: { login: string };
-}
 
 interface ContentItem {
   name: string;
@@ -34,16 +23,6 @@ interface ContentItem {
   sha: string;
   content?: string | null;
   encoding?: string;
-}
-
-interface BranchItem {
-  name: string;
-}
-
-export function RepoPageSkeleton({ className }: { className?: string }) {
-  return (
-    <div className={`animate-pulse rounded bg-[#eaeef2] ${className ?? ""}`} />
-  );
 }
 
 function visibilityLabel(repo: RepoMetadata): string {
@@ -76,24 +55,24 @@ export default function RepoTreePage({
 }) {
   const { owner, repo, path: rawPathSegments } = use(params);
   const pathSegments = decodePathSegments(rawPathSegments ?? []);
-  if (!pathSegments.length) notFound();
-
-  const initialBranch = pathSegments[0];
-  const currentPath = pathSegments.slice(1).join("/");
+  const hasValidPath = pathSegments.length > 0;
+  const initialBranch = pathSegments[0] ?? "";
+  const currentPath = hasValidPath ? pathSegments.slice(1).join("/") : "";
 
   const [currentRef, setCurrentRef] = useState(initialBranch);
-  const [metadata, setMetadata] = useState<RepoMetadata | null>(null);
-  const [metadataError, setMetadataError] = useState<unknown>(null);
-  const [metadataNotFound, setMetadataNotFound] = useState(false);
-  const [branches, setBranches] = useState<BranchItem[]>([{ name: initialBranch }]);
 
+  const {
+    data: metadata,
+    error: metadataError,
+    isNotFound: metadataNotFound,
+  } = useRepoMetadata(owner, repo);
+  const { branches } = useRepoBranches(owner, repo, initialBranch);
   const {
     data: contentsRaw,
     isLoading,
     error: contentsError,
     isNotFound: contentsNotFound,
   } = useRepoContents(owner, repo, currentPath, currentRef);
-
   const { data: readmeRaw } = useRepoContents(
     owner,
     repo,
@@ -101,61 +80,13 @@ export default function RepoTreePage({
     currentRef,
   );
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadMetadata() {
-      try {
-        const repoData = await apiClient.getRepo<RepoMetadata>(owner, repo);
-        if (cancelled) return;
-        setMetadata(repoData);
-        setMetadataError(null);
-        setMetadataNotFound(false);
-      } catch (err) {
-        if (cancelled) return;
-        if (isApiError(err) && err.status === 404) {
-          setMetadataNotFound(true);
-          return;
-        }
-        setMetadataError(err);
-      }
-    }
-
-    void loadMetadata();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [owner, repo]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadBranches() {
-      try {
-        const branchesRaw = await apiClient.getBranches<BranchItem[]>(owner, repo);
-        if (cancelled) return;
-        setBranches(
-          branchesRaw.length > 0 ? branchesRaw : [{ name: initialBranch }],
-        );
-      } catch {
-        if (!cancelled) setBranches([{ name: initialBranch }]);
-      }
-    }
-
-    void loadBranches();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [owner, repo, initialBranch]);
-
   const readmeHtml = useMemo(() => {
     if (currentPath || !readmeRaw || Array.isArray(readmeRaw)) return null;
     if (!readmeRaw.content || readmeRaw.encoding !== "base64") return null;
     return renderMarkdown(decodeBase64Content(readmeRaw.content));
   }, [currentPath, readmeRaw]);
 
+  if (!hasValidPath) notFound();
   if (metadataNotFound || contentsNotFound) notFound();
   if (metadataError) throw metadataError;
   if (contentsError) throw contentsError;

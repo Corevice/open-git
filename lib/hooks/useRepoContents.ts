@@ -19,18 +19,58 @@ export interface RepoContentFile {
 
 export type RepoContentsData = RepoContentFile | RepoContentFile[];
 
-export function sanitizeRepoPath(path: string): string {
-  return path
-    .split("/")
-    .filter((segment) => segment.length > 0 && segment !== "." && segment !== "..")
-    .join("/");
+export interface RepoMetadata {
+  name: string;
+  description: string | null;
+  private: boolean;
+  visibility?: string;
+  default_branch: string;
+  stargazers_count: number;
+  watchers_count: number;
+  forks_count: number;
+  owner: { login: string };
+}
+
+export interface BranchItem {
+  name: string;
+}
+
+function decodePathSegment(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
+
+export function sanitizeRepoPath(path: string): string | null {
+  if (path === "") return "";
+
+  const parts: string[] = [];
+  for (const rawSegment of path.split("/")) {
+    if (rawSegment.length === 0) continue;
+
+    const segment = decodePathSegment(rawSegment);
+    if (segment === null || segment === "." || segment === "..") {
+      return null;
+    }
+    parts.push(segment);
+  }
+
+  return parts.join("/");
 }
 
 export function sanitizeRepoRef(ref: string): string {
   const trimmed = ref.trim();
-  if (!trimmed || trimmed.includes("..") || /[/\\]/.test(trimmed)) {
-    return "";
+  if (!trimmed || trimmed.includes("\\")) return "";
+
+  const decoded = decodePathSegment(trimmed);
+  if (decoded === null || decoded.includes("..")) return "";
+
+  for (const segment of decoded.split("/")) {
+    if (segment === "." || segment === "..") return "";
   }
+
   return trimmed;
 }
 
@@ -55,5 +95,38 @@ export function useRepoContents(
 
   const isNotFound = isApiError(error) && error.status === 404;
 
-  return { data, isLoading, error, isNotFound };
+  return { data, isLoading, error: error ?? null, isNotFound };
+}
+
+export function useRepoMetadata(owner: string, repo: string) {
+  const key = owner && repo ? (["repo-metadata", owner, repo] as const) : null;
+
+  const { data, isLoading, error } = useSWR(
+    key,
+    ([, o, r]) => apiClient.getRepo<RepoMetadata>(o, r),
+    { revalidateOnFocus: false },
+  );
+
+  const isNotFound = isApiError(error) && error.status === 404;
+
+  return { data, isLoading, error: error ?? null, isNotFound };
+}
+
+export function useRepoBranches(owner: string, repo: string, fallbackBranch: string) {
+  const key = owner && repo ? (["repo-branches", owner, repo] as const) : null;
+
+  const { data, isLoading, error } = useSWR(
+    key,
+    async ([, o, r]) => {
+      const branches = await apiClient.getBranches<BranchItem[]>(o, r);
+      return branches.length > 0 ? branches : [{ name: fallbackBranch }];
+    },
+    { revalidateOnFocus: false },
+  );
+
+  return {
+    branches: data ?? [{ name: fallbackBranch }],
+    isLoading,
+    error: error ?? null,
+  };
 }

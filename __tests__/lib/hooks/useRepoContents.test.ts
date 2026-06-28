@@ -37,16 +37,29 @@ function createWrapper() {
 
 describe("sanitizeRepoPath", () => {
   it("removes traversal segments", () => {
-    expect(sanitizeRepoPath("../etc/passwd")).toBe("etc/passwd");
-    expect(sanitizeRepoPath("src/./../secret")).toBe("src/secret");
+    expect(sanitizeRepoPath("src/secret")).toBe("src/secret");
+    expect(sanitizeRepoPath("")).toBe("");
+  });
+
+  it("rejects traversal and encoded traversal segments", () => {
+    expect(sanitizeRepoPath("../etc/passwd")).toBeNull();
+    expect(sanitizeRepoPath("src/../secret")).toBeNull();
+    expect(sanitizeRepoPath("%2e%2e/secret")).toBeNull();
+    expect(sanitizeRepoPath("src/%2e%2e/secret")).toBeNull();
   });
 });
 
 describe("sanitizeRepoRef", () => {
-  it("rejects refs with path separators or traversal", () => {
+  it("accepts valid refs including slash-separated branch names", () => {
     expect(sanitizeRepoRef("main")).toBe("main");
+    expect(sanitizeRepoRef("feature/foo")).toBe("feature/foo");
+  });
+
+  it("rejects refs with traversal or backslashes", () => {
     expect(sanitizeRepoRef("../main")).toBe("");
-    expect(sanitizeRepoRef("feature/foo")).toBe("");
+    expect(sanitizeRepoRef("foo/..")).toBe("");
+    expect(sanitizeRepoRef("branch\\name")).toBe("");
+    expect(sanitizeRepoRef("%2e%2e")).toBe("");
   });
 });
 
@@ -67,7 +80,25 @@ describe("useRepoContents", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(mockGetContents).toHaveBeenCalledWith("owner", "repo", "src", "main");
+    expect(mockGetContents).not.toHaveBeenCalled();
+    expect(result.current.data).toBeUndefined();
+    expect(result.current.error).toBeNull();
+    expect(result.current.isNotFound).toBe(false);
+  });
+
+  it("fetches contents for valid path and ref", async () => {
+    mockGetContents.mockResolvedValue([{ name: "README.md", type: "file" }]);
+
+    const { result } = renderHook(
+      () => useRepoContents("owner", "repo", "src/app", "feature/foo"),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(mockGetContents).toHaveBeenCalledWith("owner", "repo", "src/app", "feature/foo");
     expect(result.current.data).toEqual([{ name: "README.md", type: "file" }]);
     expect(result.current.error).toBeNull();
     expect(result.current.isNotFound).toBe(false);
@@ -85,6 +116,22 @@ describe("useRepoContents", () => {
 
     expect(mockGetContents).not.toHaveBeenCalled();
     expect(result.current.data).toBeUndefined();
+    expect(result.current.error).toBeNull();
+  });
+
+  it("skips fetch when path sanitizes to invalid", async () => {
+    const { result } = renderHook(
+      () => useRepoContents("owner", "repo", "..", "main"),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(mockGetContents).not.toHaveBeenCalled();
+    expect(result.current.data).toBeUndefined();
+    expect(result.current.error).toBeNull();
   });
 
   it("surfaces 404 as isNotFound", async () => {
