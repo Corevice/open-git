@@ -20,6 +20,7 @@ import (
 
 	gossh "github.com/gliderlabs/ssh"
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	echoMiddleware "github.com/labstack/echo/v4/middleware"
@@ -41,6 +42,7 @@ import (
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
+	mcpusecase "github.com/open-git/backend/internal/usecase/mcp"
 	orgUC "github.com/open-git/backend/internal/usecase/org"
 	prusecase "github.com/open-git/backend/internal/usecase/pr"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
@@ -48,6 +50,7 @@ import (
 	userpreferencesUC "github.com/open-git/backend/internal/usecase/user_preferences"
 	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
 	"github.com/open-git/backend/internal/infrastructure/queue"
+	"github.com/open-git/backend/internal/worker"
 )
 
 var (
@@ -480,6 +483,44 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	triggerRunUC := compatusecase.NewTriggerRunUsecase(compatRepo, compatRunner)
 	compatHandler := handler.NewCompatHandler(getReportUC, triggerRunUC, compatRepo)
 
+	mcpVerificationRepo := infrarepo.NewSQLxMCPVerificationRepository(sqlxDB)
+	mcpAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	getLatestVerificationUC := mcpusecase.NewGetLatestVerificationUsecase(mcpVerificationRepo)
+	listHistoryVerificationUC := mcpusecase.NewListVerificationHistoryUsecase(mcpVerificationRepo)
+	getJobStatusUC := mcpusecase.NewGetJobStatusUsecase(mcpVerificationRepo)
+	deleteVerificationUC := mcpusecase.NewDeleteVerificationUsecase(mcpVerificationRepo, mcpAuditRepo)
+
+	var runVerificationUC *mcpusecase.RunVerificationUsecase
+	if cfg.RedisAddr != "" {
+		asynqClient := queue.NewAsynqClient(cfg.RedisAddr)
+		runVerificationUC = mcpusecase.NewRunVerificationUsecase(mcpVerificationRepo, mcpAuditRepo, asynqClient)
+
+		asynqServer := queue.NewAsynqServer(cfg.RedisAddr, 10)
+		mux := asynq.NewServeMux()
+		mcpWorker := worker.NewMCPVerificationWorker(mcpVerificationRepo, cfg.WebBaseURL)
+		mux.HandleFunc(queue.TypeMCPVerification, mcpWorker.HandleMCPVerification)
+		go func() {
+			middleware.Log().Info("asynq server starting")
+			if err := asynqServer.Run(mux); err != nil {
+				middleware.Log().Info("asynq server stopped", "error", err)
+			}
+		}()
+	} else {
+		runVerificationUC = mcpusecase.NewRunVerificationUsecaseWithDeps(
+			mcpVerificationRepo,
+			mcpAuditRepo,
+			noopMCPEnqueuer{},
+		)
+	}
+
+	mcpVerificationHandler := handler.NewMCPVerificationHandler(
+		runVerificationUC,
+		getLatestVerificationUC,
+		listHistoryVerificationUC,
+		getJobStatusUC,
+		deleteVerificationUC,
+	)
+
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 	rateLimitHandler := handler.NewRateLimitHandler()
 	rootHandler := handler.NewRootHandler()
@@ -547,6 +588,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	v1 := e.Group("/api/v1")
 	compatHandler.RegisterRoutes(v1, authMiddleware)
+	mcpVerificationHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
 
 	workflowJobRepo := infrarepo.NewWorkflowJobRepository(sqlxDB)
@@ -587,6 +629,12 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		}()
 	}
 	return sshServer, nil
+}
+
+type noopMCPEnqueuer struct{}
+
+func (noopMCPEnqueuer) EnqueueMCPVerification(context.Context, queue.MCPVerificationPayload) error {
+	return errors.New("redis not configured")
 }
 
 func corsAllowedOrigins() []string {
