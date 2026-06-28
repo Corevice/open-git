@@ -92,6 +92,7 @@ func main() {
 	e.HTTPErrorHandler = newHTTPErrorHandler()
 
 	e.Use(echoMiddleware.RequestID())
+	e.Use(middleware.SecurityHeadersMiddleware())
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.StructuredRecover())
 	e.Use(echoMiddleware.CORSWithConfig(echoMiddleware.CORSConfig{
@@ -572,8 +573,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	sshKeyHandler := handler.NewSSHKeyHandler(sshKeyRepo)
 
 	api := e.Group("")
-	e.POST("/register", authHandler.Register)
-	e.POST("/login", authHandler.Login)
+	e.POST("/register", authHandler.Register, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
+	e.POST("/login", authHandler.Login, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
 
 	tokens := api.Group("/user/tokens", authMiddleware)
 	tokens.GET("", tokenHandler.List)
@@ -598,7 +599,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	v3 := e.Group("/api/v3")
 	v3.Use(middleware.GitHubCompatHeaders())
-	v3.Use(middleware.RateLimitMiddleware(5000))
+	v3.Use(middleware.RateLimitMiddleware(5000, 60))
 	v3.Use(middleware.GitHubCommonHeadersMiddleware())
 
 	userHandler.RegisterRoutes(v3, authMiddleware)
