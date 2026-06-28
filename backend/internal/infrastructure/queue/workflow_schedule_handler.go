@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
 	"github.com/open-git/backend/internal/domain/entity"
@@ -78,14 +79,23 @@ type domainJobRepoAdapter struct {
 }
 
 func (a *domainJobRepoAdapter) ListByRunID(ctx context.Context, orgID, runID string) ([]*schedulableJob, error) {
-	jobs, err := a.repo.ListByRunID(ctx, orgID, runID)
+	orgUUID, err := uuid.Parse(orgID)
+	if err != nil {
+		return nil, fmt.Errorf("parse org id: %w", err)
+	}
+	runUUID, err := uuid.Parse(runID)
+	if err != nil {
+		return nil, fmt.Errorf("parse run id: %w", err)
+	}
+
+	jobs, err := a.repo.ListByRunID(ctx, orgUUID, runUUID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]*schedulableJob, len(jobs))
 	for i, job := range jobs {
 		out[i] = &schedulableJob{
-			ID:         job.ID,
+			ID:         job.ID.String(),
 			Name:       job.Name,
 			Status:     job.Status,
 			Conclusion: job.Conclusion,

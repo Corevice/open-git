@@ -16,6 +16,7 @@ import (
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
+	"github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/transport"
@@ -73,7 +74,12 @@ func InitBare(path string) error {
 	return err
 }
 
-func repoServer(repoPath string) (*server.Server, *transport.Endpoint, error) {
+type gitTransportServer interface {
+	NewUploadPackSession(ep *transport.Endpoint, cfg interface{}) (transport.UploadPackSession, error)
+	NewReceivePackSession(ep *transport.Endpoint, cfg interface{}) (transport.ReceivePackSession, error)
+}
+
+func repoServer(repoPath string) (gitTransportServer, *transport.Endpoint, error) {
 	abs, err := filepath.Abs(repoPath)
 	if err != nil {
 		return nil, nil, err
@@ -492,7 +498,7 @@ func GetDiff(repoPath, baseRef, headRef string) ([]FileDiff, error) {
 		return nil, err
 	}
 
-	changes, err := object.DiffTree(context.Background(), baseTree, headTree)
+	changes, err := object.DiffTree(baseTree, headTree)
 	if err != nil {
 		return nil, err
 	}
@@ -519,18 +525,18 @@ func GetDiff(repoPath, baseRef, headRef string) ([]FileDiff, error) {
 		var patchContent strings.Builder
 		for _, chunk := range fp.Chunks() {
 			switch chunk.Type() {
-			case object.Add:
+			case diff.Add:
 				if status == "" {
 					status = "add"
 				}
-			case object.Delete:
+			case diff.Delete:
 				status = "delete"
-			case object.Modify:
-				if status != "delete" {
+			default:
+				if chunk.Type() != diff.Equal && status != "delete" {
 					status = "modify"
 				}
 			}
-			if chunk.Type() != object.Equal {
+			if chunk.Type() != diff.Equal {
 				patchContent.WriteString(chunk.Content())
 			}
 		}

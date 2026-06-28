@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -69,6 +70,34 @@ func (m *mockWorkflowJobRepo) Create(context.Context, *entity.WorkflowJob) error
 	return nil
 }
 
+func (m *mockWorkflowJobRepo) GetByID(context.Context, uuid.UUID) (*entity.WorkflowJob, error) {
+	return nil, domain.ErrNotFound
+}
+
+func (m *mockWorkflowJobRepo) AcquireForRunner(context.Context, uuid.UUID, uuid.UUID, int) (bool, error) {
+	return false, nil
+}
+
+func (m *mockWorkflowJobRepo) UpdateStatus(context.Context, uuid.UUID, string, string) error {
+	return nil
+}
+
+func (m *mockWorkflowJobRepo) Complete(context.Context, uuid.UUID, string, time.Time) error {
+	return nil
+}
+
+func (m *mockWorkflowJobRepo) Cancel(context.Context, uuid.UUID) error {
+	return nil
+}
+
+func (m *mockWorkflowJobRepo) CancelInProgressByRunID(context.Context, uuid.UUID, uuid.UUID) error {
+	return nil
+}
+
+func (m *mockWorkflowJobRepo) ListQueued(context.Context, uuid.UUID) ([]*entity.WorkflowJob, error) {
+	return nil, nil
+}
+
 func (m *mockWorkflowJobRepo) CreateBatch(_ context.Context, jobs []*entity.WorkflowJob) error {
 	copied := make([]*entity.WorkflowJob, len(jobs))
 	for i, job := range jobs {
@@ -81,14 +110,6 @@ func (m *mockWorkflowJobRepo) CreateBatch(_ context.Context, jobs []*entity.Work
 
 func (m *mockWorkflowJobRepo) ListByRunID(context.Context, uuid.UUID, uuid.UUID) ([]*entity.WorkflowJob, error) {
 	return nil, nil
-}
-
-func (m *mockWorkflowJobRepo) Update(context.Context, *entity.WorkflowJob) error {
-	return nil
-}
-
-func (m *mockWorkflowJobRepo) CancelInProgressByRunID(context.Context, uuid.UUID, uuid.UUID) error {
-	return nil
 }
 
 func (m *mockWorkflowJobRepo) ResetQueuedByRunID(context.Context, uuid.UUID) error {

@@ -8,11 +8,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
 	"github.com/open-git/backend/internal/domain/entity"
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/infrastructure/runner"
+)
+
+var (
+	testExecOrgID  = uuid.MustParse("00000000-0000-0000-0000-000000000101")
+	testExecRunID  = uuid.MustParse("00000000-0000-0000-0000-000000000102")
+	testExecJobID  = uuid.MustParse("00000000-0000-0000-0000-000000000103")
+	testExecRepoID = uuid.MustParse("00000000-0000-0000-0000-000000000104")
 )
 
 type mockExecJobRepo struct {
@@ -22,14 +30,18 @@ type mockExecJobRepo struct {
 
 func (m *mockExecJobRepo) Create(context.Context, *entity.WorkflowJob) error { return nil }
 
-func (m *mockExecJobRepo) GetByID(_ context.Context, _, jobID string) (*entity.WorkflowJob, error) {
+func (m *mockExecJobRepo) GetByID(_ context.Context, jobID uuid.UUID) (*entity.WorkflowJob, error) {
 	if m.job == nil || m.job.ID != jobID {
 		return nil, errors.New("not found")
 	}
 	return m.job, nil
 }
 
-func (m *mockExecJobRepo) UpdateStatus(_ context.Context, jobID, status, conclusion string, _ *time.Time) error {
+func (m *mockExecJobRepo) AcquireForRunner(context.Context, uuid.UUID, uuid.UUID, int) (bool, error) {
+	return false, nil
+}
+
+func (m *mockExecJobRepo) UpdateStatus(_ context.Context, jobID uuid.UUID, status, conclusion string) error {
 	if m.job != nil && m.job.ID == jobID {
 		m.job.Status = status
 		m.job.Conclusion = conclusion
@@ -38,9 +50,21 @@ func (m *mockExecJobRepo) UpdateStatus(_ context.Context, jobID, status, conclus
 	return nil
 }
 
-func (m *mockExecJobRepo) ListByRunID(context.Context, string, string) ([]*entity.WorkflowJob, error) {
+func (m *mockExecJobRepo) Complete(_ context.Context, jobID uuid.UUID, conclusion string, _ time.Time) error {
+	return m.UpdateStatus(context.Background(), jobID, entity.WorkflowJobStatusCompleted, conclusion)
+}
+
+func (m *mockExecJobRepo) Cancel(context.Context, uuid.UUID) error { return nil }
+
+func (m *mockExecJobRepo) ListQueued(context.Context, uuid.UUID) ([]*entity.WorkflowJob, error) {
 	return nil, nil
 }
+
+func (m *mockExecJobRepo) ListByRunID(context.Context, uuid.UUID, uuid.UUID) ([]*entity.WorkflowJob, error) {
+	return nil, nil
+}
+
+var _ domainrepo.IWorkflowJobRepository = (*mockExecJobRepo)(nil)
 
 type mockExecStepRepo struct {
 	steps []*runner.Step
@@ -125,8 +149,12 @@ func TestJobTimeoutMinutes_UsesReflectionField(t *testing.T) {
 func TestBuildLogCallback_ConcurrentAppendIsSafe(t *testing.T) {
 	logRepo := &mockExecLogRepo{}
 	handler := &WorkflowJobExecHandler{logRepo: logRepo}
-	payload := WorkflowJobExecPayload{OrgID: "org-1", RunID: "run-1", JobID: "job-1"}
-	job := &entity.WorkflowJob{RepositoryID: "repo-1"}
+	payload := WorkflowJobExecPayload{
+		OrgID: testExecOrgID.String(),
+		RunID: testExecRunID.String(),
+		JobID: testExecJobID.String(),
+	}
+	job := &entity.WorkflowJob{RepositoryID: testExecRepoID}
 
 	logFn, logErrFn := handler.buildLogCallback(context.Background(), payload, job)
 
@@ -149,12 +177,13 @@ func TestBuildLogCallback_ConcurrentAppendIsSafe(t *testing.T) {
 }
 
 func TestWorkflowJobExecHandler_RejectsRunMismatch(t *testing.T) {
+	runID := testExecRunID
 	jobRepo := &mockExecJobRepo{
 		job: &entity.WorkflowJob{
-			ID:             "job-1",
-			WorkflowRunID:  "run-1",
-			OrganizationID: "org-1",
-			RepositoryID:   "repo-1",
+			ID:             testExecJobID,
+			WorkflowRunID:  &runID,
+			OrganizationID: testExecOrgID,
+			RepositoryID:   testExecRepoID,
 		},
 	}
 	handler := NewWorkflowJobExecHandlerWithEnqueuer(
@@ -167,9 +196,9 @@ func TestWorkflowJobExecHandler_RejectsRunMismatch(t *testing.T) {
 	)
 
 	task, err := newJobExecTask(WorkflowJobExecPayload{
-		JobID: "job-1",
-		RunID: "run-other",
-		OrgID: "org-1",
+		JobID: testExecJobID.String(),
+		RunID: uuid.New().String(),
+		OrgID: testExecOrgID.String(),
 	})
 	if err != nil {
 		t.Fatalf("newJobExecTask: %v", err)
@@ -182,12 +211,13 @@ func TestWorkflowJobExecHandler_RejectsRunMismatch(t *testing.T) {
 }
 
 func TestWorkflowJobExecHandler_MarksTimedOutJobCompleted(t *testing.T) {
+	runID := testExecRunID
 	jobRepo := &mockExecJobRepo{
 		job: &entity.WorkflowJob{
-			ID:             "job-1",
-			WorkflowRunID:  "run-1",
-			OrganizationID: "org-1",
-			RepositoryID:   "repo-1",
+			ID:             testExecJobID,
+			WorkflowRunID:  &runID,
+			OrganizationID: testExecOrgID,
+			RepositoryID:   testExecRepoID,
 		},
 	}
 	handler := NewWorkflowJobExecHandlerWithEnqueuer(
@@ -200,9 +230,9 @@ func TestWorkflowJobExecHandler_MarksTimedOutJobCompleted(t *testing.T) {
 	)
 
 	task, err := newJobExecTask(WorkflowJobExecPayload{
-		JobID: "job-1",
-		RunID: "run-1",
-		OrgID: "org-1",
+		JobID: testExecJobID.String(),
+		RunID: testExecRunID.String(),
+		OrgID: testExecOrgID.String(),
 	})
 	if err != nil {
 		t.Fatalf("newJobExecTask: %v", err)
