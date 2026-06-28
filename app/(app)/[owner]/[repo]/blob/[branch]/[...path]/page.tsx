@@ -10,33 +10,15 @@ import {
   apiClient,
   decodeBase64Content,
   decodePathSegments,
-  isApiError,
 } from "@/lib/api-client";
 import { useRepoContents } from "@/lib/hooks/useRepoContents";
-
-interface ContentResponse {
-  name: string;
-  path: string;
-  sha: string;
-  size: number;
-  type: "file" | "dir";
-  content?: string | null;
-  encoding?: string;
-  download_url?: string;
-  truncated?: boolean;
-}
+import { RepoPageSkeleton } from "@/app/(app)/[owner]/[repo]/tree/[...path]/page";
 
 interface BranchItem {
   name: string;
 }
 
-function Skeleton({ className }: { className?: string }) {
-  return (
-    <div className={`animate-pulse rounded bg-[#eaeef2] ${className ?? ""}`} />
-  );
-}
-
-function isBinaryContent(data: ContentResponse): boolean {
+function isBinaryContent(data: { content?: string | null }): boolean {
   return data.content == null;
 }
 
@@ -52,12 +34,12 @@ export default function BlobPage({
   const [currentRef, setCurrentRef] = useState(initialBranch);
   const [branches, setBranches] = useState<BranchItem[]>([{ name: initialBranch }]);
 
-  const { data: contentData, isLoading } = useRepoContents(
-    owner,
-    repo,
-    decodedPath,
-    currentRef,
-  );
+  const {
+    data: contentData,
+    isLoading,
+    error,
+    isNotFound,
+  } = useRepoContents(owner, repo, decodedPath, currentRef);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,10 +49,10 @@ export default function BlobPage({
         const branchesRaw = await apiClient.getBranches<BranchItem[]>(owner, repo);
         if (cancelled) return;
         setBranches(
-          branchesRaw.length > 0 ? branchesRaw : [{ name: currentRef }],
+          branchesRaw.length > 0 ? branchesRaw : [{ name: initialBranch }],
         );
       } catch {
-        if (!cancelled) setBranches([{ name: currentRef }]);
+        if (!cancelled) setBranches([{ name: initialBranch }]);
       }
     }
 
@@ -79,7 +61,7 @@ export default function BlobPage({
     return () => {
       cancelled = true;
     };
-  }, [owner, repo, currentRef]);
+  }, [owner, repo, initialBranch]);
 
   if (isLoading) {
     return (
@@ -100,20 +82,21 @@ export default function BlobPage({
 
         <div className="max-w-[1280px] mx-auto px-6 py-6">
           <div className="bg-white border border-[#d0d7de] rounded-lg overflow-hidden p-4 space-y-3">
-            <Skeleton className="h-5 w-full" />
-            <Skeleton className="h-5 w-full" />
-            <Skeleton className="h-5 w-full" />
+            <RepoPageSkeleton className="h-5 w-full" />
+            <RepoPageSkeleton className="h-5 w-full" />
+            <RepoPageSkeleton className="h-5 w-full" />
           </div>
         </div>
       </div>
     );
   }
 
-  if (!contentData) notFound();
+  if (isNotFound) notFound();
+  if (error) throw error;
+  if (!contentData || Array.isArray(contentData)) notFound();
+  if (contentData.type !== "file") notFound();
 
-  const fileData = contentData as ContentResponse;
-  if (fileData.type !== "file") notFound();
-
+  const fileData = contentData;
   const downloadUrl = fileData.download_url ?? "";
   const pathParts = decodedPath.split("/");
   const binary = isBinaryContent(fileData);

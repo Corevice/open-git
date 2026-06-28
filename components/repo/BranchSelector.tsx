@@ -12,23 +12,16 @@ import {
 interface Props {
   branches: { name: string }[];
   currentBranch: string;
-  onChange?: (branch: string) => void;
-  onRefChange?: (ref: string) => void;
+  onChange: (branch: string) => void;
 }
 
 export default function BranchSelector({
   branches,
   currentBranch,
   onChange,
-  onRefChange,
 }: Props) {
-  const handleChange = (ref: string) => {
-    onRefChange?.(ref);
-    onChange?.(ref);
-  };
-
   return (
-    <Select value={currentBranch} onValueChange={handleChange}>
+    <Select value={currentBranch} onValueChange={onChange}>
       <SelectTrigger className="w-[180px]">
         <SelectValue placeholder="Select branch" />
       </SelectTrigger>
@@ -59,16 +52,20 @@ export function RepoRefSelector({
   const router = useRouter();
   const allowed = branchNamesSet(branches);
 
+  const handleChange = (name: string) => {
+    if (!allowed.has(name)) return;
+    if (onRefChange) {
+      onRefChange(name);
+      return;
+    }
+    router.push(`?ref=${encodeURIComponent(name)}`);
+  };
+
   return (
     <BranchSelector
       branches={branches}
       currentBranch={currentBranch}
-      onRefChange={onRefChange}
-      onChange={(name) => {
-        if (!allowed.has(name)) return;
-        if (onRefChange) return;
-        router.push(`?ref=${encodeURIComponent(name)}`);
-      }}
+      onChange={handleChange}
     />
   );
 }
@@ -91,24 +88,28 @@ export function TreeBranchSelector({
   const router = useRouter();
   const allowed = branchNamesSet(branches);
 
+  const handleChange = (name: string) => {
+    if (!allowed.has(name)) return;
+    if (onRefChange) {
+      onRefChange(name);
+      return;
+    }
+    if (currentPath) {
+      const encodedPath = currentPath
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/");
+      router.push(`/${owner}/${repo}/tree/${encodeURIComponent(name)}/${encodedPath}`);
+      return;
+    }
+    router.push(`/${owner}/${repo}/tree/${encodeURIComponent(name)}`);
+  };
+
   return (
     <BranchSelector
       branches={branches}
       currentBranch={currentBranch}
-      onRefChange={onRefChange}
-      onChange={(name) => {
-        if (!allowed.has(name)) return;
-        if (onRefChange) return;
-        if (currentPath) {
-          const encodedPath = currentPath
-            .split("/")
-            .map(encodeURIComponent)
-            .join("/");
-          router.push(`/${owner}/${repo}/tree/${encodeURIComponent(name)}/${encodedPath}`);
-          return;
-        }
-        router.push(`/${owner}/${repo}/tree/${encodeURIComponent(name)}`);
-      }}
+      onChange={handleChange}
     />
   );
 }
