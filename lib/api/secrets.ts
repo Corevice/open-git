@@ -1,3 +1,4 @@
+import sodium from "libsodium-wrappers";
 import { API_TOKEN_KEY, ApiError } from "../api";
 import { env } from "../env";
 
@@ -24,15 +25,12 @@ export interface SecretValidationError extends ApiError {
 
 type HttpMethod = "GET" | "PUT" | "DELETE";
 
-interface ListSecretsResponse {
+interface PaginatedSecretsResponse<T> {
   total_count: number;
-  secrets: ActionSecret[];
+  secrets: T[];
 }
 
-interface ListOrgSecretsResponse {
-  total_count: number;
-  secrets: OrgActionSecret[];
-}
+const SECRETS_PAGE_SIZE = 100;
 
 function resolveBaseUrl(): string {
   return env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, "");
@@ -52,6 +50,37 @@ function buildHeaders(): Record<string, string> {
   }
 
   return headers;
+}
+
+function validatePathSegment(value: string, label: string): void {
+  if (
+    !value ||
+    value.includes("/") ||
+    value.includes("\\") ||
+    value === "." ||
+    value === ".."
+  ) {
+    throw new ApiError(400, `Invalid ${label}`);
+  }
+}
+
+function repoSecretsPath(owner: string, repo: string, name?: string): string {
+  validatePathSegment(owner, "owner");
+  validatePathSegment(repo, "repo");
+  if (name !== undefined) {
+    validatePathSegment(name, "secret name");
+  }
+  const base = `/api/v3/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/secrets`;
+  return name !== undefined ? `${base}/${encodeURIComponent(name)}` : base;
+}
+
+function orgSecretsPath(owner: string, name?: string): string {
+  validatePathSegment(owner, "owner");
+  if (name !== undefined) {
+    validatePathSegment(name, "secret name");
+  }
+  const base = `/api/v3/orgs/${encodeURIComponent(owner)}/actions/secrets`;
+  return name !== undefined ? `${base}/${encodeURIComponent(name)}` : base;
 }
 
 function parseFieldErrors(
@@ -118,18 +147,30 @@ async function request<T>(
   return response.json() as Promise<T>;
 }
 
-function encodeSecretName(name: string): string {
-  return encodeURIComponent(name);
+async function fetchAllSecrets<T>(basePath: string): Promise<T[]> {
+  let page = 1;
+  const secrets: T[] = [];
+  let totalCount = 0;
+
+  do {
+    const separator = basePath.includes("?") ? "&" : "?";
+    const data = await request<PaginatedSecretsResponse<T>>(
+      "GET",
+      `${basePath}${separator}per_page=${SECRETS_PAGE_SIZE}&page=${page}`,
+    );
+    secrets.push(...data.secrets);
+    totalCount = data.total_count;
+    page += 1;
+  } while (secrets.length < totalCount);
+
+  return secrets;
 }
 
 export function listRepoSecrets(
   owner: string,
   repo: string,
 ): Promise<ActionSecret[]> {
-  return request<ListSecretsResponse>(
-    "GET",
-    `/api/v3/repos/${owner}/${repo}/actions/secrets`,
-  ).then((data) => data.secrets);
+  return fetchAllSecrets<ActionSecret>(repoSecretsPath(owner, repo));
 }
 
 export function getRepoPublicKey(
@@ -138,7 +179,7 @@ export function getRepoPublicKey(
 ): Promise<PublicKey> {
   return request<PublicKey>(
     "GET",
-    `/api/v3/repos/${owner}/${repo}/actions/secrets/public-key`,
+    `${repoSecretsPath(owner, repo)}/public-key`,
   );
 }
 
@@ -149,11 +190,10 @@ export function upsertRepoSecret(
   encrypted_value: string,
   key_id: string,
 ): Promise<void> {
-  return request<void>(
-    "PUT",
-    `/api/v3/repos/${owner}/${repo}/actions/secrets/${encodeSecretName(name)}`,
-    { encrypted_value, key_id },
-  );
+  return request<void>("PUT", repoSecretsPath(owner, repo, name), {
+    encrypted_value,
+    key_id,
+  });
 }
 
 export function deleteRepoSecret(
@@ -161,75 +201,60 @@ export function deleteRepoSecret(
   repo: string,
   name: string,
 ): Promise<void> {
-  return request<void>(
-    "DELETE",
-    `/api/v3/repos/${owner}/${repo}/actions/secrets/${encodeSecretName(name)}`,
-  );
+  return request<void>("DELETE", repoSecretsPath(owner, repo, name));
 }
 
-export function listOrgSecrets(org: string): Promise<OrgActionSecret[]> {
-  return request<ListOrgSecretsResponse>(
-    "GET",
-    `/api/v3/orgs/${org}/actions/secrets`,
-  ).then((data) => data.secrets);
+export function listOrgSecrets(owner: string): Promise<OrgActionSecret[]> {
+  return fetchAllSecrets<OrgActionSecret>(orgSecretsPath(owner));
 }
 
-export function getOrgPublicKey(org: string): Promise<PublicKey> {
-  return request<PublicKey>(
-    "GET",
-    `/api/v3/orgs/${org}/actions/secrets/public-key`,
-  );
+export function getOrgPublicKey(owner: string): Promise<PublicKey> {
+  return request<PublicKey>("GET", `${orgSecretsPath(owner)}/public-key`);
 }
 
 export function upsertOrgSecret(
-  org: string,
+  owner: string,
   name: string,
-  encrypted_value: string,
-  key_id: string,
+  encrypted_value: string | undefined,
+  key_id: string | undefined,
   visibility: SecretVisibility,
   selected_repository_ids?: number[],
 ): Promise<void> {
   const payload: {
-    encrypted_value: string;
-    key_id: string;
     visibility: SecretVisibility;
+    encrypted_value?: string;
+    key_id?: string;
     selected_repository_ids?: number[];
-  } = {
-    encrypted_value,
-    key_id,
-    visibility,
-  };
+  } = { visibility };
+
+  if (encrypted_value !== undefined && key_id !== undefined) {
+    payload.encrypted_value = encrypted_value;
+    payload.key_id = key_id;
+  }
 
   if (selected_repository_ids !== undefined) {
     payload.selected_repository_ids = selected_repository_ids;
   }
 
-  return request<void>(
-    "PUT",
-    `/api/v3/orgs/${org}/actions/secrets/${encodeSecretName(name)}`,
-    payload,
-  );
+  return request<void>("PUT", orgSecretsPath(owner, name), payload);
 }
 
-export function deleteOrgSecret(org: string, name: string): Promise<void> {
-  return request<void>(
-    "DELETE",
-    `/api/v3/orgs/${org}/actions/secrets/${encodeSecretName(name)}`,
-  );
+export function deleteOrgSecret(owner: string, name: string): Promise<void> {
+  return request<void>("DELETE", orgSecretsPath(owner, name));
 }
 
 export async function sealSecret(
   value: string,
   publicKey: PublicKey,
 ): Promise<{ encrypted_value: string; key_id: string }> {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]!);
-  }
+  await sodium.ready;
+  const base64Variant = sodium.base64_variants.ORIGINAL;
+  const publicKeyBytes = sodium.from_base64(publicKey.key, base64Variant);
+  const valueBytes = sodium.from_string(value);
+  const sealed = sodium.crypto_box_seal(valueBytes, publicKeyBytes);
 
   return {
-    encrypted_value: btoa(binary),
+    encrypted_value: sodium.to_base64(sealed, base64Variant),
     key_id: publicKey.key_id,
   };
 }

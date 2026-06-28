@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { FormEvent, use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +36,10 @@ function visibilityLabel(visibility: SecretVisibility): string {
   }
 }
 
+function isSecretVisibility(value: string): value is SecretVisibility {
+  return value === "all" || value === "private" || value === "selected";
+}
+
 function VisibilityBadge({ visibility }: { visibility: SecretVisibility }) {
   const variant =
     visibility === "all"
@@ -54,6 +58,7 @@ export default function OrganizationSecretsPage({
 }) {
   const { owner } = use(params);
   const router = useRouter();
+  const loadIdRef = useRef(0);
 
   const [secrets, setSecrets] = useState<OrgActionSecret[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,24 +77,43 @@ export default function OrganizationSecretsPage({
   const [formVisibility, setFormVisibility] =
     useState<SecretVisibility>("all");
 
+  const redirectOnUnauthorized = useCallback(
+    (err: unknown): boolean => {
+      if (err instanceof ApiError && err.status === 401) {
+        router.push("/login");
+        return true;
+      }
+      return false;
+    },
+    [router],
+  );
+
   const loadSecrets = useCallback(async () => {
+    const loadId = ++loadIdRef.current;
     setLoading(true);
     setError(null);
     try {
       const data = await listOrgSecrets(owner);
+      if (loadId !== loadIdRef.current) {
+        return;
+      }
       setSecrets(data);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        router.push("/login");
+      if (redirectOnUnauthorized(err)) {
+        return;
+      }
+      if (loadId !== loadIdRef.current) {
         return;
       }
       setError(
         err instanceof Error ? err.message : "Failed to load organization secrets.",
       );
     } finally {
-      setLoading(false);
+      if (loadId === loadIdRef.current) {
+        setLoading(false);
+      }
     }
-  }, [owner, router]);
+  }, [owner, redirectOnUnauthorized]);
 
   useEffect(() => {
     void loadSecrets();
@@ -127,13 +151,26 @@ export default function OrganizationSecretsPage({
     setFormError(null);
     setFieldErrors({});
     try {
+      const trimmedValue = value.trim();
       const publicKey = await getOrgPublicKey(owner);
-      const { encrypted_value, key_id } = await sealSecret(value, publicKey);
-      await upsertOrgSecret(owner, name, encrypted_value, key_id, visibility);
+      const { encrypted_value, key_id } = await sealSecret(
+        trimmedValue,
+        publicKey,
+      );
+      await upsertOrgSecret(
+        owner,
+        name,
+        encrypted_value,
+        key_id,
+        visibility,
+      );
       setShowCreateForm(false);
       resetFormState();
       await loadSecrets();
     } catch (err) {
+      if (redirectOnUnauthorized(err)) {
+        return;
+      }
       if (isSecretValidationError(err)) {
         setFieldErrors(err.fieldErrors);
         setFormError(err.message);
@@ -156,13 +193,36 @@ export default function OrganizationSecretsPage({
     setFormError(null);
     setFieldErrors({});
     try {
-      const publicKey = await getOrgPublicKey(owner);
-      const { encrypted_value, key_id } = await sealSecret(value, publicKey);
-      await upsertOrgSecret(owner, name, encrypted_value, key_id, visibility);
+      const trimmedValue = value.trim();
+      if (trimmedValue) {
+        const publicKey = await getOrgPublicKey(owner);
+        const { encrypted_value, key_id } = await sealSecret(
+          trimmedValue,
+          publicKey,
+        );
+        await upsertOrgSecret(
+          owner,
+          name,
+          encrypted_value,
+          key_id,
+          visibility,
+        );
+      } else {
+        await upsertOrgSecret(
+          owner,
+          name,
+          undefined,
+          undefined,
+          visibility,
+        );
+      }
       setEditingSecret(null);
       resetFormState();
       await loadSecrets();
     } catch (err) {
+      if (redirectOnUnauthorized(err)) {
+        return;
+      }
       if (isSecretValidationError(err)) {
         setFieldErrors(err.fieldErrors);
         setFormError(err.message);
@@ -184,6 +244,9 @@ export default function OrganizationSecretsPage({
       setSecrets((prev) => prev.filter((secret) => secret.name !== name));
       setDeletingSecret(null);
     } catch (err) {
+      if (redirectOnUnauthorized(err)) {
+        return;
+      }
       setDeleteError(
         err instanceof Error ? err.message : "Failed to delete secret.",
       );
@@ -192,7 +255,7 @@ export default function OrganizationSecretsPage({
     }
   };
 
-  const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (editingSecret !== null) {
       void handleUpdate(formName, formValue, formVisibility);
@@ -262,9 +325,12 @@ export default function OrganizationSecretsPage({
         <select
           id={isUpdate ? "update-secret-visibility" : "create-secret-visibility"}
           value={formVisibility}
-          onChange={(event) =>
-            setFormVisibility(event.target.value as SecretVisibility)
-          }
+          onChange={(event) => {
+            const next = event.target.value;
+            if (isSecretVisibility(next)) {
+              setFormVisibility(next);
+            }
+          }}
           className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
           aria-invalid={fieldErrors.visibility ? true : undefined}
         >
@@ -348,7 +414,7 @@ export default function OrganizationSecretsPage({
           GitHub Actions workflows across repositories in this organization.
         </p>
 
-        {showCreateForm && (
+        {showCreateForm && editingSecret === null && (
           <div className="mb-6 rounded-md border border-[#d0d7de] bg-white p-6">
             <h2 className="mb-4 text-lg font-semibold">
               New organization secret
@@ -426,7 +492,7 @@ export default function OrganizationSecretsPage({
           </div>
         )}
 
-        {editingSecret !== null && (
+        {editingSecret !== null && !showCreateForm && (
           <div className="mt-6 rounded-md border border-[#d0d7de] bg-white p-6">
             <h2 className="mb-4 text-lg font-semibold">
               Update secret: {editingSecret}
