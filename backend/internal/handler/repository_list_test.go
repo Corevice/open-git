@@ -252,7 +252,7 @@ func TestListUserReposOK(t *testing.T) {
 	}
 }
 
-func TestListUserReposInvalidPerPage(t *testing.T) {
+func TestListUserReposNegativePerPageClampsToOne(t *testing.T) {
 	repos := &listMockRepositoryRepo{
 		byOwner: map[uuid.UUID][]*entity.Repository{
 			listTestUserUUID: makeUserRepos(1),
@@ -264,8 +264,8 @@ func TestListUserReposInvalidPerPage(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
 
