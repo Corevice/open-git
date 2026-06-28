@@ -22,7 +22,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+	echoMiddleware "github.com/labstack/echo/v4/middleware"
 
 	"github.com/open-git/backend/internal/compat"
 	"github.com/open-git/backend/internal/config"
@@ -32,12 +32,12 @@ import (
 	"github.com/open-git/backend/internal/domain/entity"
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/handler"
-	appmiddleware "github.com/open-git/backend/internal/middleware"
 	"github.com/open-git/backend/internal/infrastructure/crypto"
 	infraDB "github.com/open-git/backend/internal/infrastructure/database"
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
+	"github.com/open-git/backend/internal/middleware"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
@@ -47,6 +47,7 @@ import (
 	userUC "github.com/open-git/backend/internal/usecase/user"
 	userpreferencesUC "github.com/open-git/backend/internal/usecase/user_preferences"
 	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
+	"github.com/open-git/backend/internal/infrastructure/queue"
 )
 
 var (
@@ -60,6 +61,7 @@ func main() {
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("invalid config: %v", err)
 	}
+	middleware.InitLogging(os.Getenv("LOG_LEVEL"))
 
 	db, err := infraDB.Connect(cfg)
 	if err != nil {
@@ -70,7 +72,7 @@ func main() {
 	if err := infraDB.Ping(context.Background(), db); err != nil {
 		log.Fatalf("ping database: %v", err)
 	}
-	log.Printf("database connected (%s): %s", cfg.DBType, infraDB.MaskDSN(cfg.DBDSN))
+	middleware.Log().Info("database connected", "db_type", cfg.DBType, "dsn", infraDB.MaskDSN(cfg.DBDSN))
 
 	if cfg.DBAutoMigrate {
 		if err := infraDB.RunMigrations(db, cfg.DBType, "./migrations"); err != nil {
@@ -82,23 +84,16 @@ func main() {
 	e.HideBanner = true
 	e.HTTPErrorHandler = newHTTPErrorHandler()
 
-	e.Use(middleware.RequestID())
-	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
-		Format: `{"time":"${time_rfc3339_nano}","method":"${method}","path":"${path}","status":${status},"latency_ms":"${latency}","request_id":"${id}"}` + "\n",
-	}))
-	e.Use(middleware.RecoverWithConfig(middleware.RecoverConfig{
-		LogErrorFunc: func(c echo.Context, err error, stack []byte) error {
-			c.Logger().Errorf("panic recovered: %v\n%s", err, stack)
-			return nil
-		},
-	}))
-	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+	e.Use(echoMiddleware.RequestID())
+	e.Use(middleware.RequestLogger())
+	e.Use(middleware.StructuredRecover())
+	e.Use(echoMiddleware.CORSWithConfig(echoMiddleware.CORSConfig{
 		AllowOrigins: corsAllowedOrigins(),
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderXRequestID},
 	}))
-	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(20)))
-	e.Use(middleware.TimeoutWithConfig(middleware.TimeoutConfig{Timeout: 30 * time.Second}))
+	e.Use(echoMiddleware.RateLimiter(echoMiddleware.NewRateLimiterMemoryStore(20)))
+	e.Use(echoMiddleware.TimeoutWithConfig(echoMiddleware.TimeoutConfig{Timeout: 30 * time.Second}))
 	e.Use(requestContextMiddleware())
 	if cfg.MetricsEnabled {
 		e.Use(obs.EchoPrometheusMiddleware)
@@ -128,7 +123,7 @@ func main() {
 	defer cancel()
 	if sshServer != nil {
 		if err := sshServer.Close(); err != nil {
-			log.Printf("shutdown ssh server: %v", err)
+			middleware.Log().Info("shutdown ssh server", "error", err)
 		}
 	}
 	if err := e.Shutdown(ctx); err != nil {
@@ -157,7 +152,7 @@ func (r *gitResolver) Resolve(ctx context.Context, ownerLogin, repoName string) 
 	return &handler.ResolvedGitRepository{
 		ID:             repository.ID,
 		OrganizationID: repository.OrganizationID,
-		OwnerID:        appmiddleware.UUIDToInt64(repository.OwnerID),
+		OwnerID:        middleware.UUIDToInt64(repository.OwnerID),
 		Name:           repository.Name,
 		Visibility:     repository.Visibility,
 		DiskPath:       filepath.Join(r.gitRoot, ownerLogin, repoName+".git"),
@@ -173,7 +168,7 @@ type membershipRoleLookup interface {
 }
 
 func (a *gitMembershipAdapter) HasReadAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error) {
-	_, err := a.memberships.GetRole(ctx, organizationID, appmiddleware.Int64ToUUID(userID))
+	_, err := a.memberships.GetRole(ctx, organizationID, middleware.Int64ToUUID(userID))
 	if errors.Is(err, domain.ErrNotFound) {
 		return false, nil
 	}
@@ -184,7 +179,7 @@ func (a *gitMembershipAdapter) HasReadAccess(ctx context.Context, userID int64, 
 }
 
 func (a *gitMembershipAdapter) HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error) {
-	role, err := a.memberships.GetRole(ctx, organizationID, appmiddleware.Int64ToUUID(userID))
+	role, err := a.memberships.GetRole(ctx, organizationID, middleware.Int64ToUUID(userID))
 	if errors.Is(err, domain.ErrNotFound) {
 		return false, nil
 	}
@@ -234,7 +229,7 @@ func (a *legacyUserRepoAdapter) Create(ctx context.Context, user *domain.User) e
 }
 
 func (a *legacyUserRepoAdapter) GetByID(ctx context.Context, id int64) (*domain.User, error) {
-	entityUser, err := a.users.GetByID(ctx, appmiddleware.Int64ToUUID(id))
+	entityUser, err := a.users.GetByID(ctx, middleware.Int64ToUUID(id))
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +261,7 @@ func (r *gitSSHInfraResolver) Resolve(ctx context.Context, ownerLogin, repoName 
 	if err != nil {
 		return "", uuid.Nil, err
 	}
-	return resolved.DiskPath, appmiddleware.Int64ToUUID(resolved.OwnerID), nil
+	return resolved.DiskPath, middleware.Int64ToUUID(resolved.OwnerID), nil
 }
 
 func entityUserToDomain(user *entity.User) *domain.User {
@@ -274,7 +269,7 @@ func entityUserToDomain(user *entity.User) *domain.User {
 		return nil
 	}
 	return &domain.User{
-		ID:           appmiddleware.UUIDToInt64(user.ID),
+		ID:           middleware.UUIDToInt64(user.ID),
 		Login:        user.Login,
 		Email:        user.Email,
 		PasswordHash: user.PasswordHash,
@@ -290,7 +285,7 @@ func domainUserToEntity(user *domain.User) *entity.User {
 		CreatedAt:    user.CreatedAt,
 	}
 	if user.ID != 0 {
-		entityUser.ID = appmiddleware.Int64ToUUID(user.ID)
+		entityUser.ID = middleware.Int64ToUUID(user.ID)
 	}
 	return entityUser
 }
@@ -345,9 +340,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	milestoneRepo := infrarepo.NewMilestoneRepository(sqlxDB)
 	txManager := infraDB.NewDomainTxManager(sqlxDB)
 
-	authMiddleware := appmiddleware.AuthMiddleware(tokenRepo)
-	realGitBasicAuth := appmiddleware.GitBasicAuthMiddleware(tokenRepo)
-	realOptionalGitAuth := appmiddleware.OptionalGitAuth(tokenRepo)
+	authMiddleware := middleware.AuthMiddleware(tokenRepo)
+	realGitBasicAuth := middleware.GitBasicAuthMiddleware(tokenRepo)
+	realOptionalGitAuth := middleware.OptionalGitAuth(tokenRepo)
 
 	repoGitResolver := &gitResolver{repos: repoRepo, gitRoot: cfg.GitDataRoot}
 	membershipAdapter := &gitMembershipAdapter{memberships: membershipRepo}
@@ -405,7 +400,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	resolveRepo := func(c echo.Context, owner, name string) (*entity.Repository, error) {
 		return getRepoUC.Execute(c.Request().Context(), repoUC.GetRepositoryInput{
-			RequestUserID: appmiddleware.UserUUIDFromContext(c),
+			RequestUserID: middleware.UserUUIDFromContext(c),
 			OwnerLogin:    owner,
 			Name:          name,
 		})
@@ -443,7 +438,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	bpUpsertUC := repoUC.NewUpsertBranchProtectionUsecase(bpWriteRepo, auditLogRepo)
 	bpDeleteUC := repoUC.NewDeleteBranchProtectionUsecase(bpWriteRepo, auditLogRepo)
 	checkRepoAdmin := func(c echo.Context, repo *entity.Repository) error {
-		userID := appmiddleware.UserUUIDFromContext(c)
+		userID := middleware.UserUUIDFromContext(c)
 		if repo.OwnerID == userID {
 			return nil
 		}
@@ -524,9 +519,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	e.POST("/:owner/:repo.git/git-receive-pack", gitHTTPHandler.ReceivePack, realGitBasicAuth)
 
 	v3 := e.Group("/api/v3")
-	v3.Use(appmiddleware.GitHubCompatHeaders())
-	v3.Use(appmiddleware.RateLimitMiddleware(5000))
-	v3.Use(appmiddleware.GitHubCommonHeadersMiddleware())
+	v3.Use(middleware.GitHubCompatHeaders())
+	v3.Use(middleware.RateLimitMiddleware(5000))
+	v3.Use(middleware.GitHubCommonHeadersMiddleware())
 
 	userHandler.RegisterRoutes(v3, authMiddleware)
 	userPreferencesHandler.RegisterRoutes(v3, authMiddleware)
@@ -554,6 +549,18 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	compatHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
 
+	workflowJobRepo := infrarepo.NewWorkflowJobRepository(sqlxDB)
+	var jobLogRepo domainrepo.IJobLogRepository
+	var jobLogSub *queue.JobLogSubscriber
+	if cfg.RedisAddr != "" {
+		jobLogSub = queue.NewJobLogSubscriber(cfg.RedisAddr)
+	}
+	actionsLogHandler := handler.NewActionsLogHandler(jobLogRepo, workflowJobRepo, jobLogSub, repoRepo)
+	actionsLogHandler.RegisterRoutes(v1, authMiddleware)
+
+	apiActions := e.Group("/api")
+	actionsLogHandler.RegisterRoutes(apiActions, authMiddleware)
+
 	var sshServer *sshinfra.SSHServer
 	if cfg.SSHEnabled {
 		hostKey, err := loadOrGenerateHostKey(cfg.SSHHostKeyPath)
@@ -573,9 +580,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 			hostKey,
 		)
 		go func() {
-			log.Printf("ssh server listening on %s", sshListenAddr)
+			middleware.Log().Info("ssh server listening", "addr", sshListenAddr)
 			if err := sshServer.Start(sshListenAddr); err != nil && !errors.Is(err, gossh.ErrServerClosed) {
-				log.Printf("ssh server stopped: %v", err)
+				middleware.Log().Info("ssh server stopped", "error", err)
 			}
 		}()
 	}
