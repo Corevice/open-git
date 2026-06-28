@@ -205,7 +205,7 @@ func (h *PullRequestHandler) CreatePullRequest(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
+	actorID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return err
 	}
@@ -216,10 +216,10 @@ func (h *PullRequestHandler) CreatePullRequest(c echo.Context) error {
 	}
 
 	pr, err := h.createPRUC.Execute(c.Request().Context(), prusecase.CreatePRInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		GitPath:        repo.GitPath,
-		ActorID:        actor.UserID,
+		ActorID:        actorID,
 		Title:          req.Title,
 		Body:           req.Body,
 		HeadRef:        req.Head,
@@ -302,7 +302,7 @@ func (h *PullRequestHandler) MergePullRequest(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
+	actorID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return err
 	}
@@ -322,10 +322,10 @@ func (h *PullRequestHandler) MergePullRequest(c echo.Context) error {
 	}
 
 	_, err = h.mergePRUC.Execute(c.Request().Context(), prusecase.MergePRInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		GitPath:        repo.GitPath,
-		ActorID:        actor.UserID,
+		ActorID:        actorID,
 		Number:         number,
 		MergeMethod:    req.MergeMethod,
 	})
@@ -406,7 +406,7 @@ func (h *PullRequestHandler) CreateReview(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
+	actorID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return err
 	}
@@ -438,7 +438,7 @@ func (h *PullRequestHandler) CreateReview(c echo.Context) error {
 	review := &entity.Review{
 		ID:            uuid.New(),
 		PullRequestID: pr.ID,
-		ReviewerID:    actor.UserID,
+		ReviewerID:    actorID,
 		State:         state,
 		Body:          req.Body,
 		CommitSHA:     pr.HeadSHA,
@@ -456,7 +456,7 @@ func (h *PullRequestHandler) CreateReview(c echo.Context) error {
 		rc := &entity.ReviewComment{
 			ID:            uuid.New(),
 			PullRequestID: pr.ID,
-			AuthorID:      actor.UserID,
+			AuthorID:      actorID,
 			ReviewID:      &reviewID,
 			Path:          comment.Path,
 			Body:          comment.Body,
@@ -527,7 +527,7 @@ func (h *PullRequestHandler) CreateReviewComment(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
+	actorID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return err
 	}
@@ -556,7 +556,7 @@ func (h *PullRequestHandler) CreateReviewComment(c echo.Context) error {
 	comment := &entity.ReviewComment{
 		ID:            uuid.New(),
 		PullRequestID: pr.ID,
-		AuthorID:      actor.UserID,
+		AuthorID:      actorID,
 		Path:          req.Path,
 		Body:          req.Body,
 		Line:          req.Line,
