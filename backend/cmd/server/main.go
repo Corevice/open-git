@@ -44,6 +44,7 @@ import (
 	"github.com/open-git/backend/internal/middleware"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
+	docsuc "github.com/open-git/backend/internal/usecase/docs"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
 	mcpusecase "github.com/open-git/backend/internal/usecase/mcp"
 	orgUC "github.com/open-git/backend/internal/usecase/org"
@@ -626,6 +627,12 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3Keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	v1 := e.Group("/api/v1")
+	docsRoot := getenv("DOCS_ROOT", ".")
+	editBaseURL := getenv("DOCS_EDIT_BASE_URL", "")
+	docsTreeUC := docsuc.NewGetDocTreeUsecase(docsRoot)
+	docsSectionUC := docsuc.NewGetDocSectionUsecase(docsTreeUC)
+	docsHandler := handler.NewDocsHandler(docsTreeUC, docsSectionUC, editBaseURL)
+	docsHandler.RegisterRoutes(v1)
 	compatHandler.RegisterRoutes(v1, authMiddleware)
 	mcpVerificationHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
