@@ -18,7 +18,8 @@ func GitHubCommonHeadersMiddleware() echo.MiddlewareFunc {
 				return err
 			}
 
-			if c.Response().Header().Get(echo.HeaderContentType) == "" {
+			contentType := c.Response().Header().Get(echo.HeaderContentType)
+			if contentType == "" || contentType == echo.MIMEApplicationJSON {
 				c.Response().Header().Set(echo.HeaderContentType, defaultContentType)
 			}
 			if c.Response().Header().Get(githubMediaTypeHeader) == "" {
