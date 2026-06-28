@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
+	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/handler"
 	"github.com/open-git/backend/internal/middleware"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
@@ -52,9 +53,12 @@ func (m *tokenAuditMockAuditRepo) Create(_ context.Context, log *entity.AuditLog
 	if m.err != nil {
 		return m.err
 	}
-	m.logs = append(m.logs, log)
+	copied := *log
+	m.logs = append(m.logs, &copied)
 	return nil
 }
+
+var _ domainrepo.IAuditLogRepository = (*tokenAuditMockAuditRepo)(nil)
 
 type tokenAuditMockUserLookup struct {
 	user *entity.User
@@ -118,13 +122,17 @@ func TestTokenCreate_RecordsAudit(t *testing.T) {
 	if auditRepo.logs[0].TargetType != "token" {
 		t.Fatalf("targetType = %q, want token", auditRepo.logs[0].TargetType)
 	}
+	if auditRepo.logs[0].Metadata["actor_login"] != "octocat" {
+		t.Fatalf("actor_login = %v, want octocat", auditRepo.logs[0].Metadata["actor_login"])
+	}
 
 	var resp map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if resp["token"] == "" {
-		t.Fatal("expected token in response")
+	token, ok := resp["token"].(string)
+	if !ok || token == "" {
+		t.Fatalf("expected token in response, got %#v", resp["token"])
 	}
 }
 
