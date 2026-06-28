@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { Menu } from "lucide-react";
 
+import { Footer } from "@/components/layout/Footer";
 import { Header } from "@/components/layout/Header";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AuthProvider } from "@/lib/auth";
@@ -33,6 +34,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           />
           <main className="flex-1">{children}</main>
         </div>
+        <Footer />
       </div>
     </AuthProvider>
   );
