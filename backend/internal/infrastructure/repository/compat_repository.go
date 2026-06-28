@@ -87,8 +87,14 @@ func (r *sqlxCompatRepository) UpdateRun(ctx context.Context, run *entity.Compat
 	return dbErrors.MapDBError(err)
 }
 
+const compatTestRunSelectColumns = `
+	id, suite, status, triggered_by, organization_id,
+	total_endpoints, passing, failing, unimplemented, coverage_rate,
+	started_at, finished_at, created_at
+`
+
 func (r *sqlxCompatRepository) GetRun(ctx context.Context, id uuid.UUID) (*entity.CompatTestRun, error) {
-	const query = `SELECT * FROM compat_test_run WHERE id = ?`
+	const query = `SELECT ` + compatTestRunSelectColumns + ` FROM compat_test_run WHERE id = ?`
 	q := r.DB.Rebind(query)
 
 	run, err := scanCompatTestRun(r.DB.QueryRowxContext(ctx, q, id))
@@ -103,7 +109,8 @@ func (r *sqlxCompatRepository) GetRun(ctx context.Context, id uuid.UUID) (*entit
 
 func (r *sqlxCompatRepository) ListRuns(ctx context.Context, orgID uuid.UUID, limit int) ([]*entity.CompatTestRun, error) {
 	const query = `
-		SELECT * FROM compat_test_run
+		SELECT ` + compatTestRunSelectColumns + `
+		FROM compat_test_run
 		WHERE organization_id = ?
 		ORDER BY started_at DESC
 		LIMIT ?
@@ -197,17 +204,17 @@ type compatTestRunScanner interface {
 
 func scanCompatTestRun(scanner compatTestRunScanner) (*entity.CompatTestRun, error) {
 	var (
-		run         entity.CompatTestRun
-		triggeredBy sql.NullString
-		startedAt   sql.NullTime
-		finishedAt  sql.NullTime
+		run            entity.CompatTestRun
+		triggeredByRaw any
+		startedAt      sql.NullTime
+		finishedAt     sql.NullTime
 	)
 
 	if err := scanner.Scan(
 		&run.ID,
 		&run.Suite,
 		&run.Status,
-		&triggeredBy,
+		&triggeredByRaw,
 		&run.OrganizationID,
 		&run.TotalEndpoints,
 		&run.Passing,
@@ -221,13 +228,11 @@ func scanCompatTestRun(scanner compatTestRunScanner) (*entity.CompatTestRun, err
 		return nil, err
 	}
 
-	if triggeredBy.Valid {
-		id, err := uuid.Parse(triggeredBy.String)
-		if err != nil {
-			return nil, err
-		}
-		run.TriggeredBy = &id
+	triggeredBy, err := parseOptionalUUID(triggeredByRaw)
+	if err != nil {
+		return nil, err
 	}
+	run.TriggeredBy = triggeredBy
 	if startedAt.Valid {
 		run.StartedAt = &startedAt.Time
 	}
@@ -245,8 +250,8 @@ type compatEndpointResultScanner interface {
 func scanCompatEndpointResult(scanner compatEndpointResultScanner) (*entity.CompatEndpointResult, error) {
 	var (
 		result    entity.CompatEndpointResult
-		checksRaw sql.NullString
-		diffRaw   sql.NullString
+		checksRaw any
+		diffRaw   any
 	)
 
 	if err := scanner.Scan(
@@ -261,18 +266,67 @@ func scanCompatEndpointResult(scanner compatEndpointResultScanner) (*entity.Comp
 		return nil, err
 	}
 
-	if checksRaw.Valid && checksRaw.String != "" {
+	checksJSON, err := jsonBytesFromDBValue(checksRaw)
+	if err != nil {
+		return nil, err
+	}
+	if len(checksJSON) > 0 {
 		checks := &entity.CompatEndpointChecks{}
-		if err := json.Unmarshal([]byte(checksRaw.String), checks); err != nil {
+		if err := json.Unmarshal(checksJSON, checks); err != nil {
 			return nil, err
 		}
 		result.Checks = checks
 	}
-	if diffRaw.Valid && diffRaw.String != "" {
-		result.Diff = json.RawMessage(diffRaw.String)
+
+	diffJSON, err := jsonBytesFromDBValue(diffRaw)
+	if err != nil {
+		return nil, err
+	}
+	if len(diffJSON) > 0 {
+		result.Diff = json.RawMessage(diffJSON)
 	}
 
 	return &result, nil
+}
+
+func parseOptionalUUID(raw any) (*uuid.UUID, error) {
+	switch value := raw.(type) {
+	case nil:
+		return nil, nil
+	case []byte:
+		if len(value) == 0 {
+			return nil, nil
+		}
+		id, err := uuid.Parse(string(value))
+		if err != nil {
+			return nil, err
+		}
+		return &id, nil
+	case string:
+		if value == "" {
+			return nil, nil
+		}
+		id, err := uuid.Parse(value)
+		if err != nil {
+			return nil, err
+		}
+		return &id, nil
+	default:
+		return nil, errors.New("unsupported uuid column type")
+	}
+}
+
+func jsonBytesFromDBValue(raw any) ([]byte, error) {
+	switch value := raw.(type) {
+	case nil:
+		return nil, nil
+	case []byte:
+		return value, nil
+	case string:
+		return []byte(value), nil
+	default:
+		return nil, errors.New("unsupported json column type")
+	}
 }
 
 func marshalCompatEndpointChecks(checks *entity.CompatEndpointChecks) (any, error) {

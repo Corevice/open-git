@@ -3,6 +3,7 @@ package repository_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,50 @@ import (
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/infrastructure/repository"
 )
+
+func newCompatTestDB(t *testing.T) *sqlx.DB {
+	t.Helper()
+
+	db := openTestDB(t)
+
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS compat_test_run (
+			id TEXT PRIMARY KEY,
+			suite TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'queued',
+			triggered_by TEXT REFERENCES users(id),
+			organization_id TEXT NOT NULL,
+			total_endpoints INTEGER NOT NULL DEFAULT 0,
+			passing INTEGER NOT NULL DEFAULT 0,
+			failing INTEGER NOT NULL DEFAULT 0,
+			unimplemented INTEGER NOT NULL DEFAULT 0,
+			coverage_rate REAL NOT NULL DEFAULT 0,
+			started_at TIMESTAMP,
+			finished_at TIMESTAMP,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("create compat_test_run table: %v", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS compat_endpoint_result (
+			id TEXT PRIMARY KEY,
+			run_id TEXT NOT NULL REFERENCES compat_test_run(id) ON DELETE CASCADE,
+			method TEXT NOT NULL,
+			path TEXT NOT NULL,
+			status TEXT NOT NULL,
+			checks TEXT,
+			diff TEXT
+		)
+	`)
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("create compat_endpoint_result table: %v", err)
+	}
+
+	return db
+}
 
 func TestCompatRepository(t *testing.T) {
 	tests := []struct {
@@ -27,7 +72,7 @@ func TestCompatRepository(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := openTestDB(t)
+			db := newCompatTestDB(t)
 			repo := repository.NewCompatRepository(db)
 			tt.fn(t, repo, db)
 		})
@@ -269,7 +314,7 @@ func testCompatEndpointResultJSONRoundTrip(t *testing.T, repo domainrepo.ICompat
 	if got.Checks == nil {
 		t.Fatal("expected checks, got nil")
 	}
-	if got.Checks.Schema != true || got.Checks.StatusCode != true || got.Checks.Headers != false || got.Checks.Pagination != true {
+	if !got.Checks.Schema || !got.Checks.StatusCode || got.Checks.Headers || !got.Checks.Pagination {
 		t.Fatalf("unexpected checks: %+v", got.Checks)
 	}
 
