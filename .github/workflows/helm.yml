@@ -1,0 +1,31 @@
+name: Helm CI
+
+on:
+  push:
+    paths:
+      - 'helm/**'
+  pull_request:
+    paths:
+      - 'helm/**'
+
+jobs:
+  helm-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: Update chart dependencies
+        run: helm dependency update helm/
+
+      - name: Lint chart
+        run: helm lint helm/ --strict
+
+      - name: Validate templates
+        run: |
+          helm template gitforge helm/ > /tmp/rendered.yaml
+          cat /tmp/rendered.yaml | docker run --rm -i ghcr.io/yannh/kubeconform:latest -strict -ignore-missing-schemas -
+
+      - name: Dry-run install
+        run: helm install gitforge helm/ --dry-run --generate-name --set ingress.host=test.example.com
