@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,16 +49,28 @@ func (r *sqlxSystemSettingRepository) Get(ctx context.Context, key string) (*ent
 		return nil, dbErrors.MapDBError(err)
 	}
 
-	var value map[string]any
+	value := map[string]any{}
 	if len(row.Value) > 0 {
-		if err := json.Unmarshal(row.Value, &value); err != nil {
+		if !json.Valid(row.Value) {
+			return nil, fmt.Errorf("invalid json value for system setting %q", key)
+		}
+		var decoded any
+		if err := json.Unmarshal(row.Value, &decoded); err != nil {
 			return nil, err
 		}
+		obj, ok := decoded.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("system setting value must be a JSON object")
+		}
+		value = obj
 	}
 
-	updatedBy, err := uuid.Parse(row.UpdatedBy)
-	if err != nil {
-		return nil, err
+	updatedBy := uuid.Nil
+	if row.UpdatedBy != "" {
+		parsed, err := uuid.Parse(row.UpdatedBy)
+		if err == nil {
+			updatedBy = parsed
+		}
 	}
 
 	return &entity.SystemSetting{
@@ -74,9 +87,9 @@ func (r *sqlxSystemSettingRepository) Set(ctx context.Context, setting *entity.S
 		return err
 	}
 
-	now := time.Now().UTC()
-	if setting.UpdatedAt.IsZero() {
-		setting.UpdatedAt = now
+	updatedAt := setting.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
 	}
 
 	const query = `
@@ -92,7 +105,7 @@ func (r *sqlxSystemSettingRepository) Set(ctx context.Context, setting *entity.S
 		"key":        setting.Key,
 		"value":      string(valueJSON),
 		"updated_by": setting.UpdatedBy.String(),
-		"updated_at": setting.UpdatedAt,
+		"updated_at": updatedAt,
 	})
 	if err != nil {
 		return dbErrors.MapDBError(err)

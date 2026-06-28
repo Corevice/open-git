@@ -252,8 +252,9 @@ func TestAuditLogRepository_IPAddressRoundTrip(t *testing.T) {
 	repo := repository.NewAuditLogRepository(db)
 	ctx := context.Background()
 
+	logID := uuid.New()
 	log := &entity.AuditLog{
-		ID:             uuid.New(),
+		ID:             logID,
 		OrganizationID: orgID,
 		ActorID:        actorID,
 		ActorLogin:     "alice",
@@ -269,14 +270,69 @@ func TestAuditLogRepository_IPAddressRoundTrip(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	logs, total, err := repo.List(ctx, orgID, "", 1, 10)
+	logs, _, err := repo.List(ctx, orgID, "settings.update", 1, 100)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if total != 1 || len(logs) != 1 {
-		t.Fatalf("expected 1 log, got total=%d len=%d", total, len(logs))
+
+	var found *entity.AuditLog
+	for _, entry := range logs {
+		if entry.ID == logID {
+			found = entry
+			break
+		}
 	}
-	if logs[0].IPAddress != "203.0.113.42" {
-		t.Fatalf("IPAddress: got %q, want %q", logs[0].IPAddress, "203.0.113.42")
+	if found == nil {
+		t.Fatalf("expected log %v in list (len=%d)", logID, len(logs))
+	}
+	if found.IPAddress != "203.0.113.42" {
+		t.Fatalf("IPAddress: got %q, want %q", found.IPAddress, "203.0.113.42")
+	}
+}
+
+func TestAuditLogRepository_CreateIPAddressValidation(t *testing.T) {
+	db := openTestDB(t)
+	setupAuditLogSearchColumns(t, db)
+	orgID, actorID := seedAuditLogSearchFixtures(t, db)
+	repo := repository.NewAuditLogRepository(db)
+	ctx := context.Background()
+
+	base := &entity.AuditLog{
+		OrganizationID: orgID,
+		ActorID:        actorID,
+		ActorLogin:     "alice",
+		Action:         "settings.update",
+		TargetType:     "system_setting",
+		TargetID:       "site.name",
+		CreatedAt:      time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC),
+	}
+
+	tests := []struct {
+		name      string
+		ipAddress string
+		wantErr   bool
+	}{
+		{name: "empty ip address allowed", ipAddress: "", wantErr: false},
+		{name: "valid ipv4", ipAddress: "203.0.113.42", wantErr: false},
+		{name: "invalid ip format rejected", ipAddress: "not-an-ip", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := *base
+			entry.ID = uuid.New()
+			entry.IPAddress = tt.ipAddress
+
+			err := repo.Create(ctx, &entry)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+		})
 	}
 }

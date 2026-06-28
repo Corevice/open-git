@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,18 +73,32 @@ func AuditLogRowToEntity(row AuditLogRow) (*entity.AuditLog, error) {
 	}, nil
 }
 
-func (r *sqlxAuditLogRepository) Create(ctx context.Context, log *entity.AuditLog) error {
-	if log.ID == uuid.Nil {
-		log.ID = uuid.New()
+func validateIPAddress(ip string) error {
+	if ip == "" {
+		return nil
+	}
+	if net.ParseIP(ip) == nil {
+		return fmt.Errorf("invalid ip address: %q", ip)
+	}
+	return nil
+}
+
+func (r *sqlxAuditLogRepository) Create(ctx context.Context, auditLog *entity.AuditLog) error {
+	if auditLog.ID == uuid.Nil {
+		auditLog.ID = uuid.New()
 	}
 	now := time.Now().UTC()
-	if log.CreatedAt.IsZero() {
-		log.CreatedAt = now
+	if auditLog.CreatedAt.IsZero() {
+		auditLog.CreatedAt = now
+	}
+
+	if err := validateIPAddress(auditLog.IPAddress); err != nil {
+		return err
 	}
 
 	metaJSON := []byte("{}")
-	if log.Metadata != nil {
-		encoded, err := json.Marshal(log.Metadata)
+	if auditLog.Metadata != nil {
+		encoded, err := json.Marshal(auditLog.Metadata)
 		if err != nil {
 			return err
 		}
@@ -95,24 +111,24 @@ func (r *sqlxAuditLogRepository) Create(ctx context.Context, log *entity.AuditLo
 	`
 
 	userAgent := ""
-	if log.Metadata != nil {
-		if v, ok := log.Metadata["user_agent"].(string); ok {
+	if auditLog.Metadata != nil {
+		if v, ok := auditLog.Metadata["user_agent"].(string); ok {
 			userAgent = v
 		}
 	}
 
 	_, err := r.db.NamedExecContext(ctx, query, map[string]any{
-		"id":              log.ID,
-		"organization_id": log.OrganizationID,
-		"actor_id":        log.ActorID,
-		"actor_login":     log.ActorLogin,
-		"action":          log.Action,
-		"target_type":     log.TargetType,
-		"target_id":       log.TargetID,
+		"id":              auditLog.ID,
+		"organization_id": auditLog.OrganizationID,
+		"actor_id":        auditLog.ActorID,
+		"actor_login":     auditLog.ActorLogin,
+		"action":          auditLog.Action,
+		"target_type":     auditLog.TargetType,
+		"target_id":       auditLog.TargetID,
 		"metadata":        string(metaJSON),
-		"ip_address":      log.IPAddress,
+		"ip_address":      auditLog.IPAddress,
 		"user_agent":      userAgent,
-		"created_at":      log.CreatedAt,
+		"created_at":      auditLog.CreatedAt,
 	})
 	return err
 }
