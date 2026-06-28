@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 )
@@ -98,12 +99,31 @@ func (r *sqlxIssueRepository) GetByID(ctx context.Context, id uuid.UUID) (*entit
 		&issue.AuthorID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
 	return &issue, nil
+}
+
+func buildIssueFilterWhere(filter domainrepo.ListIssuesFilter) (string, []any) {
+	query := " WHERE repository_id = $1"
+	args := []any{filter.RepositoryID}
+	idx := 2
+
+	if filter.State != "" {
+		query += " AND state = $" + itoa(idx)
+		args = append(args, filter.State)
+		idx++
+	}
+	for _, label := range filter.Labels {
+		query += " AND id IN (SELECT issue_id FROM issue_labels il JOIN labels l ON il.label_id = l.id WHERE l.name = $" + itoa(idx) + ")"
+		args = append(args, label)
+		idx++
+	}
+
+	return query, args
 }
 
 func (r *sqlxIssueRepository) ListByRepo(ctx context.Context, filter domainrepo.ListIssuesFilter) ([]*entity.Issue, int, error) {
@@ -117,50 +137,19 @@ func (r *sqlxIssueRepository) ListByRepo(ctx context.Context, filter domainrepo.
 	}
 	offset := (page - 1) * perPage
 
-	countQuery := `
-		SELECT COUNT(*)
-		FROM issues
-		WHERE repository_id = $1
-	`
-	countArgs := []any{filter.RepositoryID}
-	countIdx := 2
+	whereClause, whereArgs := buildIssueFilterWhere(filter)
 
-	listQuery := `
-		SELECT id, organization_id, repository_id, number, title, body, state, author_id
-		FROM issues
-		WHERE repository_id = $1
-	`
-	listArgs := []any{filter.RepositoryID}
-	listIdx := 2
-
-	if filter.State != "" {
-		countQuery += " AND state = $" + itoa(countIdx)
-		countArgs = append(countArgs, filter.State)
-		countIdx++
-
-		listQuery += " AND state = $" + itoa(listIdx)
-		listArgs = append(listArgs, filter.State)
-		listIdx++
-	}
-	if len(filter.Labels) > 0 {
-		labelClause := " AND id IN (SELECT issue_id FROM issue_labels il JOIN labels l ON il.label_id = l.id WHERE l.name = $" + itoa(countIdx) + ")"
-		countQuery += labelClause
-		countArgs = append(countArgs, filter.Labels[0])
-		countIdx++
-
-		labelClause = " AND id IN (SELECT issue_id FROM issue_labels il JOIN labels l ON il.label_id = l.id WHERE l.name = $" + itoa(listIdx) + ")"
-		listQuery += labelClause
-		listArgs = append(listArgs, filter.Labels[0])
-		listIdx++
-	}
-
+	countQuery := "SELECT COUNT(*) FROM issues" + whereClause
 	var total int
-	if err := r.DB.QueryRowxContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+	if err := r.DB.QueryRowxContext(ctx, countQuery, whereArgs...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
-	listQuery += " ORDER BY number DESC LIMIT $" + itoa(listIdx) + " OFFSET $" + itoa(listIdx+1)
-	listArgs = append(listArgs, perPage, offset)
+	listIdx := len(whereArgs) + 1
+	listQuery := `
+		SELECT id, organization_id, repository_id, number, title, body, state, author_id
+		FROM issues` + whereClause + " ORDER BY number DESC LIMIT $" + itoa(listIdx) + " OFFSET $" + itoa(listIdx+1)
+	listArgs := append(whereArgs, perPage, offset)
 
 	rows, err := r.DB.QueryxContext(ctx, listQuery, listArgs...)
 	if err != nil {
@@ -214,26 +203,11 @@ func (r *sqlxIssueRepository) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *sqlxIssueRepository) Count(ctx context.Context, filter domainrepo.ListIssuesFilter) (int, error) {
-	query := `
-		SELECT COUNT(*)
-		FROM issues
-		WHERE repository_id = $1
-	`
-	args := []any{filter.RepositoryID}
-	idx := 2
-
-	if filter.State != "" {
-		query += " AND state = $" + itoa(idx)
-		args = append(args, filter.State)
-		idx++
-	}
-	if len(filter.Labels) > 0 {
-		query += " AND id IN (SELECT issue_id FROM issue_labels il JOIN labels l ON il.label_id = l.id WHERE l.name = $" + itoa(idx) + ")"
-		args = append(args, filter.Labels[0])
-	}
+	whereClause, whereArgs := buildIssueFilterWhere(filter)
+	query := "SELECT COUNT(*) FROM issues" + whereClause
 
 	var total int
-	if err := r.DB.QueryRowxContext(ctx, query, args...).Scan(&total); err != nil {
+	if err := r.DB.QueryRowxContext(ctx, query, whereArgs...).Scan(&total); err != nil {
 		return 0, err
 	}
 	return total, nil

@@ -22,8 +22,37 @@ func (m *mockCommentRepo) Create(_ context.Context, comment *entity.Comment) err
 	return nil
 }
 
-func (m *mockCommentRepo) ListByIssue(_ context.Context, _ uuid.UUID) ([]*entity.Comment, error) {
-	return m.comments, nil
+func (m *mockCommentRepo) GetByID(_ context.Context, id uuid.UUID) (*entity.Comment, error) {
+	for _, comment := range m.comments {
+		if comment.ID == id {
+			return comment, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockCommentRepo) ListByIssue(_ context.Context, _ uuid.UUID, _, _ int) ([]*entity.Comment, int, error) {
+	return m.comments, len(m.comments), nil
+}
+
+func (m *mockCommentRepo) Update(_ context.Context, comment *entity.Comment) error {
+	for i, existing := range m.comments {
+		if existing.ID == comment.ID {
+			m.comments[i] = comment
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *mockCommentRepo) Delete(_ context.Context, id uuid.UUID) error {
+	for i, comment := range m.comments {
+		if comment.ID == id {
+			m.comments = append(m.comments[:i], m.comments[i+1:]...)
+			return nil
+		}
+	}
+	return nil
 }
 
 type commentIssueRepo struct {

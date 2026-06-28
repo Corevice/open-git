@@ -1,6 +1,10 @@
 package entity
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type WorkflowRun struct {
 	ID             uuid.UUID
@@ -10,4 +14,6 @@ type WorkflowRun struct {
 	Status         string
 	Conclusion     string
 	HeadSHA        string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
