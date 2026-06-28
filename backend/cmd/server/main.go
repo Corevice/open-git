@@ -58,6 +58,9 @@ func main() {
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("invalid config: %v", err)
 	}
+	if cfg.MetricsEnabled && strings.TrimSpace(cfg.MetricsAuthToken) == "" {
+		log.Fatalf("METRICS_AUTH_TOKEN is required when METRICS_ENABLED is true")
+	}
 
 	db, err := infraDB.Connect(cfg)
 	if err != nil {
@@ -78,12 +81,10 @@ func main() {
 
 	e := echo.New()
 	e.HideBanner = true
-	if cfg.MetricsEnabled {
-		observability.RegisterMetricsRoute(e, cfg.MetricsPath, cfg.MetricsAuthToken)
-	}
 	e.HTTPErrorHandler = newHTTPErrorHandler()
 
 	e.Use(middleware.RequestID())
+	e.Use(requestContextMiddleware())
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
 		Format: `{"time":"${time_rfc3339_nano}","method":"${method}","path":"${path}","status":${status},"latency_ms":"${latency}","request_id":"${id}"}` + "\n",
 	}))
@@ -102,8 +103,8 @@ func main() {
 	e.Use(middleware.TimeoutWithConfig(middleware.TimeoutConfig{Timeout: 30 * time.Second}))
 	if cfg.MetricsEnabled {
 		e.Use(observability.EchoPrometheusMiddleware)
+		observability.RegisterMetricsRoute(e, cfg.MetricsPath, cfg.MetricsAuthToken)
 	}
-	e.Use(requestContextMiddleware())
 
 	e.GET("/healthz", healthzHandler)
 	e.GET("/readyz", readyzHandler(db))

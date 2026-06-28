@@ -63,8 +63,10 @@ func TestEchoPrometheusMiddleware(t *testing.T) {
 }
 
 func TestNewMetricsHandlerRequiresAuthToken(t *testing.T) {
+	observability.InitTestMetrics(t)
+
 	e := echo.New()
-	e.GET("/metrics", observability.NewMetricsHandler(""))
+	e.GET("/metrics", observability.NewMetricsHandler("secret"))
 
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	rec := httptest.NewRecorder()
@@ -72,6 +74,21 @@ func TestNewMetricsHandlerRequiresAuthToken(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestNewMetricsHandlerAllowsAccessWithoutToken(t *testing.T) {
+	observability.InitTestMetrics(t)
+
+	e := echo.New()
+	e.GET("/metrics", observability.NewMetricsHandler(""))
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
 
@@ -127,11 +144,12 @@ func TestRegisterMetricsRoute(t *testing.T) {
 func TestObserveGitOperation(t *testing.T) {
 	gatherer := observability.InitTestMetrics(t)
 
-	observability.ObserveGitOperation("clone", "https")
+	observability.ObserveGitOperation("clone", "https", "org-123")
 
 	metric := findMetricSample(t, gatherer, "git_operations_total", map[string]string{
-		"type":     "clone",
-		"protocol": "https",
+		"type":            "clone",
+		"protocol":        "https",
+		"organization_id": "org-123",
 	})
 	if metric == nil {
 		t.Fatal("expected git_operations_total sample")
@@ -144,10 +162,11 @@ func TestObserveGitOperation(t *testing.T) {
 func TestObserveWorkflowRun(t *testing.T) {
 	gatherer := observability.InitTestMetrics(t)
 
-	observability.ObserveWorkflowRun("success")
+	observability.ObserveWorkflowRun("success", "org-456")
 
 	metric := findMetricSample(t, gatherer, "workflow_runs_total", map[string]string{
-		"status": "success",
+		"status":          "success",
+		"organization_id": "org-456",
 	})
 	if metric == nil {
 		t.Fatal("expected workflow_runs_total sample")
