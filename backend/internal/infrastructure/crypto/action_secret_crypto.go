@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/hkdf"
-	"golang.org/x/crypto/nacl/secretbox"
+	"golang.org/x/crypto/nacl/box"
 )
 
 const (
@@ -73,21 +73,7 @@ func (e *ActionSecretEncryptor) KeyID() string {
 }
 
 func (e *ActionSecretEncryptor) DecryptSealedBox(ciphertext []byte) ([]byte, error) {
-	if len(ciphertext) < 32+secretbox.Overhead {
-		return nil, errors.New("ciphertext too short")
-	}
-
-	var ephemeralPublicKey [32]byte
-	copy(ephemeralPublicKey[:], ciphertext[:32])
-
-	var sharedSecret [32]byte
-	curve25519.ScalarMult(&sharedSecret, &e.privateKey, &ephemeralPublicKey)
-
-	var nonce [24]byte
-	copy(nonce[:], sharedSecret[:])
-	nonce[23] ^= 1
-
-	plaintext, ok := secretbox.Open(nil, ciphertext[32:], &nonce, &sharedSecret)
+	plaintext, ok := box.OpenAnonymous(nil, ciphertext, &e.publicKey, &e.privateKey)
 	if !ok {
 		return nil, errors.New("failed to decrypt sealed box")
 	}
