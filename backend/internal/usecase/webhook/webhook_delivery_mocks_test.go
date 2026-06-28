@@ -49,17 +49,17 @@ func (m *mockWebhookDeliveryRepo) UpdateStatus(context.Context, uuid.UUID, strin
 
 var _ domainrepo.IWebhookDeliveryRepository = (*mockWebhookDeliveryRepo)(nil)
 
-type mockWebhookRepo struct {
+type mockDeliveryWebhookRepo struct {
 	webhook *entity.Webhook
 }
 
-func newMockWebhookRepo(webhook *entity.Webhook) *mockWebhookRepo {
-	return &mockWebhookRepo{webhook: webhook}
+func newMockDeliveryWebhookRepo(webhook *entity.Webhook) *mockDeliveryWebhookRepo {
+	return &mockDeliveryWebhookRepo{webhook: webhook}
 }
 
-func (m *mockWebhookRepo) Create(context.Context, *entity.Webhook) error { return nil }
+func (m *mockDeliveryWebhookRepo) Create(context.Context, *entity.Webhook) error { return nil }
 
-func (m *mockWebhookRepo) GetByID(_ context.Context, id, orgID uuid.UUID) (*entity.Webhook, error) {
+func (m *mockDeliveryWebhookRepo) GetByID(_ context.Context, id, orgID uuid.UUID) (*entity.Webhook, error) {
 	if m.webhook == nil || m.webhook.ID != id || m.webhook.OrganizationID != orgID {
 		return nil, apperror.ErrNotFound
 	}
@@ -67,23 +67,23 @@ func (m *mockWebhookRepo) GetByID(_ context.Context, id, orgID uuid.UUID) (*enti
 	return &copyHook, nil
 }
 
-func (m *mockWebhookRepo) ListByRepo(context.Context, uuid.UUID, uuid.UUID, int, int) ([]*entity.Webhook, int64, error) {
+func (m *mockDeliveryWebhookRepo) ListByRepo(context.Context, uuid.UUID, uuid.UUID, int, int) ([]*entity.Webhook, int64, error) {
 	return nil, 0, nil
 }
 
-func (m *mockWebhookRepo) ListByOrg(context.Context, uuid.UUID, int, int) ([]*entity.Webhook, int64, error) {
+func (m *mockDeliveryWebhookRepo) ListByOrg(context.Context, uuid.UUID, int, int) ([]*entity.Webhook, int64, error) {
 	return nil, 0, nil
 }
 
-func (m *mockWebhookRepo) Update(context.Context, *entity.Webhook) error { return nil }
+func (m *mockDeliveryWebhookRepo) Update(context.Context, *entity.Webhook) error { return nil }
 
-func (m *mockWebhookRepo) Delete(context.Context, uuid.UUID, uuid.UUID) error { return nil }
+func (m *mockDeliveryWebhookRepo) Delete(context.Context, uuid.UUID, uuid.UUID) error { return nil }
 
-func (m *mockWebhookRepo) ListActiveByRepoAndEvent(context.Context, uuid.UUID, uuid.UUID, string) ([]*entity.Webhook, error) {
+func (m *mockDeliveryWebhookRepo) ListActiveByRepoAndEvent(context.Context, uuid.UUID, uuid.UUID, string) ([]*entity.Webhook, error) {
 	return nil, nil
 }
 
-var _ domainrepo.IWebhookRepository = (*mockWebhookRepo)(nil)
+var _ domainrepo.IWebhookRepository = (*mockDeliveryWebhookRepo)(nil)
 
 type mockWebhookDeliveryEnqueuer struct {
 	payload queue.WebhookDeliveryPayload

@@ -104,6 +104,30 @@ func (r *sqlxAuditLogRepository) Create(ctx context.Context, log *entity.AuditLo
 	return err
 }
 
+func (r *sqlxAuditLogRepository) InsertAuditLog(
+	ctx context.Context,
+	orgID, actorID uuid.UUID,
+	action, targetType string,
+	targetID uuid.UUID,
+	metadata json.RawMessage,
+) error {
+	var meta map[string]any
+	if len(metadata) > 0 {
+		if err := json.Unmarshal(metadata, &meta); err != nil {
+			return err
+		}
+	}
+
+	return r.Create(ctx, &entity.AuditLog{
+		OrganizationID: orgID,
+		ActorID:        actorID,
+		Action:         action,
+		TargetType:     targetType,
+		TargetID:       targetID.String(),
+		Metadata:       meta,
+	})
+}
+
 func (r *sqlxAuditLogRepository) List(ctx context.Context, orgID uuid.UUID, action string, page, perPage int) ([]*entity.AuditLog, int, error) {
 	baseQuery := `
 		SELECT id, organization_id, actor_id, actor_login, action, target_type, target_id, metadata, created_at

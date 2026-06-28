@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -20,6 +21,16 @@ type mockAuditLogRepository struct {
 }
 
 func (m *mockAuditLogRepository) Create(_ context.Context, _ *entity.AuditLog) error {
+	return nil
+}
+
+func (m *mockAuditLogRepository) InsertAuditLog(
+	_ context.Context,
+	_, _ uuid.UUID,
+	_, _ string,
+	_ uuid.UUID,
+	_ json.RawMessage,
+) error {
 	return nil
 }
 
