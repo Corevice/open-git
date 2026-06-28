@@ -129,14 +129,15 @@ func TestParsePackageJSONDependenciesPrecedence(t *testing.T) {
 
 func TestParseRequirementsTxtCases(t *testing.T) {
 	tests := []struct {
-		name    string
-		content string
-		want    []Dependency
-		absent  []string
+		name     string
+		fixture  string
+		content  string
+		want     []Dependency
+		absent   []string
 	}{
 		{
 			name:    "sample file",
-			content: string(readTestdata(t, "sample_requirements.txt")),
+			fixture: "sample_requirements.txt",
 			want: []Dependency{
 				{Name: "django", Version: "4.2.7", Ecosystem: "PyPI"},
 				{Name: "flask", Version: "3.0.0", Ecosystem: "PyPI"},
@@ -194,11 +195,28 @@ func TestParseRequirementsTxtCases(t *testing.T) {
 				{Name: "requests", Version: "2.31.0", Ecosystem: "PyPI"},
 			},
 		},
+		{
+			name:    "URL dependency line preserved",
+			content: "git+https://example.com/org/repo.git@v1.2.3#egg=requests\n",
+			want:    nil,
+		},
+		{
+			name:    "lower bound preferred over compatible release",
+			content: "requests>=2.31.0,~=2.31.0\n",
+			want: []Dependency{
+				{Name: "requests", Version: "2.31.0", Ecosystem: "PyPI"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			deps, err := ParseManifest(ManifestRequirementsTxt, []byte(tt.content))
+			content := tt.content
+			if tt.fixture != "" {
+				content = string(readTestdata(t, tt.fixture))
+			}
+
+			deps, err := ParseManifest(ManifestRequirementsTxt, []byte(content))
 			if err != nil {
 				t.Fatalf("ParseManifest(requirements.txt) returned error: %v", err)
 			}
@@ -262,6 +280,14 @@ func TestParsePackageJSONStripsSemverPrefix(t *testing.T) {
 			content: `{"dependencies": {"lodash": ">=2.0,<3.0"}}`,
 			want:    nil,
 			absent:  []string{"lodash"},
+		},
+		{
+			name:    "prefix only version omitted",
+			content: `{"dependencies": {"lodash": ">=", "express": "4.18.2"}}`,
+			want: []Dependency{
+				{Name: "express", Version: "4.18.2", Ecosystem: "npm"},
+			},
+			absent: []string{"lodash"},
 		},
 	}
 

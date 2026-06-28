@@ -69,9 +69,17 @@ func isValidPackageName(name string) bool {
 		return false
 	}
 	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case r == '-', r == '_', r == '.', r == '@', r == '/':
+		case r == '-', r == '_', r == '.', r == '@':
+		case r == '/':
+			// Slash is only valid in scoped package names (@scope/name).
+			if !strings.HasPrefix(name, "@") {
+				return false
+			}
 		default:
 			return false
 		}
@@ -108,6 +116,8 @@ func parsePackageJSON(content []byte) ([]Dependency, error) {
 		if !isValidPackageName(name) || !isValidVersionString(version) {
 			continue
 		}
+		// Runtime dependencies take precedence: skip dev-only entries when the
+		// same package is already listed under dependencies.
 		if _, exists := seen[name]; !exists {
 			seen[name] = version
 		}
@@ -115,9 +125,13 @@ func parsePackageJSON(content []byte) ([]Dependency, error) {
 
 	deps := make([]Dependency, 0, len(seen))
 	for name, version := range seen {
+		stripped := stripSemverPrefix(version)
+		if stripped == "" {
+			continue
+		}
 		deps = append(deps, Dependency{
 			Name:      name,
-			Version:   stripSemverPrefix(version),
+			Version:   stripped,
 			Ecosystem: "npm",
 		})
 	}
@@ -137,23 +151,18 @@ func stripPEP508Extras(name string) string {
 }
 
 func findRequirementOperator(spec string) (op string, idx int) {
-	for _, candidate := range requirementOperators {
-		if strings.HasPrefix(spec, candidate) {
-			return candidate, 0
-		}
-	}
-
 	bestIdx := -1
 	bestLen := 0
-	for _, candidate := range requirementOperators {
-		i := strings.Index(spec, candidate)
-		if i < 0 {
-			continue
-		}
-		if len(candidate) > bestLen || (len(candidate) == bestLen && (bestIdx < 0 || i < bestIdx)) {
-			op = candidate
-			bestIdx = i
-			bestLen = len(candidate)
+	for i := 0; i < len(spec); i++ {
+		for _, candidate := range requirementOperators {
+			if !strings.HasPrefix(spec[i:], candidate) {
+				continue
+			}
+			if len(candidate) > bestLen || (len(candidate) == bestLen && (bestIdx < 0 || i < bestIdx)) {
+				op = candidate
+				bestIdx = i
+				bestLen = len(candidate)
+			}
 		}
 	}
 	if bestIdx >= 0 {
@@ -168,7 +177,7 @@ func parseRequirementLine(line string) (name, version string, ok bool) {
 		return "", "", false
 	}
 
-	parts := strings.Split(line, ",")
+	parts := splitRequirementSpecifiers(line)
 	var pkgName string
 	var exactVersion string
 	var lowerBound string
@@ -233,15 +242,53 @@ func parseRequirementLine(line string) (name, version string, ok bool) {
 	switch {
 	case exactVersion != "":
 		version = exactVersion
-	case compatibleVersion != "":
-		version = compatibleVersion
 	case lowerBound != "":
 		version = lowerBound
+	case compatibleVersion != "":
+		version = compatibleVersion
 	default:
 		return "", "", false
 	}
 
 	return pkgName, version, true
+}
+
+// splitRequirementSpecifiers splits PEP 440 compound specifiers on commas while
+// preserving commas inside URL-based dependency lines.
+func splitRequirementSpecifiers(line string) []string {
+	if strings.Contains(line, "://") {
+		return []string{line}
+	}
+
+	raw := strings.Split(line, ",")
+	if len(raw) <= 1 {
+		return raw
+	}
+
+	parts := make([]string, 0, len(raw))
+	current := strings.TrimSpace(raw[0])
+	for _, segment := range raw[1:] {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			continue
+		}
+		if _, opIdx := findRequirementOperator(segment); opIdx >= 0 {
+			if current != "" {
+				parts = append(parts, current)
+			}
+			current = segment
+			continue
+		}
+		if current == "" {
+			current = segment
+		} else {
+			current += "," + segment
+		}
+	}
+	if current != "" {
+		parts = append(parts, current)
+	}
+	return parts
 }
 
 // npmVersionPrefixes lists npm semver range prefixes in longest-match-first order.
