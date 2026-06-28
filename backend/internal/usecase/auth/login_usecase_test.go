@@ -15,6 +15,15 @@ type loginMockUserRepo struct {
 	users map[string]*domain.User
 }
 
+func (m *loginMockUserRepo) GetByID(_ context.Context, id int64) (*domain.User, error) {
+	for _, u := range m.users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return nil, errors.New("not found")
+}
+
 func (m *loginMockUserRepo) Create(_ context.Context, _ *domain.User) error {
 	return nil
 }
