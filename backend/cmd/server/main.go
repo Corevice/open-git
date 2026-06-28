@@ -629,13 +629,14 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	var healthMinioClient *minio.Client
 	if cfg.MinioEndpoint != "" {
-		healthMinioClient, err = minio.New(cfg.MinioEndpoint, &minio.Options{
+		client, minioErr := minio.New(cfg.MinioEndpoint, &minio.Options{
 			Creds:  credentials.NewStaticV4(os.Getenv("MINIO_ACCESS_KEY"), os.Getenv("MINIO_SECRET_KEY"), ""),
 			Secure: getenvBool("MINIO_USE_TLS", false),
 		})
-		if err != nil {
-			return nil, fmt.Errorf("init health minio client: %w", err)
+		if minioErr != nil {
+			return nil, fmt.Errorf("init health minio client: %w", minioErr)
 		}
+		healthMinioClient = client
 	}
 
 	var healthRedisClient *redis.Client
