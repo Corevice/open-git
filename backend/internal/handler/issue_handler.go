@@ -229,11 +229,6 @@ func (h *IssueHandler) ListComments(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
-	if err != nil {
-		return err
-	}
-
 	number, err := strconv.Atoi(c.Param("number"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid issue number")
@@ -243,7 +238,7 @@ func (h *IssueHandler) ListComments(c echo.Context) error {
 	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
 
 	output, err := h.listCommentsUC.Execute(c.Request().Context(), issueusecase.ListCommentsInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		IssueNumber:    number,
 		Page:           page,
