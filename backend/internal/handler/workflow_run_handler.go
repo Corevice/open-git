@@ -96,18 +96,13 @@ func (h *WorkflowRunHandler) ListRuns(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
-	if err != nil {
-		return err
-	}
-
 	page, perPage, err := middleware.ParsePaginationParams(c)
 	if err != nil {
 		return err
 	}
 
 	output, err := h.listRunsUC.Execute(c.Request().Context(), workflowusecase.ListRunsInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		Status:         c.QueryParam("status"),
 		Branch:         c.QueryParam("branch"),
@@ -139,18 +134,13 @@ func (h *WorkflowRunHandler) GetRun(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
-	if err != nil {
-		return err
-	}
-
 	runID, err := uuid.Parse(c.Param("run_id"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid run_id")
 	}
 
 	run, err := h.getRunUC.Execute(c.Request().Context(), workflowusecase.GetRunInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		RunID:          runID,
 	})
@@ -173,7 +163,7 @@ func (h *WorkflowRunHandler) CancelRun(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
+	actorID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return err
 	}
@@ -184,10 +174,10 @@ func (h *WorkflowRunHandler) CancelRun(c echo.Context) error {
 	}
 
 	err = h.cancelRunUC.Execute(c.Request().Context(), workflowusecase.CancelRunInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		RunID:          runID,
-		ActorID:        actor.UserID,
+		ActorID:        actorID,
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrConflict) {
@@ -208,7 +198,7 @@ func (h *WorkflowRunHandler) RerunRun(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
+	actorID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return err
 	}
@@ -219,10 +209,10 @@ func (h *WorkflowRunHandler) RerunRun(c echo.Context) error {
 	}
 
 	_, err = h.rerunUC.Execute(c.Request().Context(), workflowusecase.RerunRunInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		RunID:          runID,
-		ActorID:        actor.UserID,
+		ActorID:        actorID,
 	})
 	if err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {
@@ -240,18 +230,13 @@ func (h *WorkflowRunHandler) ListJobs(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
-	if err != nil {
-		return err
-	}
-
 	runID, err := uuid.Parse(c.Param("run_id"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid run_id")
 	}
 
 	jobs, err := h.listJobsUC.Execute(c.Request().Context(), workflowusecase.ListJobsInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		RunID:          runID,
 	})

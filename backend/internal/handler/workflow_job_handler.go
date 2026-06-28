@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
 	workflowusecase "github.com/open-git/backend/internal/usecase/workflow"
 )
@@ -21,6 +22,7 @@ type WorkflowJobHandler struct {
 	listStepsUC *workflowusecase.ListStepsUsecase
 	logRepo     workflowusecase.JobLogRepository
 	jobRepo     workflowusecase.WorkflowJobRepository
+	resolveRepo func(c echo.Context, owner, repo string) (*entity.Repository, error)
 }
 
 func NewWorkflowJobHandler(
@@ -28,12 +30,14 @@ func NewWorkflowJobHandler(
 	listStepsUC *workflowusecase.ListStepsUsecase,
 	logRepo workflowusecase.JobLogRepository,
 	jobRepo workflowusecase.WorkflowJobRepository,
+	resolveRepo func(c echo.Context, owner, repo string) (*entity.Repository, error),
 ) *WorkflowJobHandler {
 	return &WorkflowJobHandler{
 		getJobUC:    getJobUC,
 		listStepsUC: listStepsUC,
 		logRepo:     logRepo,
 		jobRepo:     jobRepo,
+		resolveRepo: resolveRepo,
 	}
 }
 
@@ -57,7 +61,7 @@ type workflowJobDetailResponse struct {
 }
 
 func (h *WorkflowJobHandler) GetJob(c echo.Context) error {
-	actor, err := middleware.GetActor(c)
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
 		return err
 	}
@@ -68,7 +72,7 @@ func (h *WorkflowJobHandler) GetJob(c echo.Context) error {
 	}
 
 	job, err := h.getJobUC.Execute(c.Request().Context(), workflowusecase.GetJobInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		JobID:          jobID,
 	})
 	if err != nil {
@@ -145,12 +149,16 @@ func (h *WorkflowJobHandler) StreamJobLogs(c echo.Context) error {
 }
 
 func (h *WorkflowJobHandler) ensureJobAccess(c echo.Context, jobID uuid.UUID) error {
-	actor, err := middleware.GetActor(c)
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
 		return err
 	}
 
-	job, err := h.jobRepo.GetByID(c.Request().Context(), actor.OrganizationID, jobID)
+	if _, err := middleware.GetUserUUID(c); err != nil {
+		return err
+	}
+
+	job, err := h.jobRepo.GetByID(c.Request().Context(), repo.OrganizationID, jobID)
 	if err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
