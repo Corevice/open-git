@@ -5,11 +5,16 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
 func readTestdata(t *testing.T, name string) []byte {
 	t.Helper()
+
+	if strings.Contains(name, "..") || filepath.IsAbs(name) || strings.ContainsAny(name, `/\`) {
+		t.Fatalf("invalid testdata name: %q", name)
+	}
 
 	content, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {
@@ -65,6 +70,7 @@ func TestParsePackageJSON(t *testing.T) {
 		t.Fatalf("ParseManifest(package.json) returned error: %v", err)
 	}
 
+	// Expected versions reflect stripSemverPrefix output (^ and ~ prefixes removed).
 	want := []Dependency{
 		{Name: "express", Version: "4.18.2", Ecosystem: "npm"},
 		{Name: "jest", Version: "29.7.0", Ecosystem: "npm"},
@@ -125,8 +131,43 @@ func TestParseRequirementsTxtNonStrictSpecifiers(t *testing.T) {
 	}
 
 	assertDepsEqual(t, deps, []Dependency{
-		{Name: "django", Version: "4.2.6", Ecosystem: "PyPI"},
 		{Name: "flask", Version: "3.0.0", Ecosystem: "PyPI"},
+		{Name: "requests", Version: "2.31.0", Ecosystem: "PyPI"},
+	})
+}
+
+func TestParseRequirementsTxtCompoundSpecifiers(t *testing.T) {
+	content := []byte("requests>=2.31.0,<3.0\n")
+	deps, err := ParseManifest(ManifestRequirementsTxt, content)
+	if err != nil {
+		t.Fatalf("ParseManifest(requirements.txt) returned error: %v", err)
+	}
+
+	assertDepsEqual(t, deps, []Dependency{
+		{Name: "requests", Version: "2.31.0", Ecosystem: "PyPI"},
+	})
+}
+
+func TestParseRequirementsTxtCompoundSpecifiersPreferExact(t *testing.T) {
+	content := []byte("requests==2.31.0,>=2.0\n")
+	deps, err := ParseManifest(ManifestRequirementsTxt, content)
+	if err != nil {
+		t.Fatalf("ParseManifest(requirements.txt) returned error: %v", err)
+	}
+
+	assertDepsEqual(t, deps, []Dependency{
+		{Name: "requests", Version: "2.31.0", Ecosystem: "PyPI"},
+	})
+}
+
+func TestParseRequirementsTxtPEP508Extras(t *testing.T) {
+	content := []byte("requests[security]==2.31.0\n")
+	deps, err := ParseManifest(ManifestRequirementsTxt, content)
+	if err != nil {
+		t.Fatalf("ParseManifest(requirements.txt) returned error: %v", err)
+	}
+
+	assertDepsEqual(t, deps, []Dependency{
 		{Name: "requests", Version: "2.31.0", Ecosystem: "PyPI"},
 	})
 }
@@ -181,5 +222,12 @@ func TestParseMalformedPackageJSON(t *testing.T) {
 	_, err := ParseManifest(ManifestPackageJSON, []byte(`{"dependencies":`))
 	if err == nil {
 		t.Fatal("ParseManifest(malformed package.json) expected error, got nil")
+	}
+}
+
+func TestParseMalformedGoMod(t *testing.T) {
+	_, err := ParseManifest(ManifestGoMod, []byte("modul broken\n"))
+	if err == nil {
+		t.Fatal("ParseManifest(malformed go.mod) expected error, got nil")
 	}
 }

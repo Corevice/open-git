@@ -64,6 +64,33 @@ type packageJSON struct {
 	DevDependencies map[string]string `json:"devDependencies"`
 }
 
+func isValidPackageName(name string) bool {
+	if name == "" || strings.ContainsAny(name, " \t\n\r\f") {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.', r == '@', r == '/':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isValidVersionString(version string) bool {
+	if version == "" {
+		return false
+	}
+	for _, r := range version {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 func parsePackageJSON(content []byte) ([]Dependency, error) {
 	var pkg packageJSON
 	if err := json.Unmarshal(content, &pkg); err != nil {
@@ -72,9 +99,15 @@ func parsePackageJSON(content []byte) ([]Dependency, error) {
 
 	seen := make(map[string]string)
 	for name, version := range pkg.Dependencies {
+		if !isValidPackageName(name) || !isValidVersionString(version) {
+			continue
+		}
 		seen[name] = version
 	}
 	for name, version := range pkg.DevDependencies {
+		if !isValidPackageName(name) || !isValidVersionString(version) {
+			continue
+		}
 		if _, exists := seen[name]; !exists {
 			seen[name] = version
 		}
@@ -94,20 +127,104 @@ func parsePackageJSON(content []byte) ([]Dependency, error) {
 // requirementOperators lists PEP 440-style operators in longest-match-first order.
 var requirementOperators = []string{"==", "!=", ">=", "<=", "~=", ">", "<"}
 
-func parseRequirementLine(line string) (name, version string, ok bool) {
-	for _, op := range requirementOperators {
-		idx := strings.Index(line, op)
-		if idx <= 0 {
-			continue
+func stripPEP508Extras(name string) string {
+	if idx := strings.Index(name, "["); idx >= 0 {
+		if end := strings.Index(name[idx:], "]"); end >= 0 {
+			name = name[:idx] + name[idx+end+1:]
 		}
-		name = strings.TrimSpace(line[:idx])
-		version = strings.TrimSpace(line[idx+len(op):])
-		if name == "" || version == "" {
-			continue
-		}
-		return name, version, true
 	}
-	return "", "", false
+	return strings.TrimSpace(name)
+}
+
+func findRequirementOperator(spec string) (op string, idx int) {
+	for _, candidate := range requirementOperators {
+		if i := strings.Index(spec, candidate); i >= 0 {
+			return candidate, i
+		}
+	}
+	return "", -1
+}
+
+func parseRequirementLine(line string) (name, version string, ok bool) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return "", "", false
+	}
+
+	parts := strings.Split(line, ",")
+	var pkgName string
+	var exactVersion string
+	var lowerBound string
+	var compatibleVersion string
+
+	for i, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		op, opIdx := findRequirementOperator(part)
+		if opIdx < 0 {
+			if i == 0 && pkgName == "" {
+				pkgName = stripPEP508Extras(part)
+			}
+			continue
+		}
+
+		var partName string
+		partVersion := strings.TrimSpace(part[opIdx+len(op):])
+		if partVersion == "" {
+			continue
+		}
+
+		if opIdx > 0 {
+			partName = stripPEP508Extras(strings.TrimSpace(part[:opIdx]))
+			if i == 0 {
+				if partName == "" {
+					continue
+				}
+				pkgName = partName
+			}
+		} else if i > 0 {
+			// Continuation segment such as ",<3.0" in "requests>=2.31.0,<3.0".
+		} else {
+			continue
+		}
+
+		switch op {
+		case "==":
+			exactVersion = partVersion
+		case "!=":
+			// Exclusion constraints do not identify an installed version.
+		case ">=", ">":
+			if lowerBound == "" {
+				lowerBound = partVersion
+			}
+		case "~=":
+			if compatibleVersion == "" {
+				compatibleVersion = partVersion
+			}
+		case "<=", "<":
+			// Upper bounds alone do not identify an installed version.
+		}
+	}
+
+	if pkgName == "" {
+		return "", "", false
+	}
+
+	switch {
+	case exactVersion != "":
+		version = exactVersion
+	case compatibleVersion != "":
+		version = compatibleVersion
+	case lowerBound != "":
+		version = lowerBound
+	default:
+		return "", "", false
+	}
+
+	return pkgName, version, true
 }
 
 func stripSemverPrefix(version string) string {
