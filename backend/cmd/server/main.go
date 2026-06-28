@@ -601,6 +601,29 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		exportAuditLogsUC,
 	)
 
+	securityAdvisoryRepo := infrarepo.NewSecurityAdvisoryRepository(sqlxDB)
+	dependabotAlertRepo := infrarepo.NewDependabotAlertRepository(sqlxDB)
+	listAdvisoriesUC := securityUC.NewListAdvisoriesUsecase(securityAdvisoryRepo)
+	getAdvisoryUC := securityUC.NewGetAdvisoryUsecase(securityAdvisoryRepo)
+	updateAdvisoryStateUC := securityUC.NewUpdateAdvisoryStateUsecase(securityAdvisoryRepo)
+	listDependabotAlertsUC := securityUC.NewListDependabotAlertsUsecase(dependabotAlertRepo)
+	updateDependabotAlertUC := securityUC.NewUpdateDependabotAlertUsecase(dependabotAlertRepo)
+	securityAdvisoryHandler := handler.NewSecurityAdvisoryHandler(
+		getOrgUC,
+		membershipRepo,
+		listAdvisoriesUC,
+		getAdvisoryUC,
+		updateAdvisoryStateUC,
+		resolveRepo,
+	)
+	dependabotAlertHandler := handler.NewDependabotAlertHandler(
+		membershipRepo,
+		listDependabotAlertsUC,
+		updateDependabotAlertUC,
+		dependabotAlertRepo,
+		resolveRepo,
+	)
+
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 	rateLimitHandler := handler.NewRateLimitHandler()
 	rootHandler := handler.NewRootHandler()
@@ -652,6 +675,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3.Group("", authMiddleware, middleware.RequireScope("admin:org")).PUT("/orgs/:org/memberships/:username", orgHandler.UpdateMembership)
 	orgHandler.RegisterRoutes(v3, authMiddleware)
 	orgAuditLogHandler.RegisterRoutes(v3, authMiddleware)
+	securityAdvisoryHandler.RegisterRoutes(v3, authMiddleware)
+	dependabotAlertHandler.RegisterRoutes(v3, authMiddleware)
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
 	collaboratorHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
