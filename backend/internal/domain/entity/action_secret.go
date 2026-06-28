@@ -17,6 +17,8 @@ type ActionSecret struct {
 	RepositoryID   uuid.UUID
 	Name           string
 	EncryptedValue string
+	KeyID          string
+	Visibility     string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
