@@ -14,6 +14,7 @@ type AuditLog struct {
 	Action         string
 	TargetType     string
 	TargetID       string
+	IPAddress      string         `db:"ip_address" json:"ip_address"`
 	Metadata       map[string]any
 	CreatedAt      time.Time
 }

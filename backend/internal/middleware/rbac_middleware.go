@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -14,8 +15,11 @@ func RequireScope(scope string) echo.MiddlewareFunc {
 					return next(c)
 				}
 			}
-			return echo.NewHTTPError(http.StatusForbidden, map[string]string{
-				"message": "Missing scope: " + scope,
+			c.Response().Header().Set("X-Accepted-OAuth-Scopes", scope)
+			c.Response().Header().Set("X-OAuth-Scopes", strings.Join(GetScopes(c), ", "))
+			return echo.NewHTTPError(http.StatusForbidden, githubAuthError{
+				Message:          "Resource not accessible by personal access token",
+				DocumentationURL: githubDocsURL,
 			})
 		}
 	}
