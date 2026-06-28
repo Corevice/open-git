@@ -37,4 +37,28 @@ describe("RbacGate", () => {
 
     expect(screen.getByText("View content")).toBeInTheDocument();
   });
+
+  it('requiredRole="admin", userRole=null — children not rendered', () => {
+    render(
+      <RbacGate requiredRole="admin" userRole={null}>
+        <button type="button">Delete repository</button>
+      </RbacGate>,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Delete repository" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('requiredRole="admin", userRole=undefined — children not rendered', () => {
+    render(
+      <RbacGate requiredRole="admin" userRole={undefined}>
+        <button type="button">Delete repository</button>
+      </RbacGate>,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Delete repository" }),
+    ).not.toBeInTheDocument();
+  });
 });

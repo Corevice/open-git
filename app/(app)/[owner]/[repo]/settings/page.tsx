@@ -12,7 +12,7 @@ import {
   type ApiError,
 } from "@/lib/api-client";
 import { ApiClient } from "@/lib/api";
-import { AUTH_TOKEN_KEY } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
 
 type RepoSettingsApiClient = typeof baseApiClient & {
   repos: {
@@ -25,58 +25,71 @@ type RepoSettingsApiClient = typeof baseApiClient & {
   };
 };
 
-const apiBase = (
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  ""
-).replace(/\/$/, "");
+type RepoMetadata = {
+  owner: { login: string };
+};
 
-async function repoRequest<T>(
-  method: "PATCH" | "DELETE",
-  owner: string,
-  repo: string,
-  body?: unknown,
-): Promise<T> {
-  const res = await fetch(`${apiBase}/api/v3/repos/${owner}/${repo}`, {
-    method,
-    headers: {
+function createRepoSettingsClient(
+  baseURL: string,
+  token: string | null,
+): RepoSettingsApiClient {
+  const apiBase = baseURL.replace(/\/$/, "");
+
+  async function repoRequest<T>(
+    method: "PATCH" | "DELETE",
+    owner: string,
+    repo: string,
+    body?: unknown,
+  ): Promise<T> {
+    const headers: Record<string, string> = {
       Accept: "application/vnd.github+json",
       "Content-Type": "application/json",
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-
-  if (!res.ok) {
-    let message = res.statusText;
-    let code = String(res.status);
-    try {
-      const errorBody = (await res.json()) as { message?: string; code?: string };
-      message = errorBody.message ?? message;
-      code = errorBody.code ?? code;
-    } catch {
-      // ignore non-JSON error bodies
+    };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
     }
-    const error: ApiError = { status: res.status, code, message };
-    throw error;
+
+    const res = await fetch(`${apiBase}/api/v3/repos/${owner}/${repo}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+
+    if (!res.ok) {
+      let message = res.statusText;
+      let code = String(res.status);
+      try {
+        const errorBody = (await res.json()) as {
+          message?: string;
+          code?: string;
+        };
+        message = errorBody.message ?? message;
+        code = errorBody.code ?? code;
+      } catch {
+        // ignore non-JSON error bodies
+      }
+      const error: ApiError = { status: res.status, code, message };
+      throw error;
+    }
+
+    if (res.status === 204) {
+      return undefined as T;
+    }
+
+    return (await res.json()) as T;
   }
 
-  if (res.status === 204) {
-    return undefined as T;
-  }
-
-  return (await res.json()) as T;
+  return Object.assign(baseApiClient, {
+    repos: {
+      updateRepo(owner: string, repo: string, data: { name: string }) {
+        return repoRequest("PATCH", owner, repo, data);
+      },
+      deleteRepo(owner: string, repo: string) {
+        return repoRequest("DELETE", owner, repo);
+      },
+    },
+  }) as RepoSettingsApiClient;
 }
-
-const apiClient = Object.assign(baseApiClient, {
-  repos: {
-    updateRepo(owner: string, repo: string, data: { name: string }) {
-      return repoRequest("PATCH", owner, repo, data);
-    },
-    deleteRepo(owner: string, repo: string) {
-      return repoRequest("DELETE", owner, repo);
-    },
-  },
-}) as RepoSettingsApiClient;
 
 function mapMembershipRoleToRbac(role: string): RbacRole {
   const normalized = role.toLowerCase();
@@ -96,24 +109,30 @@ export default function RepoSettingsPage({
 }) {
   const { owner, repo } = use(params);
   const router = useRouter();
+  const { token } = useAuth();
+
+  const baseURL =
+    process.env.NEXT_PUBLIC_API_BASE_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    "http://localhost:8080";
 
   const membershipClient = useMemo(() => {
-    const baseURL =
-      process.env.NEXT_PUBLIC_API_BASE_URL ??
-      process.env.NEXT_PUBLIC_API_URL ??
-      "";
-    const token =
-      typeof window !== "undefined"
-        ? localStorage.getItem(AUTH_TOKEN_KEY)
-        : null;
     const client = new ApiClient(baseURL);
     if (token) {
       client.setToken(token);
     }
     return client;
-  }, []);
+  }, [baseURL, token]);
+
+  const apiClient = useMemo(
+    () => createRepoSettingsClient(baseURL, token),
+    [baseURL, token],
+  );
 
   const [userRole, setUserRole] = useState<RbacRole | null>(null);
+  const [roleLoading, setRoleLoading] = useState(true);
+  const [roleError, setRoleError] = useState<string | null>(null);
+  const [roleRetryKey, setRoleRetryKey] = useState(0);
   const [newName, setNewName] = useState(repo);
   const [renameSubmitting, setRenameSubmitting] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
@@ -135,31 +154,62 @@ export default function RepoSettingsPage({
     let cancelled = false;
 
     async function loadUserRole() {
+      setRoleLoading(true);
+      setRoleError(null);
+
+      if (!token) {
+        if (!cancelled) {
+          setUserRole(null);
+          setRoleLoading(false);
+        }
+        return;
+      }
+
       try {
-        const currentUser = await membershipClient.users.getCurrent();
+        const [currentUser, repoData] = await Promise.all([
+          membershipClient.users.getCurrent(),
+          membershipClient.get<RepoMetadata>(
+            `/api/v3/repos/${owner}/${repo}`,
+          ),
+        ]);
         if (cancelled) {
           return;
         }
 
-        if (currentUser.login === owner) {
+        const repoOwnerLogin = repoData.owner.login;
+
+        if (currentUser.login === repoOwnerLogin) {
           setUserRole("admin");
           return;
         }
 
-        const members = await membershipClient.orgs.listMembers(owner);
-        if (cancelled) {
-          return;
-        }
+        try {
+          await membershipClient.orgs.get(repoOwnerLogin);
+          const members =
+            await membershipClient.orgs.listMembers(repoOwnerLogin);
+          if (cancelled) {
+            return;
+          }
 
-        const membership = members.find(
-          (member) => member.login === currentUser.login,
-        );
-        setUserRole(
-          membership ? mapMembershipRoleToRbac(membership.role) : null,
-        );
+          const membership = members.find(
+            (member) => member.login === currentUser.login,
+          );
+          setUserRole(
+            membership ? mapMembershipRoleToRbac(membership.role) : null,
+          );
+        } catch {
+          if (!cancelled) {
+            setUserRole(null);
+          }
+        }
       } catch {
         if (!cancelled) {
           setUserRole(null);
+          setRoleError("Failed to load permissions.");
+        }
+      } finally {
+        if (!cancelled) {
+          setRoleLoading(false);
         }
       }
     }
@@ -169,7 +219,7 @@ export default function RepoSettingsPage({
     return () => {
       cancelled = true;
     };
-  }, [membershipClient, owner]);
+  }, [membershipClient, owner, repo, token, roleRetryKey]);
 
   const handleRename = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -214,13 +264,8 @@ export default function RepoSettingsPage({
     }
   };
 
-  return (
-    <div className="mx-auto max-w-3xl space-y-8 px-6 py-8">
-      <h1 className="text-2xl font-semibold">Settings</h1>
-      <p className="text-sm text-[#656d76]">
-        {owner}/{repo}
-      </p>
-
+  const adminSections = (
+    <>
       <RbacGate requiredRole="admin" userRole={userRole}>
         <section className="rounded-md border border-[#d0d7de] bg-white p-5">
           <h2 className="text-lg font-semibold">Rename repository</h2>
@@ -300,6 +345,32 @@ export default function RepoSettingsPage({
           )}
         </div>
       </RbacGate>
+    </>
+  );
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-8 px-6 py-8">
+      <h1 className="text-2xl font-semibold">Settings</h1>
+      <p className="text-sm text-[#656d76]">
+        {owner}/{repo}
+      </p>
+
+      {roleLoading ? (
+        <p className="text-sm text-[#656d76]">Checking permissions…</p>
+      ) : roleError ? (
+        <div className="rounded-md border border-[#d0d7de] bg-white p-5">
+          <p className="text-sm text-[#cf222e]">{roleError}</p>
+          <button
+            type="button"
+            onClick={() => setRoleRetryKey((key) => key + 1)}
+            className="mt-3 rounded-md border border-[#d0d7de] px-4 py-2 text-sm font-semibold hover:bg-[#f6f8fa]"
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        adminSections
+      )}
     </div>
   );
 }
