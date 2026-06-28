@@ -1,11 +1,11 @@
 "use client";
 
-import { FormEvent, use, useCallback, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { SecretForm } from "@/components/secret-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
 import {
   deleteOrgSecret,
@@ -14,6 +14,7 @@ import {
   listOrgSecrets,
   sealSecret,
   upsertOrgSecret,
+  validateSecretName,
   type OrgActionSecret,
   type SecretVisibility,
 } from "@/lib/api/secrets";
@@ -34,10 +35,6 @@ function visibilityLabel(visibility: SecretVisibility): string {
     case "selected":
       return "Selected repositories";
   }
-}
-
-function isSecretVisibility(value: string): value is SecretVisibility {
-  return value === "all" || value === "private" || value === "selected";
 }
 
 function VisibilityBadge({ visibility }: { visibility: SecretVisibility }) {
@@ -72,10 +69,9 @@ export default function OrganizationSecretsPage({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const [formName, setFormName] = useState("");
-  const [formValue, setFormValue] = useState("");
-  const [formVisibility, setFormVisibility] =
-    useState<SecretVisibility>("all");
+  const editingSecretData = secrets.find(
+    (secret) => secret.name === editingSecret,
+  );
 
   const redirectOnUnauthorized = useCallback(
     (err: unknown): boolean => {
@@ -122,78 +118,49 @@ export default function OrganizationSecretsPage({
   const resetFormState = () => {
     setFormError(null);
     setFieldErrors({});
-    setFormName("");
-    setFormValue("");
-    setFormVisibility("all");
   };
 
   const openCreateForm = () => {
     resetFormState();
+    setDeleteError(null);
     setShowCreateForm(true);
     setEditingSecret(null);
   };
 
   const openEditForm = (secret: OrgActionSecret) => {
     resetFormState();
-    setFormName(secret.name);
-    setFormValue("");
-    setFormVisibility(secret.visibility);
+    setDeleteError(null);
     setEditingSecret(secret.name);
     setShowCreateForm(false);
   };
 
-  const handleCreate = async (
+  const handleUpsert = async (
     name: string,
     value: string,
-    visibility: SecretVisibility,
+    visibility: SecretVisibility = "all",
   ) => {
     setSubmitting(true);
     setFormError(null);
     setFieldErrors({});
-    try {
-      const trimmedValue = value.trim();
-      const publicKey = await getOrgPublicKey(owner);
-      const { encrypted_value, key_id } = await sealSecret(
-        trimmedValue,
-        publicKey,
-      );
-      await upsertOrgSecret(
-        owner,
-        name,
-        encrypted_value,
-        key_id,
-        visibility,
-      );
-      setShowCreateForm(false);
-      resetFormState();
-      await loadSecrets();
-    } catch (err) {
-      if (redirectOnUnauthorized(err)) {
-        return;
-      }
-      if (isSecretValidationError(err)) {
-        setFieldErrors(err.fieldErrors);
-        setFormError(err.message);
-      } else {
-        setFormError(
-          err instanceof Error ? err.message : "Failed to create secret.",
-        );
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
-  const handleUpdate = async (
-    name: string,
-    value: string,
-    visibility: SecretVisibility,
-  ) => {
-    setSubmitting(true);
-    setFormError(null);
-    setFieldErrors({});
+    const isUpdate = editingSecret !== null;
+    const nameError = isUpdate ? null : validateSecretName(name);
+    if (nameError) {
+      setFieldErrors({ name: nameError });
+      setFormError(nameError);
+      setSubmitting(false);
+      return;
+    }
+
+    const trimmedValue = value.trim();
+    if (!isUpdate && !trimmedValue) {
+      setFieldErrors({ value: "Secret value is required" });
+      setFormError("Secret value is required");
+      setSubmitting(false);
+      return;
+    }
+
     try {
-      const trimmedValue = value.trim();
       if (trimmedValue) {
         const publicKey = await getOrgPublicKey(owner);
         const { encrypted_value, key_id } = await sealSecret(
@@ -216,6 +183,8 @@ export default function OrganizationSecretsPage({
           visibility,
         );
       }
+
+      setShowCreateForm(false);
       setEditingSecret(null);
       resetFormState();
       await loadSecrets();
@@ -228,7 +197,11 @@ export default function OrganizationSecretsPage({
         setFormError(err.message);
       } else {
         setFormError(
-          err instanceof Error ? err.message : "Failed to update secret.",
+          err instanceof Error
+            ? err.message
+            : isUpdate
+              ? "Failed to update secret."
+              : "Failed to create secret.",
         );
       }
     } finally {
@@ -254,125 +227,6 @@ export default function OrganizationSecretsPage({
       setDeleting(false);
     }
   };
-
-  const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (editingSecret !== null) {
-      void handleUpdate(formName, formValue, formVisibility);
-    } else {
-      void handleCreate(formName, formValue, formVisibility);
-    }
-  };
-
-  const renderSecretForm = (isUpdate: boolean) => (
-    <form onSubmit={handleFormSubmit} className="space-y-4">
-      {formError && (
-        <p className="text-sm text-[#cf222e]" role="alert">
-          {formError}
-        </p>
-      )}
-
-      <div>
-        <label
-          htmlFor={isUpdate ? "update-secret-name" : "create-secret-name"}
-          className="mb-1 block text-sm font-medium"
-        >
-          Name
-        </label>
-        <Input
-          id={isUpdate ? "update-secret-name" : "create-secret-name"}
-          value={formName}
-          onChange={(event) => setFormName(event.target.value)}
-          readOnly={isUpdate}
-          disabled={isUpdate}
-          placeholder="SECRET_NAME"
-          className="font-mono"
-          aria-invalid={fieldErrors.name ? true : undefined}
-        />
-        {fieldErrors.name && (
-          <p className="mt-1 text-sm text-[#cf222e]">{fieldErrors.name}</p>
-        )}
-      </div>
-
-      <div>
-        <label
-          htmlFor={isUpdate ? "update-secret-value" : "create-secret-value"}
-          className="mb-1 block text-sm font-medium"
-        >
-          Value
-        </label>
-        <textarea
-          id={isUpdate ? "update-secret-value" : "create-secret-value"}
-          value={formValue}
-          onChange={(event) => setFormValue(event.target.value)}
-          rows={4}
-          placeholder={isUpdate ? "Enter a new value" : "Secret value"}
-          className="flex w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-sm ring-offset-white placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-          aria-invalid={fieldErrors.value ? true : undefined}
-        />
-        {fieldErrors.value && (
-          <p className="mt-1 text-sm text-[#cf222e]">{fieldErrors.value}</p>
-        )}
-      </div>
-
-      <div>
-        <label
-          htmlFor={isUpdate ? "update-secret-visibility" : "create-secret-visibility"}
-          className="mb-1 block text-sm font-medium"
-        >
-          Repository access
-        </label>
-        <select
-          id={isUpdate ? "update-secret-visibility" : "create-secret-visibility"}
-          value={formVisibility}
-          onChange={(event) => {
-            const next = event.target.value;
-            if (isSecretVisibility(next)) {
-              setFormVisibility(next);
-            }
-          }}
-          className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
-          aria-invalid={fieldErrors.visibility ? true : undefined}
-        >
-          <option value="all">All repositories</option>
-          <option value="private">Private repositories</option>
-          <option value="selected">Selected repositories</option>
-        </select>
-        {fieldErrors.visibility && (
-          <p className="mt-1 text-sm text-[#cf222e]">
-            {fieldErrors.visibility}
-          </p>
-        )}
-      </div>
-
-      <div className="flex justify-end gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => {
-            if (isUpdate) {
-              setEditingSecret(null);
-            } else {
-              setShowCreateForm(false);
-            }
-            resetFormState();
-          }}
-          disabled={submitting}
-        >
-          Cancel
-        </Button>
-        <Button type="submit" disabled={submitting}>
-          {submitting
-            ? isUpdate
-              ? "Updating…"
-              : "Creating…"
-            : isUpdate
-              ? "Update secret"
-              : "Add secret"}
-        </Button>
-      </div>
-    </form>
-  );
 
   return (
     <div className="min-h-screen bg-[#f6f8fa]">
@@ -419,14 +273,24 @@ export default function OrganizationSecretsPage({
             <h2 className="mb-4 text-lg font-semibold">
               New organization secret
             </h2>
-            {renderSecretForm(false)}
+            <SecretForm
+              onSubmit={handleUpsert}
+              showVisibility
+              submitting={submitting}
+              formError={formError}
+              fieldErrors={fieldErrors}
+              onCancel={() => {
+                setShowCreateForm(false);
+                resetFormState();
+              }}
+            />
           </div>
         )}
 
         {loading ? (
           <p className="text-sm text-[#656d76]">Loading…</p>
         ) : error ? (
-          <p className="text-sm text-[#cf222e]">{error}</p>
+          <p className="text-sm text-destructive">{error}</p>
         ) : secrets.length === 0 ? (
           <div className="rounded-md border border-[#d0d7de] bg-white p-8 text-center">
             <h2 className="text-lg font-semibold">No secrets configured</h2>
@@ -492,12 +356,24 @@ export default function OrganizationSecretsPage({
           </div>
         )}
 
-        {editingSecret !== null && !showCreateForm && (
+        {editingSecret !== null && !showCreateForm && editingSecretData && (
           <div className="mt-6 rounded-md border border-[#d0d7de] bg-white p-6">
             <h2 className="mb-4 text-lg font-semibold">
               Update secret: {editingSecret}
             </h2>
-            {renderSecretForm(true)}
+            <SecretForm
+              onSubmit={handleUpsert}
+              existingName={editingSecret}
+              initialVisibility={editingSecretData.visibility}
+              showVisibility
+              submitting={submitting}
+              formError={formError}
+              fieldErrors={fieldErrors}
+              onCancel={() => {
+                setEditingSecret(null);
+                resetFormState();
+              }}
+            />
           </div>
         )}
       </div>
@@ -512,7 +388,7 @@ export default function OrganizationSecretsPage({
           <div className="mx-4 w-full max-w-md rounded-md border border-[#d0d7de] bg-white p-6 shadow-lg">
             <h2
               id="delete-secret-title"
-              className="text-lg font-semibold text-[#cf222e]"
+              className="text-lg font-semibold text-destructive"
             >
               Delete secret?
             </h2>
@@ -522,7 +398,7 @@ export default function OrganizationSecretsPage({
               cannot be undone.
             </p>
             {deleteError && (
-              <p className="mt-2 text-sm text-[#cf222e]">{deleteError}</p>
+              <p className="mt-2 text-sm text-destructive">{deleteError}</p>
             )}
             <div className="mt-4 flex justify-end gap-2">
               <Button

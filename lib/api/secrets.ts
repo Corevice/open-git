@@ -31,9 +31,30 @@ interface PaginatedSecretsResponse<T> {
 }
 
 const SECRETS_PAGE_SIZE = 100;
+const SECRETS_MAX_PAGES = 100;
+const SECRET_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
+
+let cachedBaseUrl: string | undefined;
 
 function resolveBaseUrl(): string {
-  return env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, "");
+  if (cachedBaseUrl === undefined) {
+    cachedBaseUrl = env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, "");
+  }
+  return cachedBaseUrl;
+}
+
+export function validateSecretName(name: string): string | null {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return "Secret name is required";
+  }
+  if (!SECRET_NAME_PATTERN.test(trimmed)) {
+    return "Secret name must match [A-Z_][A-Z0-9_]*";
+  }
+  if (trimmed.startsWith("GITHUB_")) {
+    return "Secret names with GITHUB_ prefix are reserved";
+  }
+  return null;
 }
 
 function buildHeaders(): Record<string, string> {
@@ -53,12 +74,29 @@ function buildHeaders(): Record<string, string> {
 }
 
 function validatePathSegment(value: string, label: string): void {
+  const normalized = value.toLowerCase();
   if (
-    !value ||
-    value.includes("/") ||
-    value.includes("\\") ||
-    value === "." ||
-    value === ".."
+    normalized.includes("%2f") ||
+    normalized.includes("%5c") ||
+    normalized.includes("..")
+  ) {
+    throw new ApiError(400, `Invalid ${label}`);
+  }
+
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    throw new ApiError(400, `Invalid ${label}`);
+  }
+
+  if (
+    !decoded ||
+    decoded.includes("/") ||
+    decoded.includes("\\") ||
+    decoded === "." ||
+    decoded === ".." ||
+    decoded.includes("..")
   ) {
     throw new ApiError(400, `Invalid ${label}`);
   }
@@ -132,7 +170,15 @@ async function request<T>(
       throw error;
     }
 
-    throw new ApiError(response.status, message);
+    const safeMessage =
+      response.status === 401
+        ? "Unauthorized"
+        : response.status === 403
+          ? "Forbidden"
+          : response.status === 404
+            ? "Not found"
+            : "Request failed";
+    throw new ApiError(response.status, safeMessage);
   }
 
   if (response.status === 204) {
@@ -148,20 +194,45 @@ async function request<T>(
 }
 
 async function fetchAllSecrets<T>(basePath: string): Promise<T[]> {
-  let page = 1;
   const secrets: T[] = [];
-  let totalCount = 0;
+  let page = 1;
 
-  do {
+  while (page <= SECRETS_MAX_PAGES) {
     const separator = basePath.includes("?") ? "&" : "?";
     const data = await request<PaginatedSecretsResponse<T>>(
       "GET",
       `${basePath}${separator}per_page=${SECRETS_PAGE_SIZE}&page=${page}`,
     );
+
+    if (!data?.secrets || !Array.isArray(data.secrets)) {
+      break;
+    }
+
+    if (data.secrets.length === 0) {
+      break;
+    }
+
+    const previousLength = secrets.length;
     secrets.push(...data.secrets);
-    totalCount = data.total_count;
+
+    if (secrets.length === previousLength) {
+      break;
+    }
+
+    if (
+      typeof data.total_count === "number" &&
+      data.total_count >= 0 &&
+      secrets.length >= data.total_count
+    ) {
+      break;
+    }
+
+    if (data.secrets.length < SECRETS_PAGE_SIZE) {
+      break;
+    }
+
     page += 1;
-  } while (secrets.length < totalCount);
+  }
 
   return secrets;
 }
