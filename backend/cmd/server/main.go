@@ -625,6 +625,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3Keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	v1 := e.Group("/api/v1")
+	contributorsHandler := handler.NewContributorsHandler(repoGitResolver, membershipAdapter)
+	contributorsHandler.RegisterRoutes(v1)
 	compatHandler.RegisterRoutes(v1, authMiddleware)
 	mcpVerificationHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
