@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/domain/service"
@@ -22,6 +23,8 @@ import (
 type PullRequestHandler struct {
 	createPRUC        *prusecase.CreatePRUsecase
 	mergePRUC         *prusecase.MergePRUsecase
+	createReviewUC    *prusecase.CreateReviewUsecase
+	listReviewsUC     *prusecase.ListReviewsUsecase
 	prRepo            repository.IPullRequestRepository
 	reviewRepo        repository.IReviewRepository
 	reviewCommentRepo repository.IReviewCommentRepository
@@ -32,6 +35,8 @@ type PullRequestHandler struct {
 func NewPullRequestHandler(
 	createPRUC *prusecase.CreatePRUsecase,
 	mergePRUC *prusecase.MergePRUsecase,
+	createReviewUC *prusecase.CreateReviewUsecase,
+	listReviewsUC *prusecase.ListReviewsUsecase,
 	prRepo repository.IPullRequestRepository,
 	reviewRepo repository.IReviewRepository,
 	reviewCommentRepo repository.IReviewCommentRepository,
@@ -41,6 +46,8 @@ func NewPullRequestHandler(
 	return &PullRequestHandler{
 		createPRUC:        createPRUC,
 		mergePRUC:         mergePRUC,
+		createReviewUC:    createReviewUC,
+		listReviewsUC:     listReviewsUC,
 		prRepo:            prRepo,
 		reviewRepo:        reviewRepo,
 		reviewCommentRepo: reviewCommentRepo,
@@ -415,46 +422,40 @@ func (h *PullRequestHandler) CreateReview(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid pull request number")
 	}
 
-	pr, err := h.prRepo.GetByNumber(c.Request().Context(), repo.ID, number)
-	if err != nil {
-		return err
-	}
-	if pr.State == entity.PullRequestStateClosed || pr.State == entity.PullRequestStateMerged {
-		return echo.NewHTTPError(http.StatusUnprocessableEntity, "cannot review a closed pull request")
-	}
-
 	var req createReviewRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
-	state, ok := reviewEventToState[strings.ToUpper(req.Event)]
-	if !ok {
+	if _, ok := reviewEventToState[strings.ToUpper(req.Event)]; !ok {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid review event")
 	}
 
-	now := time.Now().UTC()
-	review := &entity.Review{
-		ID:            uuid.New(),
-		PullRequestID: pr.ID,
-		ReviewerID:    actor.UserID,
-		State:         state,
-		Body:          req.Body,
-		CommitSHA:     pr.HeadSHA,
-		SubmittedAt:   &now,
-		CreatedAt:     now,
-	}
-
-	if err := h.reviewRepo.Create(c.Request().Context(), review); err != nil {
+	review, err := h.createReviewUC.Execute(c.Request().Context(), prusecase.CreateReviewInput{
+		OrganizationID: actor.OrganizationID,
+		RepositoryID:   repo.ID,
+		Number:         number,
+		ActorID:        actor.UserID,
+		Event:          req.Event,
+		Body:           req.Body,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
+		if errors.Is(err, apperror.ErrValidation) {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, err.Error())
+		}
 		return err
 	}
 
 	ctx := c.Request().Context()
+	now := time.Now().UTC()
 	for _, comment := range req.Comments {
 		reviewID := review.ID
 		rc := &entity.ReviewComment{
 			ID:            uuid.New(),
-			PullRequestID: pr.ID,
+			PullRequestID: review.PullRequestID,
 			AuthorID:      actor.UserID,
 			ReviewID:      &reviewID,
 			Path:          comment.Path,
@@ -483,12 +484,11 @@ func (h *PullRequestHandler) ListReviews(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid pull request number")
 	}
 
-	pr, err := h.prRepo.GetByNumber(c.Request().Context(), repo.ID, number)
-	if err != nil {
-		return err
-	}
-
-	reviews, err := h.reviewRepo.ListByPR(c.Request().Context(), pr.ID)
+	reviews, err := h.listReviewsUC.Execute(c.Request().Context(), prusecase.ListReviewsInput{
+		OrganizationID: repo.OrganizationID,
+		RepositoryID:   repo.ID,
+		Number:         number,
+	})
 	if err != nil {
 		return err
 	}

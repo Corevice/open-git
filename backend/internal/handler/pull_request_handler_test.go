@@ -239,12 +239,22 @@ func newPullRequestHandlerEcho(t *testing.T, opts prHandlerOptions) *echo.Echo {
 		prHandlerTxManager{},
 		prHandlerMembershipRepo{},
 	)
+	reviewRepo := prHandlerReviewRepo{}
+	createReviewUC := prusecase.NewCreateReviewUsecase(
+		pr,
+		reviewRepo,
+		prHandlerAuditLogRepo{},
+		prHandlerMembershipRepo{},
+	)
+	listReviewsUC := prusecase.NewListReviewsUsecase(pr, reviewRepo)
 
 	h := handler.NewPullRequestHandler(
 		createPRUC,
 		mergePRUC,
+		createReviewUC,
+		listReviewsUC,
 		pr,
-		prHandlerReviewRepo{},
+		reviewRepo,
 		prHandlerReviewCommentRepo{},
 		gitSvc,
 		func(_ echo.Context, _, _ string) (*entity.Repository, error) {
@@ -322,6 +332,106 @@ func TestGetPullRequestFiles(t *testing.T) {
 	}
 	if resp.Files[0]["filename"] != "main.go" {
 		t.Fatalf("filename = %v, want main.go", resp.Files[0]["filename"])
+	}
+}
+
+func TestCreateReviewApprove(t *testing.T) {
+	authorID := uuid.New()
+	e := newPullRequestHandlerEcho(t, prHandlerOptions{
+		prRepo: &prHandlerPRRepo{
+			pr: &entity.PullRequest{
+				ID:             prTestPRID,
+				OrganizationID: prTestOrgUUID,
+				RepositoryID:   prTestRepoID,
+				Number:         1,
+				AuthorID:       authorID,
+				HeadRef:        "feature",
+				BaseRef:        "main",
+				BaseSHA:        "base-sha",
+				HeadSHA:        "head-sha",
+				State:          entity.PullRequestStateOpen,
+			},
+		},
+	})
+
+	body := `{"event":"APPROVE","body":"looks good"}`
+	req := httptest.NewRequest(http.MethodPost, "/repos/alice/demo/pulls/1/reviews", bytes.NewBufferString(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Host = "git.example.com"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["state"] != entity.ReviewStateApproved {
+		t.Fatalf("state = %v, want %q", resp["state"], entity.ReviewStateApproved)
+	}
+}
+
+func TestCreateReviewSelfReview(t *testing.T) {
+	actorID := middleware.Int64ToUUID(prTestUserID)
+	e := newPullRequestHandlerEcho(t, prHandlerOptions{
+		prRepo: &prHandlerPRRepo{
+			pr: &entity.PullRequest{
+				ID:             prTestPRID,
+				OrganizationID: prTestOrgUUID,
+				RepositoryID:   prTestRepoID,
+				Number:         1,
+				AuthorID:       actorID,
+				HeadRef:        "feature",
+				BaseRef:        "main",
+				BaseSHA:        "base-sha",
+				HeadSHA:        "head-sha",
+				State:          entity.PullRequestStateOpen,
+			},
+		},
+	})
+
+	body := `{"event":"APPROVE","body":"self approve"}`
+	req := httptest.NewRequest(http.MethodPost, "/repos/alice/demo/pulls/1/reviews", bytes.NewBufferString(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Host = "git.example.com"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+}
+
+func TestCreateReviewClosedPR(t *testing.T) {
+	e := newPullRequestHandlerEcho(t, prHandlerOptions{
+		prRepo: &prHandlerPRRepo{
+			pr: &entity.PullRequest{
+				ID:             prTestPRID,
+				OrganizationID: prTestOrgUUID,
+				RepositoryID:   prTestRepoID,
+				Number:         1,
+				AuthorID:       uuid.New(),
+				HeadRef:        "feature",
+				BaseRef:        "main",
+				BaseSHA:        "base-sha",
+				HeadSHA:        "head-sha",
+				State:          entity.PullRequestStateClosed,
+			},
+		},
+	})
+
+	body := `{"event":"APPROVE","body":"too late"}`
+	req := httptest.NewRequest(http.MethodPost, "/repos/alice/demo/pulls/1/reviews", bytes.NewBufferString(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Host = "git.example.com"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
 	}
 }
 
