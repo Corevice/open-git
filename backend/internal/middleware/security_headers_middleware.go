@@ -7,18 +7,18 @@ import (
 )
 
 const (
-	securityHeaderXFrameOptions           = "X-Frame-Options"
-	securityHeaderXFrameOptionsValue      = "DENY"
-	securityHeaderXContentTypeOptions     = "X-Content-Type-Options"
+	securityHeaderXFrameOptions            = "X-Frame-Options"
+	securityHeaderXFrameOptionsValue       = "DENY"
+	securityHeaderXContentTypeOptions      = "X-Content-Type-Options"
 	securityHeaderXContentTypeOptionsValue = "nosniff"
-	securityHeaderCSP                     = "Content-Security-Policy"
-	securityHeaderCSPValue                = "default-src 'self'"
-	securityHeaderHSTS                    = "Strict-Transport-Security"
-	securityHeaderHSTSValue               = "max-age=31536000; includeSubDomains"
-	securityHeaderReferrerPolicy          = "Referrer-Policy"
-	securityHeaderReferrerPolicyValue     = "strict-origin-when-cross-origin"
-	securityHeaderPermissionsPolicy       = "Permissions-Policy"
-	securityHeaderPermissionsPolicyValue  = "camera=(), microphone=(), geolocation=()"
+	securityHeaderCSP                      = "Content-Security-Policy"
+	securityHeaderCSPValue                 = "default-src 'self'"
+	securityHeaderHSTS                     = "Strict-Transport-Security"
+	securityHeaderHSTSValue                = "max-age=31536000; includeSubDomains"
+	securityHeaderReferrerPolicy           = "Referrer-Policy"
+	securityHeaderReferrerPolicyValue      = "strict-origin-when-cross-origin"
+	securityHeaderPermissionsPolicy        = "Permissions-Policy"
+	securityHeaderPermissionsPolicyValue   = "camera=(), microphone=(), geolocation=()"
 )
 
 // SecurityHeadersMiddleware sets standard security headers on every response.
