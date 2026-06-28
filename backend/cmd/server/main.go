@@ -47,6 +47,7 @@ import (
 	userUC "github.com/open-git/backend/internal/usecase/user"
 	userpreferencesUC "github.com/open-git/backend/internal/usecase/user_preferences"
 	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
+	"github.com/open-git/backend/internal/infrastructure/queue"
 )
 
 var (
@@ -547,6 +548,18 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v1 := e.Group("/api/v1")
 	compatHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
+
+	workflowJobRepo := infrarepo.NewWorkflowJobRepository(sqlxDB)
+	var jobLogRepo domainrepo.IJobLogRepository
+	var jobLogSub *queue.JobLogSubscriber
+	if cfg.RedisAddr != "" {
+		jobLogSub = queue.NewJobLogSubscriber(cfg.RedisAddr)
+	}
+	actionsLogHandler := handler.NewActionsLogHandler(jobLogRepo, workflowJobRepo, jobLogSub, repoRepo)
+	actionsLogHandler.RegisterRoutes(v1, authMiddleware)
+
+	apiActions := e.Group("/api")
+	actionsLogHandler.RegisterRoutes(apiActions, authMiddleware)
 
 	var sshServer *sshinfra.SSHServer
 	if cfg.SSHEnabled {
