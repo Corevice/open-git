@@ -363,7 +363,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	)
 	getRepoUC := repoUC.NewGetRepositoryUsecase(repoRepo, userRepo, legacyMembershipRepo)
 	listReposUC := repoUC.NewListRepositoriesUsecase(repoRepo, legacyMembershipRepo, userRepo)
-	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, listReposUC, repoRepo, orgRepo, auditLogRepo)
+	auditListRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	listAuditLogsUC := repoUC.NewListAuditLogsUsecase(auditListRepo)
+	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, listReposUC, repoRepo, orgRepo, auditLogRepo, listAuditLogsUC)
 
 	getCurrentUserUC := userUC.NewGetCurrentUserUsecase(userRepo)
 	getUserByLoginUC := userUC.NewGetUserByLoginUsecase(userRepo)
