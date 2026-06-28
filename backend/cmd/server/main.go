@@ -49,6 +49,7 @@ import (
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
 	userUC "github.com/open-git/backend/internal/usecase/user"
 	userpreferencesUC "github.com/open-git/backend/internal/usecase/user_preferences"
+	importUC "github.com/open-git/backend/internal/usecase/import"
 	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
 	"github.com/open-git/backend/internal/infrastructure/queue"
 	"github.com/open-git/backend/internal/worker"
@@ -522,6 +523,32 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		deleteVerificationUC,
 	)
 
+	importJobRepo := infrarepo.NewImportJobRepository(sqlxDB)
+	getImportUC := importUC.NewGetImportJobUsecase(importJobRepo)
+	listImportUC := importUC.NewListImportJobsUsecase(importJobRepo)
+	cancelImportUC := importUC.NewCancelImportJobUsecase(importJobRepo, membershipRepo)
+
+	var createImportUC *importUC.CreateImportJobUsecase
+	var retryImportUC *importUC.RetryImportJobUsecase
+	if cfg.RedisAddr != "" {
+		importAsynqClient := queue.NewAsynqClient(cfg.RedisAddr)
+		createImportUC = importUC.NewCreateImportJobUsecase(importJobRepo, membershipRepo, repoRepo, entityOrgRepo, importAsynqClient)
+		retryImportUC = importUC.NewRetryImportJobUsecase(importJobRepo, importJobRepo, membershipRepo, importAsynqClient)
+	} else {
+		noopImport := noopImportEnqueuer{}
+		createImportUC = importUC.NewCreateImportJobUsecaseWithDeps(importJobRepo, membershipRepo, repoRepo, entityOrgRepo, nil, noopImport)
+		retryImportUC = importUC.NewRetryImportJobUsecaseWithEnqueuer(importJobRepo, importJobRepo, membershipRepo, noopImport)
+	}
+	importHandler := handler.NewImportHandler(
+		createImportUC,
+		getImportUC,
+		listImportUC,
+		cancelImportUC,
+		retryImportUC,
+		orgRepo,
+		legacyMembershipRepo,
+	)
+
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 	rateLimitHandler := handler.NewRateLimitHandler()
 	rootHandler := handler.NewRootHandler()
@@ -590,6 +617,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v1 := e.Group("/api/v1")
 	compatHandler.RegisterRoutes(v1, authMiddleware)
 	mcpVerificationHandler.RegisterRoutes(v1, authMiddleware)
+	importHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
 
 	workflowJobRepo := infrarepo.NewWorkflowJobRepository(sqlxDB)
@@ -635,6 +663,12 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 type noopMCPEnqueuer struct{}
 
 func (noopMCPEnqueuer) EnqueueMCPVerification(context.Context, queue.MCPVerificationPayload) error {
+	return errors.New("redis not configured")
+}
+
+type noopImportEnqueuer struct{}
+
+func (noopImportEnqueuer) EnqueueGitHubImport(context.Context, uuid.UUID, uuid.UUID) error {
 	return errors.New("redis not configured")
 }
 
