@@ -2,16 +2,15 @@ package pr
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/domain/service"
-	"github.com/google/uuid"
 )
 
 const maxNumberRetries = 5
@@ -19,6 +18,7 @@ const maxNumberRetries = 5
 type CreatePRInput struct {
 	OrganizationID uuid.UUID
 	RepositoryID   uuid.UUID
+	GitPath        string
 	ActorID        uuid.UUID
 	Title          string
 	Body           string
@@ -30,14 +30,14 @@ type CreatePRUsecase struct {
 	prRepo       repository.IPullRequestRepository
 	auditLogRepo repository.IAuditLogRepository
 	gitService   service.GitService
-	txManager    repository.TransactionManager
+	txManager    repository.ITransactionManager
 }
 
 func NewCreatePRUsecase(
 	prRepo repository.IPullRequestRepository,
 	auditLogRepo repository.IAuditLogRepository,
 	gitService service.GitService,
-	txManager repository.TransactionManager,
+	txManager repository.ITransactionManager,
 ) *CreatePRUsecase {
 	return &CreatePRUsecase{
 		prRepo:       prRepo,
@@ -55,11 +55,11 @@ func (uc *CreatePRUsecase) Execute(ctx context.Context, input CreatePRInput) (*e
 		return nil, apperror.ErrValidation
 	}
 
-	headExists, err := uc.gitService.BranchExists(ctx, input.RepositoryID, input.HeadRef)
+	headExists, err := uc.gitService.BranchExists(input.GitPath, input.HeadRef)
 	if err != nil {
 		return nil, err
 	}
-	baseExists, err := uc.gitService.BranchExists(ctx, input.RepositoryID, input.BaseRef)
+	baseExists, err := uc.gitService.BranchExists(input.GitPath, input.BaseRef)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (uc *CreatePRUsecase) Execute(ctx context.Context, input CreatePRInput) (*e
 			AuthorID:       input.ActorID,
 		}
 
-		err := uc.txManager.RunInTransaction(ctx, func(txCtx context.Context) error {
+		err := uc.txManager.RunInTx(ctx, func(txCtx context.Context) error {
 			number, err := uc.prRepo.NextNumber(txCtx, input.RepositoryID)
 			if err != nil {
 				return err
@@ -92,15 +92,14 @@ func (uc *CreatePRUsecase) Execute(ctx context.Context, input CreatePRInput) (*e
 				return err
 			}
 
-			return uc.auditLogRepo.InsertAuditLog(
-				txCtx,
-				input.OrganizationID,
-				input.ActorID,
-				"pr.open",
-				"pull_request",
-				pr.ID,
-				json.RawMessage(`{}`),
-			)
+			return uc.auditLogRepo.Create(txCtx, &entity.AuditLog{
+				ID:             uuid.New(),
+				OrganizationID: input.OrganizationID,
+				ActorID:        input.ActorID,
+				Action:         "pr.open",
+				TargetType:     "pull_request",
+				TargetID:       pr.ID.String(),
+			})
 		})
 		if err == nil {
 			created = pr

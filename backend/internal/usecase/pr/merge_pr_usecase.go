@@ -2,20 +2,20 @@ package pr
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/domain/service"
-	"github.com/google/uuid"
 )
 
 type MergePRInput struct {
 	OrganizationID uuid.UUID
 	RepositoryID   uuid.UUID
+	GitPath        string
 	ActorID        uuid.UUID
 	Number         int
 	MergeMethod    string
@@ -28,7 +28,7 @@ type MergePRUsecase struct {
 	workflowRunRepo      repository.IWorkflowRunRepository
 	auditLogRepo         repository.IAuditLogRepository
 	gitService           service.GitService
-	txManager            repository.TransactionManager
+	txManager            repository.ITransactionManager
 }
 
 func NewMergePRUsecase(
@@ -38,7 +38,7 @@ func NewMergePRUsecase(
 	workflowRunRepo repository.IWorkflowRunRepository,
 	auditLogRepo repository.IAuditLogRepository,
 	gitService service.GitService,
-	txManager repository.TransactionManager,
+	txManager repository.ITransactionManager,
 ) *MergePRUsecase {
 	return &MergePRUsecase{
 		prRepo:               prRepo,
@@ -65,11 +65,12 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 		mergeMethod = "merge"
 	}
 
-	if err := uc.checkBranchProtection(ctx, input.RepositoryID, pr); err != nil {
+	if err := uc.checkBranchProtection(ctx, input.RepositoryID, input.GitPath, pr); err != nil {
 		return nil, err
 	}
 
-	if err := uc.gitService.Merge(ctx, input.RepositoryID, pr.BaseRef, pr.HeadRef, mergeMethod); err != nil {
+	mergeSHA, err := uc.gitService.Merge(input.GitPath, pr.BaseRef, pr.HeadRef, mergeMethod)
+	if err != nil {
 		if errors.Is(err, apperror.ErrConflict) {
 			return nil, apperror.ErrConflict
 		}
@@ -79,20 +80,21 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 	now := time.Now().UTC()
 	pr.State = "merged"
 	pr.MergedAt = &now
+	pr.MergedBy = &input.ActorID
+	pr.MergeCommitSHA = mergeSHA
 
-	err = uc.txManager.RunInTransaction(ctx, func(txCtx context.Context) error {
-		if err := uc.prRepo.Update(txCtx, pr); err != nil {
+	err = uc.txManager.RunInTx(ctx, func(txCtx context.Context) error {
+		if err := uc.prRepo.SetMerged(txCtx, pr.ID, now, input.ActorID, mergeSHA); err != nil {
 			return err
 		}
-		return uc.auditLogRepo.InsertAuditLog(
-			txCtx,
-			input.OrganizationID,
-			input.ActorID,
-			"pr.merge",
-			"pull_request",
-			pr.ID,
-			json.RawMessage(`{}`),
-		)
+		return uc.auditLogRepo.Create(txCtx, &entity.AuditLog{
+			ID:             uuid.New(),
+			OrganizationID: input.OrganizationID,
+			ActorID:        input.ActorID,
+			Action:         "pr.merge",
+			TargetType:     "pull_request",
+			TargetID:       pr.ID.String(),
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -101,8 +103,8 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 	return pr, nil
 }
 
-func (uc *MergePRUsecase) checkBranchProtection(ctx context.Context, repositoryID uuid.UUID, pr *entity.PullRequest) error {
-	protection, err := uc.branchProtectionRepo.GetForRef(ctx, repositoryID, pr.BaseRef)
+func (uc *MergePRUsecase) checkBranchProtection(ctx context.Context, repositoryID uuid.UUID, gitPath string, pr *entity.PullRequest) error {
+	protection, err := uc.branchProtectionRepo.GetByBranch(ctx, repositoryID, pr.BaseRef)
 	if err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {
 			return nil
@@ -117,15 +119,15 @@ func (uc *MergePRUsecase) checkBranchProtection(ctx context.Context, repositoryI
 	if err != nil {
 		return err
 	}
-	if satisfiedReviews < protection.RequiredReviews {
+	if satisfiedReviews < protection.RequiredApprovingReviews {
 		return apperror.ErrProtectionNotSatisfied
 	}
 
-	if len(protection.RequiredChecks) == 0 {
+	if len(protection.RequiredStatusChecks) == 0 {
 		return nil
 	}
 
-	headSHA, err := uc.gitService.ResolveRef(ctx, repositoryID, pr.HeadRef)
+	headSHA, err := uc.gitService.ResolveRef(gitPath, pr.HeadRef)
 	if err != nil {
 		return err
 	}
@@ -134,7 +136,7 @@ func (uc *MergePRUsecase) checkBranchProtection(ctx context.Context, repositoryI
 	if err != nil {
 		return err
 	}
-	if !allRequiredChecksPassed(protection.RequiredChecks, runs) {
+	if !allRequiredChecksPassed(protection.RequiredStatusChecks, runs) {
 		return apperror.ErrProtectionNotSatisfied
 	}
 

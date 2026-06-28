@@ -1,13 +1,19 @@
 package service
 
-import (
-	"context"
-
-	"github.com/google/uuid"
-)
+type FileDiff struct {
+	Filename         string
+	PreviousFilename string
+	Status           string
+	Patch            string
+	Additions        int
+	Deletions        int
+	Binary           bool
+}
 
 type GitService interface {
-	BranchExists(ctx context.Context, repoID uuid.UUID, ref string) (bool, error)
-	ResolveRef(ctx context.Context, repoID uuid.UUID, ref string) (string, error)
-	Merge(ctx context.Context, repoID uuid.UUID, base, head, method string) error
+	BranchExists(repoPath, branch string) (bool, error)
+	ResolveRef(repoPath, ref string) (string, error)
+	Merge(repoPath, base, head, method string) (string, error)
+	GetDiff(repoPath, base, head string, maxFiles int) ([]FileDiff, bool, error)
+	GetMergeBase(repoPath, base, head string) (string, error)
 }

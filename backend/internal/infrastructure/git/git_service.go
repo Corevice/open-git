@@ -546,3 +546,314 @@ func GetDiff(repoPath, baseRef, headRef string) ([]FileDiff, error) {
 
 	return diffs, nil
 }
+
+// BranchExists reports whether a branch exists locally or as origin/<branch>.
+func BranchExists(repoPath, branch string) (bool, error) {
+	repo, err := openRepository(repoPath)
+	if err != nil {
+		return false, err
+	}
+
+	refNames := []plumbing.ReferenceName{
+		plumbing.NewBranchReferenceName(branch),
+		plumbing.NewRemoteReferenceName("origin", branch),
+	}
+	for _, refName := range refNames {
+		if _, err := repo.Reference(refName, true); err == nil {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// ResolveRef resolves a ref to its commit SHA.
+func ResolveRef(repoPath, ref string) (string, error) {
+	repo, err := openRepository(repoPath)
+	if err != nil {
+		return "", err
+	}
+
+	hash, err := repo.ResolveRevision(plumbing.Revision(ref))
+	if err != nil {
+		return "", fmt.Errorf("resolve ref %q: %w", ref, err)
+	}
+	return hash.String(), nil
+}
+
+// GetMergeBase returns the best common ancestor of base and head.
+func GetMergeBase(repoPath, base, head string) (string, error) {
+	repo, err := openRepository(repoPath)
+	if err != nil {
+		return "", err
+	}
+
+	baseCommit, err := resolveCommit(repo, base)
+	if err != nil {
+		return "", err
+	}
+	headCommit, err := resolveCommit(repo, head)
+	if err != nil {
+		return "", err
+	}
+
+	mergeBases, err := baseCommit.MergeBase(headCommit)
+	if err != nil {
+		return "", err
+	}
+	if len(mergeBases) == 0 {
+		return "", errors.New("no merge base found")
+	}
+	return mergeBases[0].Hash.String(), nil
+}
+
+// Merge merges head into base using merge, squash, or rebase strategy.
+func Merge(repoPath, base, head, method string) (string, error) {
+	repo, err := openRepository(repoPath)
+	if err != nil {
+		return "", err
+	}
+
+	baseCommit, err := resolveCommit(repo, base)
+	if err != nil {
+		return "", err
+	}
+	headCommit, err := resolveCommit(repo, head)
+	if err != nil {
+		return "", err
+	}
+
+	baseRefName := branchRefName(base)
+	if baseRefName == "" {
+		return "", fmt.Errorf("invalid base ref %q", base)
+	}
+
+	switch method {
+	case "squash":
+		return mergeSquash(repo, baseCommit, headCommit, baseRefName)
+	case "rebase":
+		return mergeRebase(repo, baseCommit, headCommit, baseRefName, head)
+	default:
+		return mergeMerge(repo, baseCommit, headCommit, baseRefName, head)
+	}
+}
+
+func branchRefName(ref string) plumbing.ReferenceName {
+	ref = strings.TrimPrefix(ref, "refs/heads/")
+	return plumbing.NewBranchReferenceName(ref)
+}
+
+func isFastForward(base, head *object.Commit) (bool, error) {
+	if base.Hash == head.Hash {
+		return true, nil
+	}
+	mergeBases, err := base.MergeBase(head)
+	if err != nil {
+		return false, err
+	}
+	for _, mb := range mergeBases {
+		if mb.Hash == base.Hash {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func mergeMerge(repo *gogit.Repository, baseCommit, headCommit *object.Commit, baseRef plumbing.ReferenceName, headRef string) (string, error) {
+	ff, err := isFastForward(baseCommit, headCommit)
+	if err != nil {
+		return "", err
+	}
+	if ff {
+		ref := plumbing.NewHashReference(baseRef, headCommit.Hash)
+		if err := repo.Storer.SetReference(ref); err != nil {
+			return "", err
+		}
+		return headCommit.Hash.String(), nil
+	}
+
+	mergedTreeHash, err := mergeCommitTrees(repo, baseCommit, headCommit)
+	if err != nil {
+		return "", err
+	}
+
+	mergeCommit := &object.Commit{
+		Message:      fmt.Sprintf("Merge branch '%s'", strings.TrimPrefix(headRef, "refs/heads/")),
+		TreeHash:     mergedTreeHash,
+		ParentHashes: []plumbing.Hash{baseCommit.Hash, headCommit.Hash},
+		Author:       headCommit.Author,
+		Committer:    headCommit.Committer,
+	}
+	mergeHash, err := storeCommit(repo, mergeCommit)
+	if err != nil {
+		return "", err
+	}
+
+	ref := plumbing.NewHashReference(baseRef, mergeHash)
+	if err := repo.Storer.SetReference(ref); err != nil {
+		return "", err
+	}
+	return mergeHash.String(), nil
+}
+
+func mergeSquash(repo *gogit.Repository, baseCommit, headCommit *object.Commit, baseRef plumbing.ReferenceName) (string, error) {
+	mergedTreeHash, err := mergeCommitTrees(repo, baseCommit, headCommit)
+	if err != nil {
+		return "", err
+	}
+
+	squashCommit := &object.Commit{
+		Message:      fmt.Sprintf("Squashed commit of '%s'", headCommit.Hash.String()[:7]),
+		TreeHash:     mergedTreeHash,
+		ParentHashes: []plumbing.Hash{baseCommit.Hash},
+		Author:       headCommit.Author,
+		Committer:    headCommit.Committer,
+	}
+	squashHash, err := storeCommit(repo, squashCommit)
+	if err != nil {
+		return "", err
+	}
+
+	ref := plumbing.NewHashReference(baseRef, squashHash)
+	if err := repo.Storer.SetReference(ref); err != nil {
+		return "", err
+	}
+	return squashHash.String(), nil
+}
+
+func mergeRebase(repo *gogit.Repository, baseCommit, headCommit *object.Commit, baseRef plumbing.ReferenceName, headRef string) (string, error) {
+	ff, err := isFastForward(baseCommit, headCommit)
+	if err != nil {
+		return "", err
+	}
+	if ff {
+		ref := plumbing.NewHashReference(baseRef, headCommit.Hash)
+		if err := repo.Storer.SetReference(ref); err != nil {
+			return "", err
+		}
+		return headCommit.Hash.String(), nil
+	}
+
+	rebasedTreeHash, err := mergeCommitTrees(repo, baseCommit, headCommit)
+	if err != nil {
+		return "", err
+	}
+
+	rebasedCommit := &object.Commit{
+		Message:      headCommit.Message,
+		TreeHash:     rebasedTreeHash,
+		ParentHashes: []plumbing.Hash{baseCommit.Hash},
+		Author:       headCommit.Author,
+		Committer:    headCommit.Committer,
+	}
+	rebasedHash, err := storeCommit(repo, rebasedCommit)
+	if err != nil {
+		return "", err
+	}
+
+	if err := repo.Storer.SetReference(plumbing.NewHashReference(baseRef, rebasedHash)); err != nil {
+		return "", err
+	}
+
+	headBranchRef := branchRefName(headRef)
+	if headBranchRef != "" {
+		_ = repo.Storer.SetReference(plumbing.NewHashReference(headBranchRef, rebasedHash))
+	}
+
+	return rebasedHash.String(), nil
+}
+
+func mergeCommitTrees(repo *gogit.Repository, baseCommit, headCommit *object.Commit) (plumbing.Hash, error) {
+	mergeBases, err := baseCommit.MergeBase(headCommit)
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+
+	var mergeBaseTree *object.Tree
+	if len(mergeBases) > 0 {
+		mergeBaseTree, err = mergeBases[0].Tree()
+		if err != nil {
+			return plumbing.ZeroHash, err
+		}
+	} else {
+		mergeBaseTree, err = baseCommit.Tree()
+		if err != nil {
+			return plumbing.ZeroHash, err
+		}
+	}
+
+	baseTree, err := baseCommit.Tree()
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+	headTree, err := headCommit.Tree()
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+
+	entries := make(map[string]object.TreeEntry)
+	for _, e := range mergeBaseTree.Entries {
+		entries[e.Name] = e
+	}
+	applyTreeDiff(entries, mergeBaseTree, baseTree)
+	applyTreeDiff(entries, mergeBaseTree, headTree)
+
+	mergedEntries := make([]object.TreeEntry, 0, len(entries))
+	for _, e := range entries {
+		mergedEntries = append(mergedEntries, e)
+	}
+	sortTreeEntries(mergedEntries)
+
+	mergedTree := &object.Tree{Entries: mergedEntries}
+	return storeTree(repo, mergedTree)
+}
+
+func applyTreeDiff(entries map[string]object.TreeEntry, baseTree, targetTree *object.Tree) {
+	baseEntries := treeEntryMap(baseTree)
+	targetEntries := treeEntryMap(targetTree)
+
+	for name, targetEntry := range targetEntries {
+		baseEntry, ok := baseEntries[name]
+		if !ok || baseEntry.Hash != targetEntry.Hash {
+			entries[name] = targetEntry
+		}
+	}
+	for name := range baseEntries {
+		if _, ok := targetEntries[name]; !ok {
+			delete(entries, name)
+		}
+	}
+}
+
+func treeEntryMap(tree *object.Tree) map[string]object.TreeEntry {
+	m := make(map[string]object.TreeEntry, len(tree.Entries))
+	for _, e := range tree.Entries {
+		m[e.Name] = e
+	}
+	return m
+}
+
+func sortTreeEntries(entries []object.TreeEntry) {
+	for i := 0; i < len(entries); i++ {
+		for j := i + 1; j < len(entries); j++ {
+			if entries[i].Name > entries[j].Name {
+				entries[i], entries[j] = entries[j], entries[i]
+			}
+		}
+	}
+}
+
+func storeTree(repo *gogit.Repository, tree *object.Tree) (plumbing.Hash, error) {
+	obj := repo.Storer.NewEncodedObject()
+	if err := tree.Encode(obj); err != nil {
+		return plumbing.ZeroHash, err
+	}
+	return repo.Storer.SetEncodedObject(obj)
+}
+
+func storeCommit(repo *gogit.Repository, commit *object.Commit) (plumbing.Hash, error) {
+	obj := repo.Storer.NewEncodedObject()
+	if err := commit.Encode(obj); err != nil {
+		return plumbing.ZeroHash, err
+	}
+	return repo.Storer.SetEncodedObject(obj)
+}
