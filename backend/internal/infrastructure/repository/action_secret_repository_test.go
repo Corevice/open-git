@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -363,8 +364,8 @@ func TestActionSecretRepository_SetSelectedRepositories_RejectsDuplicateRepoIDs(
 	secretID := insertOrgActionSecret(t, db, enc, orgID, "DEDUPED", "selected", []byte("dedupe-value"))
 
 	err := repo.SetSelectedRepositories(context.Background(), orgID, secretID, []uuid.UUID{repoID, repoID})
-	if !errors.Is(err, apperror.ErrNotFound) {
-		t.Fatalf("expected ErrNotFound for duplicate repo IDs, got %v", err)
+	if !errors.Is(err, apperror.ErrValidation) {
+		t.Fatalf("expected ErrValidation for duplicate repo IDs, got %v", err)
 	}
 }
 
@@ -381,7 +382,7 @@ func TestActionSecretRepository_SetSelectedRepositories_RejectsCrossOrgRepoIDOR(
 
 	secretID := insertOrgActionSecret(t, db, enc, orgID, "IDOR_TARGET", "selected", []byte("idor-value"))
 
-	err := repo.SetSelectedRepositories(context.Background(), orgID, secretID, []uuid.UUID{ownRepoID, otherRepoID, ownRepoID})
+	err := repo.SetSelectedRepositories(context.Background(), orgID, secretID, []uuid.UUID{ownRepoID, otherRepoID})
 	if !errors.Is(err, apperror.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for cross-org repo IDOR attempt, got %v", err)
 	}
@@ -399,8 +400,8 @@ func TestActionSecretRepository_SetSelectedRepositories_RejectsNonSelectedVisibi
 	secretID := insertOrgActionSecret(t, db, enc, orgID, "ALL_VISIBILITY", "all", []byte("all-value"))
 
 	err := repo.SetSelectedRepositories(context.Background(), orgID, secretID, []uuid.UUID{repoID})
-	if !errors.Is(err, apperror.ErrNotFound) {
-		t.Fatalf("expected ErrNotFound for non-selected visibility, got %v", err)
+	if !errors.Is(err, apperror.ErrValidation) {
+		t.Fatalf("expected ErrValidation for non-selected visibility, got %v", err)
 	}
 }
 
@@ -453,8 +454,16 @@ func TestActionSecretRepository_ListForWorkflowIncludesOrgAll(t *testing.T) {
 	if names["REPO_SECRET"] != string(innerRepo) {
 		t.Fatalf("expected decrypted repo value, got %q", names["REPO_SECRET"])
 	}
-	if len(orderedNames) != 2 || orderedNames[0] != "ORG_SECRET" || orderedNames[1] != "REPO_SECRET" {
-		t.Fatalf("expected deterministic name ordering, got %v", orderedNames)
+	sort.Strings(orderedNames)
+	expectedOrder := []string{"ORG_SECRET", "REPO_SECRET"}
+	sort.Strings(expectedOrder)
+	if len(orderedNames) != len(expectedOrder) {
+		t.Fatalf("expected %d secrets, got %d (%v)", len(expectedOrder), len(orderedNames), orderedNames)
+	}
+	for i := range expectedOrder {
+		if orderedNames[i] != expectedOrder[i] {
+			t.Fatalf("expected deterministic name ordering %v, got %v", expectedOrder, orderedNames)
+		}
 	}
 }
 

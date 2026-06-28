@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,6 +34,13 @@ const actionSecretListColumns = `
 	id, organization_id, repository_id, name, key_id, visibility, created_at, updated_at
 `
 
+type actionSecretDB interface {
+	Rebind(string) string
+	QueryRowxContext(context.Context, string, ...any) *sqlx.Row
+	QueryxContext(context.Context, string, ...any) (*sqlx.Rows, error)
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
 func (r *sqlxActionSecretRepository) Upsert(ctx context.Context, secret *entity.ActionSecret) (bool, error) {
 	repoID := actionSecretRepoIDPtr(secret)
 
@@ -52,10 +61,6 @@ func (r *sqlxActionSecretRepository) Upsert(ctx context.Context, secret *entity.
 	keyID := secret.KeyID
 	visibility := actionSecretVisibility(secret)
 
-	if r.DriverName() == "postgres" && repoID == nil {
-		return r.upsertPostgresOrgSecret(ctx, secret, encrypted, keyID, visibility)
-	}
-
 	var query string
 	if r.DriverName() == "postgres" {
 		query = `
@@ -69,7 +74,7 @@ func (r *sqlxActionSecretRepository) Upsert(ctx context.Context, secret *entity.
 				key_id = EXCLUDED.key_id,
 				visibility = EXCLUDED.visibility,
 				updated_at = EXCLUDED.updated_at
-			RETURNING (created_at = updated_at)
+			RETURNING (xmax = 0)
 		`
 	} else {
 		query = `
@@ -109,53 +114,27 @@ func (r *sqlxActionSecretRepository) Upsert(ctx context.Context, secret *entity.
 	return created, nil
 }
 
-func (r *sqlxActionSecretRepository) upsertPostgresOrgSecret(
-	ctx context.Context,
-	secret *entity.ActionSecret,
-	encrypted []byte,
-	keyID, visibility string,
-) (bool, error) {
-	updateQuery := `
-		UPDATE action_secrets
-		SET encrypted_value = $1, key_id = $2, visibility = $3, updated_at = $4
-		WHERE organization_id = $5 AND repository_id IS NULL AND name = $6
-	`
-	result, err := r.DB.ExecContext(ctx, updateQuery, encrypted, keyID, visibility, secret.UpdatedAt, secret.OrganizationID, secret.Name)
-	if err != nil {
-		return false, dbErrors.MapDBError(err)
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return false, dbErrors.MapDBError(err)
-	}
-	if rows > 0 {
-		return false, nil
-	}
-
-	insertQuery := `
-		INSERT INTO action_secrets (
-			id, organization_id, repository_id, name, encrypted_value, key_id, visibility, created_at, updated_at
-		) VALUES (
-			$1, $2, NULL, $3, $4, $5, $6, $7, $8
-		)
-	`
-	if _, err := r.DB.ExecContext(ctx, insertQuery, secret.ID, secret.OrganizationID, secret.Name, encrypted, keyID, visibility, secret.CreatedAt, secret.UpdatedAt); err != nil {
-		return false, dbErrors.MapDBError(err)
-	}
-	return true, nil
-}
-
 func (r *sqlxActionSecretRepository) GetByName(ctx context.Context, orgID uuid.UUID, repoID *uuid.UUID, name string) (*entity.ActionSecret, error) {
-	query := `
-		SELECT id, organization_id, repository_id, name, encrypted_value, key_id, visibility, created_at, updated_at
-		FROM action_secrets
-		WHERE organization_id = ?
-			AND ((repository_id = ?) OR (repository_id IS NULL AND ? IS NULL))
-			AND name = ?
-	`
+	var query string
+	var args []any
+	if repoID == nil {
+		query = `
+			SELECT id, organization_id, repository_id, name, encrypted_value, key_id, visibility, created_at, updated_at
+			FROM action_secrets
+			WHERE organization_id = ? AND repository_id IS NULL AND name = ?
+		`
+		args = []any{orgID, name}
+	} else {
+		query = `
+			SELECT id, organization_id, repository_id, name, encrypted_value, key_id, visibility, created_at, updated_at
+			FROM action_secrets
+			WHERE organization_id = ? AND repository_id = ? AND name = ?
+		`
+		args = []any{orgID, *repoID, name}
+	}
 	query = r.DB.Rebind(query)
 
-	secret, err := r.scanActionSecret(r.DB.QueryRowxContext(ctx, query, orgID, repoIDParam(repoID), repoIDParam(repoID), name), true)
+	secret, _, err := r.scanActionSecret(r.DB.QueryRowxContext(ctx, query, args...), true)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, apperror.ErrNotFound
 	}
@@ -213,7 +192,13 @@ func (r *sqlxActionSecretRepository) Delete(ctx context.Context, orgID uuid.UUID
 }
 
 func (r *sqlxActionSecretRepository) ListForWorkflow(ctx context.Context, orgID, repoID uuid.UUID) ([]*entity.ActionSecret, error) {
-	if err := r.validateRepositoryOrganizationIDs(ctx, orgID, []uuid.UUID{repoID}); err != nil {
+	tx, err := r.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, dbErrors.MapDBError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := r.validateRepositoryOrganizationIDs(ctx, tx, orgID, []uuid.UUID{repoID}); err != nil {
 		return nil, err
 	}
 
@@ -251,9 +236,9 @@ func (r *sqlxActionSecretRepository) ListForWorkflow(ctx context.Context, orgID,
 				)
 			)
 	`
-	query = r.DB.Rebind(query)
+	query = tx.Rebind(query)
 
-	rows, err := r.DB.QueryxContext(ctx, query, orgID, repoID, orgID, repoID, repoID)
+	rows, err := tx.QueryxContext(ctx, query, orgID, repoID, orgID, repoID, repoID)
 	if err != nil {
 		return nil, dbErrors.MapDBError(err)
 	}
@@ -262,17 +247,20 @@ func (r *sqlxActionSecretRepository) ListForWorkflow(ctx context.Context, orgID,
 	repoSecrets := make([]*entity.ActionSecret, 0)
 	orgSecrets := make([]*entity.ActionSecret, 0)
 	for rows.Next() {
-		secret, err := r.scanActionSecret(rows, true)
+		secret, isOrgLevel, err := r.scanActionSecret(rows, true)
 		if err != nil {
 			return nil, dbErrors.MapDBError(err)
 		}
-		if secret.RepositoryID == uuid.Nil {
+		if isOrgLevel {
 			orgSecrets = append(orgSecrets, secret)
 			continue
 		}
 		repoSecrets = append(repoSecrets, secret)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, dbErrors.MapDBError(err)
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, dbErrors.MapDBError(err)
 	}
 
@@ -300,23 +288,8 @@ func (r *sqlxActionSecretRepository) ListForWorkflow(ctx context.Context, orgID,
 }
 
 func (r *sqlxActionSecretRepository) SetSelectedRepositories(ctx context.Context, orgID, secretID uuid.UUID, repoIDs []uuid.UUID) error {
-	secretOrgID, visibility, err := r.getActionSecretMeta(ctx, secretID)
-	if err != nil {
-		return err
-	}
-	if secretOrgID != orgID {
-		return apperror.ErrNotFound
-	}
-	if visibility != "selected" {
-		return apperror.ErrNotFound
-	}
-
 	uniqueRepoIDs, err := uniqueUUIDs(repoIDs)
 	if err != nil {
-		return err
-	}
-
-	if err := r.validateRepositoryOrganizationIDs(ctx, orgID, uniqueRepoIDs); err != nil {
 		return err
 	}
 
@@ -326,6 +299,21 @@ func (r *sqlxActionSecretRepository) SetSelectedRepositories(ctx context.Context
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	secretOrgID, visibility, err := r.getActionSecretMeta(ctx, tx, secretID)
+	if err != nil {
+		return err
+	}
+	if secretOrgID != orgID {
+		return apperror.ErrNotFound
+	}
+	if visibility != "selected" {
+		return apperror.ErrValidation
+	}
+
+	if err := r.validateRepositoryOrganizationIDs(ctx, tx, orgID, uniqueRepoIDs); err != nil {
+		return err
+	}
+
 	deleteQuery := `DELETE FROM action_secret_repositories WHERE secret_id = ?`
 	deleteQuery = tx.Rebind(deleteQuery)
 	if _, err := tx.ExecContext(ctx, deleteQuery, secretID); err != nil {
@@ -333,11 +321,18 @@ func (r *sqlxActionSecretRepository) SetSelectedRepositories(ctx context.Context
 	}
 
 	if len(uniqueRepoIDs) > 0 {
-		insertQuery := tx.Rebind(`INSERT INTO action_secret_repositories (secret_id, repository_id) VALUES (?, ?)`)
-		for _, repoID := range uniqueRepoIDs {
-			if _, err := tx.ExecContext(ctx, insertQuery, secretID, repoID); err != nil {
-				return dbErrors.MapDBError(err)
-			}
+		placeholders := make([]string, len(uniqueRepoIDs))
+		args := make([]any, 0, len(uniqueRepoIDs)*2)
+		for i, repoID := range uniqueRepoIDs {
+			placeholders[i] = "(?, ?)"
+			args = append(args, secretID, repoID)
+		}
+		insertQuery := tx.Rebind(fmt.Sprintf(
+			`INSERT INTO action_secret_repositories (secret_id, repository_id) VALUES %s`,
+			strings.Join(placeholders, ", "),
+		))
+		if _, err := tx.ExecContext(ctx, insertQuery, args...); err != nil {
+			return dbErrors.MapDBError(err)
 		}
 	}
 
@@ -348,7 +343,13 @@ func (r *sqlxActionSecretRepository) SetSelectedRepositories(ctx context.Context
 }
 
 func (r *sqlxActionSecretRepository) GetSelectedRepositories(ctx context.Context, orgID, secretID uuid.UUID) ([]uuid.UUID, error) {
-	secretOrgID, _, err := r.getActionSecretMeta(ctx, secretID)
+	tx, err := r.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, dbErrors.MapDBError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	secretOrgID, _, err := r.getActionSecretMeta(ctx, tx, secretID)
 	if err != nil {
 		return nil, err
 	}
@@ -356,10 +357,16 @@ func (r *sqlxActionSecretRepository) GetSelectedRepositories(ctx context.Context
 		return nil, apperror.ErrNotFound
 	}
 
-	query := `SELECT repository_id FROM action_secret_repositories WHERE secret_id = ? ORDER BY repository_id ASC`
-	query = r.DB.Rebind(query)
+	query := `
+		SELECT sr.repository_id
+		FROM action_secret_repositories sr
+		INNER JOIN action_secrets s ON s.id = sr.secret_id
+		WHERE sr.secret_id = ? AND s.organization_id = ?
+		ORDER BY sr.repository_id ASC
+	`
+	query = tx.Rebind(query)
 
-	rows, err := r.DB.QueryxContext(ctx, query, secretID)
+	rows, err := tx.QueryxContext(ctx, query, secretID, orgID)
 	if err != nil {
 		return nil, dbErrors.MapDBError(err)
 	}
@@ -376,16 +383,19 @@ func (r *sqlxActionSecretRepository) GetSelectedRepositories(ctx context.Context
 	if err := rows.Err(); err != nil {
 		return nil, dbErrors.MapDBError(err)
 	}
+	if err := tx.Commit(); err != nil {
+		return nil, dbErrors.MapDBError(err)
+	}
 	return repoIDs, nil
 }
 
-func (r *sqlxActionSecretRepository) getActionSecretMeta(ctx context.Context, secretID uuid.UUID) (uuid.UUID, string, error) {
+func (r *sqlxActionSecretRepository) getActionSecretMeta(ctx context.Context, db actionSecretDB, secretID uuid.UUID) (uuid.UUID, string, error) {
 	query := `SELECT organization_id, visibility FROM action_secrets WHERE id = ?`
-	query = r.DB.Rebind(query)
+	query = db.Rebind(query)
 
 	var orgID uuid.UUID
 	var visibility sql.NullString
-	err := r.DB.QueryRowxContext(ctx, query, secretID).Scan(&orgID, &visibility)
+	err := db.QueryRowxContext(ctx, query, secretID).Scan(&orgID, &visibility)
 	if errors.Is(err, sql.ErrNoRows) {
 		return uuid.Nil, "", apperror.ErrNotFound
 	}
@@ -406,7 +416,7 @@ func uniqueUUIDs(ids []uuid.UUID) ([]uuid.UUID, error) {
 	unique := make([]uuid.UUID, 0, len(ids))
 	for _, id := range ids {
 		if _, ok := seen[id]; ok {
-			return nil, apperror.ErrNotFound
+			return nil, apperror.ErrValidation
 		}
 		seen[id] = struct{}{}
 		unique = append(unique, id)
@@ -414,7 +424,7 @@ func uniqueUUIDs(ids []uuid.UUID) ([]uuid.UUID, error) {
 	return unique, nil
 }
 
-func (r *sqlxActionSecretRepository) validateRepositoryOrganizationIDs(ctx context.Context, orgID uuid.UUID, repoIDs []uuid.UUID) error {
+func (r *sqlxActionSecretRepository) validateRepositoryOrganizationIDs(ctx context.Context, db actionSecretDB, orgID uuid.UUID, repoIDs []uuid.UUID) error {
 	if len(repoIDs) == 0 {
 		return nil
 	}
@@ -424,10 +434,10 @@ func (r *sqlxActionSecretRepository) validateRepositoryOrganizationIDs(ctx conte
 	if err != nil {
 		return dbErrors.MapDBError(err)
 	}
-	query = r.DB.Rebind(query)
+	query = db.Rebind(query)
 
 	var count int
-	if err := r.DB.QueryRowxContext(ctx, query, args...).Scan(&count); err != nil {
+	if err := db.QueryRowxContext(ctx, query, args...).Scan(&count); err != nil {
 		return dbErrors.MapDBError(err)
 	}
 	if count != len(repoIDs) {
@@ -499,13 +509,13 @@ func (r *sqlxActionSecretRepository) scanActionSecretListRow(scanner actionSecre
 	return &secret, nil
 }
 
-func (r *sqlxActionSecretRepository) scanActionSecret(scanner actionSecretScanner, decrypt bool) (*entity.ActionSecret, error) {
+func (r *sqlxActionSecretRepository) scanActionSecret(scanner actionSecretScanner, decrypt bool) (*entity.ActionSecret, bool, error) {
 	var (
-		secret         entity.ActionSecret
-		repositoryID   sql.NullString
-		encryptedValue []byte
-		keyID          sql.NullString
-		visibility     sql.NullString
+		secret       entity.ActionSecret
+		repositoryID sql.NullString
+		storedValue  []byte
+		keyID        sql.NullString
+		visibility   sql.NullString
 	)
 
 	if err := scanner.Scan(
@@ -513,19 +523,20 @@ func (r *sqlxActionSecretRepository) scanActionSecret(scanner actionSecretScanne
 		&secret.OrganizationID,
 		&repositoryID,
 		&secret.Name,
-		&encryptedValue,
+		&storedValue,
 		&keyID,
 		&visibility,
 		&secret.CreatedAt,
 		&secret.UpdatedAt,
 	); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
+	isOrgLevel := !repositoryID.Valid
 	if repositoryID.Valid {
 		parsed, err := uuid.Parse(repositoryID.String)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		secret.RepositoryID = parsed
 	}
@@ -536,19 +547,28 @@ func (r *sqlxActionSecretRepository) scanActionSecret(scanner actionSecretScanne
 		secret.Visibility = visibility.String
 	}
 
-	if len(encryptedValue) > 0 {
-		if decrypt {
-			decrypted, err := r.enc.Decrypt(encryptedValue)
-			if err != nil {
-				return nil, err
-			}
-			secret.EncryptedValue = string(decrypted)
-		} else {
-			secret.EncryptedValue = string(encryptedValue)
+	if len(storedValue) > 0 {
+		if err := assignActionSecretStoredValue(&secret, storedValue, decrypt, r.enc); err != nil {
+			return nil, false, err
 		}
 	}
 
-	return &secret, nil
+	return &secret, isOrgLevel, nil
+}
+
+// assignActionSecretStoredValue maps DB bytes onto entity.ActionSecret.EncryptedValue.
+// When decrypt is true the field holds caller-facing plaintext despite the legacy name.
+func assignActionSecretStoredValue(secret *entity.ActionSecret, stored []byte, decrypt bool, enc *crypto.ActionSecretEncryptor) error {
+	if decrypt {
+		plaintext, err := enc.Decrypt(stored)
+		if err != nil {
+			return err
+		}
+		secret.EncryptedValue = string(plaintext)
+		return nil
+	}
+	secret.EncryptedValue = string(stored)
+	return nil
 }
 
 func actionSecretRepoIDPtr(secret *entity.ActionSecret) *uuid.UUID {
