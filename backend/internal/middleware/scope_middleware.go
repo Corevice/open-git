@@ -8,7 +8,12 @@ import (
 )
 
 func isJWTAuth(c echo.Context) bool {
-	return c.Get(scopesContextKey) == nil
+	v := c.Get(scopesContextKey)
+	if v == nil {
+		return true
+	}
+	scopes, ok := v.([]string)
+	return !ok || scopes == nil
 }
 
 func hasScope(c echo.Context, scope string) bool {
