@@ -426,6 +426,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3 := e.Group("/api/v3")
 	v3.Use(appmiddleware.GitHubCompatHeaders())
 	v3.Use(appmiddleware.RateLimitMiddleware(5000))
+	v3.Use(appmiddleware.GitHubCommonHeadersMiddleware())
 
 	userHandler.RegisterRoutes(v3, authMiddleware)
 	orgHandler.RegisterRoutes(v3, authMiddleware)
