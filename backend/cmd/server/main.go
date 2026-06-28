@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"database/sql"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -562,6 +563,17 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	rateLimitHandler := handler.NewRateLimitHandler()
 	rootHandler := handler.NewRootHandler()
 
+	thirdPartyLicenses := loadLicensesFromFile(cfg.LicensesFilePath)
+	metaHandler := handler.NewMetaHandler(handler.BuildInfo{
+		AppName:     cfg.AppName,
+		Version:     version,
+		GitCommit:   commit,
+		BuildDate:   buildTime,
+		LicenseName: cfg.LicenseName,
+		SourceURL:   cfg.SourceURL,
+	}, thirdPartyLicenses)
+	metaHandler.RegisterRoutes(e)
+
 	gitHTTPHandler := handler.NewGitHTTPHandler(
 		cfg.GitDataRoot,
 		repoGitResolver,
@@ -667,6 +679,21 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		}()
 	}
 	return sshServer, nil
+}
+
+func loadLicensesFromFile(path string) []handler.LicenseEntry {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		logger.Global().Warn().Err(err).Str("path", path).Msg("failed to load licenses file")
+		return []handler.LicenseEntry{}
+	}
+
+	var entries []handler.LicenseEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		logger.Global().Warn().Err(err).Str("path", path).Msg("failed to parse licenses file")
+		return []handler.LicenseEntry{}
+	}
+	return entries
 }
 
 type noopMCPEnqueuer struct{}
