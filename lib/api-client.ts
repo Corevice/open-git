@@ -13,6 +13,11 @@ export interface ApiClient {
     body: unknown,
     opts?: { token?: string },
   ): Promise<T>;
+  patch<T>(
+    path: string,
+    body: unknown,
+    opts?: { token?: string },
+  ): Promise<T>;
 }
 
 export interface CommitsResult<T> {
@@ -166,6 +171,12 @@ async function handleResponse<T>(res: Response): Promise<T> {
     if (res.status === 401 && typeof window !== "undefined") {
       window.location.href = "/sign-in";
     }
+    if (res.status === 403) {
+      error.code = "forbidden";
+    }
+    if (res.status === 409) {
+      error.code = "conflict";
+    }
     throw error;
   }
   return res.json() as Promise<T>;
@@ -190,6 +201,22 @@ export function createApiClient(baseUrl: string): ApiClient {
     ): Promise<T> {
       const res = await fetch(`${base}${path}`, {
         method: "POST",
+        headers: {
+          ...buildHeaders(opts?.token),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      return handleResponse<T>(res);
+    },
+
+    async patch<T>(
+      path: string,
+      body: unknown,
+      opts?: { token?: string },
+    ): Promise<T> {
+      const res = await fetch(`${base}${path}`, {
+        method: "PATCH",
         headers: {
           ...buildHeaders(opts?.token),
           "Content-Type": "application/json",

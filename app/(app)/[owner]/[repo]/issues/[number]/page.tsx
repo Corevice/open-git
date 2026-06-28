@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import CommentForm from "@/components/issue/CommentForm";
+import { useAuth } from "@/components/providers/auth-provider";
+import { apiClient, isApiError } from "@/lib/api-client";
 import { renderMarkdown } from "@/lib/markdown";
 
 type Label = { name: string; color: string };
@@ -23,10 +25,14 @@ type Comment = {
   user: User;
   created_at: string;
 };
+type CurrentUser = { login: string };
+type OrgMember = { login: string; role: string };
 
 type Props = {
   params: Promise<{ owner: string; repo: string; number: string }>;
 };
+
+const WRITE_ROLES = new Set(["write", "admin", "maintainer", "owner"]);
 
 function formatAge(dateStr: string): string {
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -45,14 +51,33 @@ function labelStyle(color: string): React.CSSProperties {
 }
 
 export default function IssueDetailPage({ params }: Props) {
+  const { token } = useAuth();
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
   const [number, setNumber] = useState("");
   const [issue, setIssue] = useState<Issue | null>(null);
+  const [optimisticState, setOptimisticState] = useState<"open" | "closed">("open");
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [togglingState, setTogglingState] = useState(false);
+  const [canManageIssue, setCanManageIssue] = useState(false);
+  const [toastMessage, setToastMessage] = useState<{
+    message: string;
+    variant: "success" | "error";
+  } | null>(null);
+
+  const toast = useMemo(
+    () => ({
+      success(message: string) {
+        setToastMessage({ message, variant: "success" });
+      },
+      error(message: string) {
+        setToastMessage({ message, variant: "error" });
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     params.then(({ owner: o, repo: r, number: n }) => {
@@ -72,7 +97,9 @@ export default function IssueDetailPage({ params }: Props) {
         fetch(`/repos/${owner}/${repo}/issues/${number}/comments`),
       ]);
       if (!issueRes.ok) throw new Error("Issue not found");
-      setIssue((await issueRes.json()) as Issue);
+      const loadedIssue = (await issueRes.json()) as Issue;
+      setIssue(loadedIssue);
+      setOptimisticState(loadedIssue.state);
       if (commentsRes.ok) setComments((await commentsRes.json()) as Comment[]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load issue");
@@ -85,20 +112,95 @@ export default function IssueDetailPage({ params }: Props) {
     loadIssue();
   }, [loadIssue]);
 
+  useEffect(() => {
+    if (!issue || !token) {
+      setCanManageIssue(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function checkPermissions() {
+      try {
+        const currentUser = await apiClient.get<CurrentUser>("/api/v3/user", {
+          token,
+        });
+        if (cancelled) return;
+
+        if (currentUser.login === issue.user.login) {
+          setCanManageIssue(true);
+          return;
+        }
+
+        if (currentUser.login === owner) {
+          setCanManageIssue(true);
+          return;
+        }
+
+        try {
+          const members = await apiClient.get<OrgMember[]>(
+            `/api/v3/orgs/${owner}/members`,
+            { token },
+          );
+          if (cancelled) return;
+          const membership = members.find((m) => m.login === currentUser.login);
+          setCanManageIssue(
+            membership != null && WRITE_ROLES.has(membership.role),
+          );
+        } catch {
+          if (!cancelled) setCanManageIssue(false);
+        }
+      } catch {
+        if (!cancelled) setCanManageIssue(false);
+      }
+    }
+
+    void checkPermissions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [issue, owner, token]);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = window.setTimeout(() => setToastMessage(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [toastMessage]);
+
   const toggleState = async () => {
-    if (!issue) return;
+    if (!issue || !token) return;
+    const nextState = optimisticState === "open" ? "closed" : "open";
+    const previousState = optimisticState;
+    setOptimisticState(nextState);
     setTogglingState(true);
     try {
-      const nextState = issue.state === "open" ? "closed" : "open";
-      const res = await fetch(`/repos/${owner}/${repo}/issues/${number}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state: nextState }),
-      });
-      if (!res.ok) throw new Error("Failed to update issue state");
-      setIssue((await res.json()) as Issue);
+      await apiClient.patch(
+        `/api/v3/repos/${owner}/${repo}/issues/${number}`,
+        { state: nextState },
+        { token },
+      );
+      setIssue((prev) => (prev ? { ...prev, state: nextState } : prev));
+      toast.success(nextState === "closed" ? "Issue closed" : "Issue reopened");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update issue state");
+      setOptimisticState(previousState);
+      if (isApiError(e)) {
+        if (e.status === 403) {
+          toast.error("Permission denied");
+        } else if (e.status === 409) {
+          if (
+            window.confirm(
+              "This issue was updated elsewhere. Reload the page to see the latest state?",
+            )
+          ) {
+            window.location.reload();
+          }
+        } else {
+          setError(e.message);
+        }
+      } else {
+        setError(e instanceof Error ? e.message : "Failed to update issue state");
+      }
     } finally {
       setTogglingState(false);
     }
@@ -139,27 +241,33 @@ export default function IssueDetailPage({ params }: Props) {
             {issue.title}{" "}
             <span className="text-[#656d76] font-normal">#{issue.number}</span>
           </h1>
-          <button
-            type="button"
-            onClick={toggleState}
-            disabled={togglingState}
-            className={`px-4 py-1.5 text-sm rounded-md font-semibold border disabled:opacity-50 ${
-              issue.state === "open"
-                ? "bg-[#8250df] text-white border-black/10 hover:bg-[#6f42c1]"
-                : "bg-[#1f883d] text-white border-black/10 hover:bg-[#1a7f37]"
-            }`}
-          >
-            {togglingState ? "Updating…" : issue.state === "open" ? "Close issue" : "Reopen issue"}
-          </button>
+          {canManageIssue && (
+            <button
+              type="button"
+              onClick={toggleState}
+              disabled={togglingState}
+              className={`px-4 py-1.5 text-sm rounded-md font-semibold border disabled:opacity-50 ${
+                optimisticState === "open"
+                  ? "bg-[#8250df] text-white border-black/10 hover:bg-[#6f42c1]"
+                  : "bg-[#1f883d] text-white border-black/10 hover:bg-[#1a7f37]"
+              }`}
+            >
+              {togglingState
+                ? "Updating…"
+                : optimisticState === "open"
+                  ? "Close issue"
+                  : "Reopen issue"}
+            </button>
+          )}
         </div>
 
         <div className="mb-4 flex items-center gap-2 flex-wrap">
           <span
             className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold text-white ${
-              issue.state === "open" ? "bg-[#1a7f37]" : "bg-[#8250df]"
+              optimisticState === "open" ? "bg-[#1a7f37]" : "bg-[#8250df]"
             }`}
           >
-            {issue.state === "open" ? "⊙ Open" : "✓ Closed"}
+            {optimisticState === "open" ? "⊙ Open" : "✓ Closed"}
           </span>
           {issue.labels.map((label) => (
             <span
@@ -215,6 +323,19 @@ export default function IssueDetailPage({ params }: Props) {
           onSubmitted={loadIssue}
         />
       </div>
+
+      {toastMessage && (
+        <div
+          role="status"
+          className={`fixed bottom-6 right-6 px-4 py-2 rounded-md text-sm font-medium shadow-lg ${
+            toastMessage.variant === "success"
+              ? "bg-[#1f883d] text-white"
+              : "bg-[#d1242f] text-white"
+          }`}
+        >
+          {toastMessage.message}
+        </div>
+      )}
     </div>
   );
 }
