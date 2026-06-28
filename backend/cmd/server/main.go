@@ -665,6 +665,20 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v1.GET("/health", apiV1HealthHandler.Handle)
 	v1.GET("/version", apiV1VersionHandler.Handle)
 
+	var asynqInspector *asynq.Inspector
+	if cfg.RedisAddr != "" {
+		asynqInspector = asynq.NewInspector(asynq.RedisClientOpt{Addr: cfg.RedisAddr})
+	}
+	adminStatusHandler := handler.NewAPIV1AdminStatusHandler(
+		sqlxDB,
+		healthMinioClient,
+		healthRedisClient,
+		asynqInspector,
+		getenv("MINIO_DATA_PATH", "/"),
+	)
+	v1Ops := v1.Group("", authMiddleware)
+	v1Ops.GET("/admin/status", adminStatusHandler.Handle)
+
 	compatHandler.RegisterRoutes(v1, authMiddleware)
 	mcpVerificationHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
