@@ -1,7 +1,7 @@
 CREATE TABLE action_secrets (
     id TEXT PRIMARY KEY,
-    organization_id TEXT NOT NULL REFERENCES organizations(id),
-    repository_id TEXT REFERENCES repositories(id),
+    organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    repository_id TEXT REFERENCES repositories(id) ON DELETE SET NULL,
     name TEXT NOT NULL,
     encrypted_value BLOB NOT NULL,
     key_id TEXT NOT NULL,
@@ -15,6 +15,6 @@ CREATE INDEX idx_action_secrets_org_repo ON action_secrets(organization_id, repo
 
 CREATE TABLE action_secret_repositories (
     secret_id TEXT NOT NULL REFERENCES action_secrets(id) ON DELETE CASCADE,
-    repository_id TEXT NOT NULL REFERENCES repositories(id),
+    repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
     PRIMARY KEY (secret_id, repository_id)
 );

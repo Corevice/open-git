@@ -2,8 +2,10 @@ package entity_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain/entity"
 )
@@ -42,6 +44,33 @@ func TestActionSecretValidate(t *testing.T) {
 			name: "empty name fails",
 			secret: &entity.ActionSecret{
 				Name:       "",
+				Visibility: entity.VisibilityAll,
+			},
+			wantErr: true,
+		},
+		{
+			name: "selected visibility without repositories fails",
+			secret: &entity.ActionSecret{
+				Name:       "MY_SECRET",
+				Visibility: entity.VisibilitySelected,
+			},
+			wantErr: true,
+		},
+		{
+			name: "selected visibility with repositories passes",
+			secret: &entity.ActionSecret{
+				Name:       "MY_SECRET",
+				Visibility: entity.VisibilitySelected,
+				SelectedRepositoryIDs: []uuid.UUID{
+					uuid.MustParse("550e8400-e29b-41d4-a716-446655440000"),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "name exceeding max length fails",
+			secret: &entity.ActionSecret{
+				Name:       strings.Repeat("A", entity.MaxActionSecretNameLength+1),
 				Visibility: entity.VisibilityAll,
 			},
 			wantErr: true,

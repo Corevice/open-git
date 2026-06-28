@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/nacl/box"
@@ -17,7 +18,11 @@ func newTestActionSecretEncryptor(t *testing.T) *crypto.ActionSecretEncryptor {
 
 	key := bytes.Repeat([]byte{0x42}, 32)
 	t.Setenv("ACTION_SECRET_MASTER_KEY", hex.EncodeToString(key))
-	return crypto.NewActionSecretEncryptorFromEnv()
+	enc, err := crypto.NewActionSecretEncryptorFromEnv()
+	if err != nil {
+		t.Fatalf("NewActionSecretEncryptorFromEnv: %v", err)
+	}
+	return enc
 }
 
 func TestActionSecretEncryptor_EncryptDecryptRoundTrip(t *testing.T) {
@@ -45,6 +50,9 @@ func TestActionSecretEncryptor_KeyIDStable(t *testing.T) {
 	second := enc.KeyID()
 	if first == "" {
 		t.Fatal("KeyID returned empty string")
+	}
+	if len(first) != 64 {
+		t.Fatalf("KeyID length = %d, want 64", len(first))
 	}
 	if first != second {
 		t.Fatalf("KeyID not stable: first=%q second=%q", first, second)
@@ -90,5 +98,41 @@ func TestActionSecretEncryptor_DecryptSealedBox(t *testing.T) {
 	}
 	if !bytes.Equal(got, plaintext) {
 		t.Fatalf("DecryptSealedBox mismatch: got %q, want %q", got, plaintext)
+	}
+}
+
+func TestNewActionSecretEncryptorFromEnv_MissingKey(t *testing.T) {
+	t.Setenv("ACTION_SECRET_MASTER_KEY", "")
+
+	_, err := crypto.NewActionSecretEncryptorFromEnv()
+	if err == nil {
+		t.Fatal("expected error for missing ACTION_SECRET_MASTER_KEY")
+	}
+	if !strings.Contains(err.Error(), "ACTION_SECRET_MASTER_KEY is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewActionSecretEncryptorFromEnv_InvalidHex(t *testing.T) {
+	t.Setenv("ACTION_SECRET_MASTER_KEY", "not-valid-hex")
+
+	_, err := crypto.NewActionSecretEncryptorFromEnv()
+	if err == nil {
+		t.Fatal("expected error for invalid hex key")
+	}
+	if !strings.Contains(err.Error(), "not valid hex") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNewActionSecretEncryptorFromEnv_ShortKey(t *testing.T) {
+	t.Setenv("ACTION_SECRET_MASTER_KEY", hex.EncodeToString([]byte{0x01, 0x02}))
+
+	_, err := crypto.NewActionSecretEncryptorFromEnv()
+	if err == nil {
+		t.Fatal("expected error for short key")
+	}
+	if !strings.Contains(err.Error(), "must be 32-byte hex") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
