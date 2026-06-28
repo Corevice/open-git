@@ -537,6 +537,17 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		mux := asynq.NewServeMux()
 		mcpWorker := worker.NewMCPVerificationWorker(mcpVerificationRepo, cfg.WebBaseURL)
 		mux.HandleFunc(queue.TypeMCPVerification, mcpWorker.HandleMCPVerification)
+		artifactCleanupWorker := worker.NewArtifactCleanupWorker(artifactRepo, artifactStorage, minioBucket)
+		mux.HandleFunc(queue.TypeArtifactCleanup, artifactCleanupWorker.HandleCleanup)
+		scheduler := asynq.NewScheduler(asynq.RedisClientOpt{Addr: cfg.RedisAddr}, nil)
+		if _, err := scheduler.Register("@hourly", asynq.NewTask(queue.TypeArtifactCleanup, nil)); err != nil {
+			return nil, fmt.Errorf("register artifact cleanup scheduler: %w", err)
+		}
+		go func() {
+			if err := scheduler.Run(); err != nil {
+				middleware.Log().Info("asynq scheduler stopped", "error", err)
+			}
+		}()
 		go func() {
 			middleware.Log().Info("asynq server starting")
 			if err := asynqServer.Run(mux); err != nil {
