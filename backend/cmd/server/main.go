@@ -35,6 +35,8 @@ import (
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
+	labelusecase "github.com/open-git/backend/internal/usecase/label"
+	milestoneusecase "github.com/open-git/backend/internal/usecase/milestone"
 	orgUC "github.com/open-git/backend/internal/usecase/org"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
 	userUC "github.com/open-git/backend/internal/usecase/user"
@@ -326,6 +328,11 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	auditLogRepo := infraDB.NewAuditLogRepository(db)
 	sshKeyRepo := infrarepo.NewSSHKeyRepository(sqlxDB)
 	issueRepo := infrarepo.NewIssueRepository(sqlxDB)
+	issueAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	commentRepo := infrarepo.NewCommentRepository(sqlxDB)
+	labelRepo := infrarepo.NewLabelRepository(sqlxDB)
+	milestoneRepo := infrarepo.NewMilestoneRepository(sqlxDB)
+	txManager := infraDB.NewDomainTxManager(sqlxDB)
 
 	authMiddleware := appmiddleware.AuthMiddleware(tokenRepo)
 	realGitBasicAuth := appmiddleware.GitBasicAuthMiddleware(tokenRepo)
@@ -386,8 +393,28 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		})
 	}
 
+	createIssueUC := issueusecase.NewCreateIssueUsecase(issueRepo, issueAuditRepo, txManager)
+	getIssueUC := issueusecase.NewGetIssueUsecase(issueRepo)
+	updateIssueUC := issueusecase.NewUpdateIssueUsecase(issueRepo, labelRepo, milestoneRepo, issueAuditRepo)
+	createCommentUC := issueusecase.NewCreateCommentUsecase(issueRepo, commentRepo, issueAuditRepo)
+	listCommentsUC := issueusecase.NewListCommentsUsecase(issueRepo, commentRepo)
+	updateCommentUC := issueusecase.NewUpdateCommentUsecase(commentRepo, issueAuditRepo)
+	deleteCommentUC := issueusecase.NewDeleteCommentUsecase(commentRepo, issueAuditRepo)
+	createLabelUC := labelusecase.NewCreateLabelUsecase(labelRepo, issueAuditRepo)
+	listLabelsUC := labelusecase.NewListLabelsUsecase(labelRepo)
+	updateLabelUC := labelusecase.NewUpdateLabelUsecase(labelRepo, issueAuditRepo)
+	deleteLabelUC := labelusecase.NewDeleteLabelUsecase(labelRepo, issueAuditRepo)
+	addIssueLabelsUC := labelusecase.NewAddIssueLabelsUsecase(labelRepo)
+	removeIssueLabelUC := labelusecase.NewRemoveIssueLabelUsecase(labelRepo)
+	createMilestoneUC := milestoneusecase.NewCreateMilestoneUsecase(milestoneRepo, issueAuditRepo)
+	listMilestonesUC := milestoneusecase.NewListMilestonesUsecase(milestoneRepo)
+	updateMilestoneUC := milestoneusecase.NewUpdateMilestoneUsecase(milestoneRepo, issueAuditRepo)
+	deleteMilestoneUC := milestoneusecase.NewDeleteMilestoneUsecase(milestoneRepo, issueAuditRepo)
 	listIssuesUC := issueusecase.NewListIssuesUsecase(issueRepo)
-	issueHandler := handler.NewIssueHandler(nil, listIssuesUC, nil, resolveRepo)
+	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, createCommentUC, getIssueUC, updateIssueUC, resolveRepo)
+	commentHandler := handler.NewCommentHandler(listCommentsUC, updateCommentUC, deleteCommentUC, resolveRepo)
+	labelHandler := handler.NewLabelHandler(createLabelUC, listLabelsUC, updateLabelUC, deleteLabelUC, addIssueLabelsUC, removeIssueLabelUC, resolveRepo)
+	milestoneHandler := handler.NewMilestoneHandler(createMilestoneUC, listMilestonesUC, updateMilestoneUC, deleteMilestoneUC, resolveRepo)
 	pullRequestHandler := handler.NewPullRequestHandler(nil, nil, nil, resolveRepo)
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 
@@ -417,6 +444,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	repositoryHandler.RegisterRoutes(api, authMiddleware)
 	contentHandler.RegisterRoutes(api)
 	issueHandler.RegisterRoutes(api, authMiddleware)
+	commentHandler.RegisterRoutes(api, authMiddleware)
+	labelHandler.RegisterRoutes(api, authMiddleware)
+	milestoneHandler.RegisterRoutes(api, authMiddleware)
 	pullRequestHandler.RegisterRoutes(api, authMiddleware)
 	oauthHandler.RegisterRoutes(api, authMiddleware)
 	e.GET("/:owner/:repo.git/info/refs", gitHTTPHandler.InfoRefs, realOptionalGitAuth)
@@ -433,6 +463,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
 	issueHandler.RegisterRoutes(v3, authMiddleware)
+	commentHandler.RegisterRoutes(v3, authMiddleware)
+	labelHandler.RegisterRoutes(v3, authMiddleware)
+	milestoneHandler.RegisterRoutes(v3, authMiddleware)
 	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
 
 	v3Tokens := v3.Group("/user/tokens", authMiddleware)
