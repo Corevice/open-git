@@ -4,9 +4,9 @@ DROP TABLE IF EXISTS issue_assignees;
 DROP INDEX IF EXISTS idx_issue_labels_issue_id;
 DROP TABLE IF EXISTS issue_labels;
 
--- SQLite does not support dropping columns from existing tables without table
--- recreation. Column additions from this migration are therefore not reversible
--- on SQLite. On PostgreSQL, each column can be dropped individually:
+-- SQLite 3.35+ supports DROP COLUMN; project tests use go-sqlite3 with DROP COLUMN
+-- (see 002_webhook_delivery_status.down.sql). milestone_id has no inline REFERENCES
+-- so the column can be dropped here as well.
 
 ALTER TABLE milestones DROP COLUMN updated_at;
 ALTER TABLE milestones DROP COLUMN closed_at;
