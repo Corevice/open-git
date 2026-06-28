@@ -32,11 +32,13 @@ import (
 	appmiddleware "github.com/open-git/backend/internal/middleware"
 	"github.com/open-git/backend/internal/infrastructure/crypto"
 	infraDB "github.com/open-git/backend/internal/infrastructure/database"
+	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
 	orgUC "github.com/open-git/backend/internal/usecase/org"
+	prusecase "github.com/open-git/backend/internal/usecase/pr"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
 	userUC "github.com/open-git/backend/internal/usecase/user"
 	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
@@ -398,7 +400,26 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	createCommentUC := issueusecase.NewCreateCommentUsecase(issueRepo, commentRepo, issueAuditRepo)
 	listIssuesUC := issueusecase.NewListIssuesUsecase(issueRepo)
 	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, createCommentUC, updateIssueUC, resolveRepo)
-	pullRequestHandler := handler.NewPullRequestHandler(nil, nil, nil, resolveRepo)
+
+	gitSvc := infragit.NewGitServiceAdapter()
+	prRepo := infrarepo.NewPullRequestRepository(sqlxDB)
+	prReviewRepo := infrarepo.NewReviewRepository(sqlxDB)
+	prReviewCommentRepo := infrarepo.NewReviewCommentRepository(sqlxDB)
+	bpRepo := infrarepo.NewBranchProtectionRepository(sqlxDB)
+	wfRepo := infrarepo.NewWorkflowRunRepository(sqlxDB)
+	prAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	prTxManager := infrarepo.NewTransactionManager(sqlxDB)
+	createPRUC := prusecase.NewCreatePRUsecase(prRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo)
+	mergePRUC := prusecase.NewMergePRUsecase(prRepo, bpRepo, prReviewRepo, wfRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo)
+	pullRequestHandler := handler.NewPullRequestHandler(
+		createPRUC,
+		mergePRUC,
+		prRepo,
+		prReviewRepo,
+		prReviewCommentRepo,
+		gitSvc,
+		resolveRepo,
+	)
 
 	webhookEncryptor := crypto.NewSecretEncryptorFromEnv()
 	webhookRepo := infrarepo.NewWebhookRepository(sqlxDB, webhookEncryptor)
