@@ -110,6 +110,46 @@ func TestValidToken(t *testing.T) {
 	}
 }
 
+func TestBearerToken(t *testing.T) {
+	raw := "ghp_xxx"
+	repo := &mockAccessTokenRepo{
+		byHash: map[string]*domain.AccessToken{
+			tokenHash(raw): {
+				UserID: 42,
+				Scopes: []string{"read"},
+			},
+		},
+	}
+	e := newAuthTestEcho(repo)
+
+	tests := []struct {
+		name       string
+		header     string
+		wantStatus int
+	}{
+		{name: "token prefix lowercase", header: "token " + raw, wantStatus: http.StatusOK},
+		{name: "token prefix uppercase", header: "TOKEN " + raw, wantStatus: http.StatusOK},
+		{name: "bearer prefix", header: "Bearer " + raw, wantStatus: http.StatusOK},
+		{name: "empty header", header: "", wantStatus: http.StatusUnauthorized},
+		{name: "basic auth", header: "Basic xyz", wantStatus: http.StatusUnauthorized},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tt.header != "" {
+				req.Header.Set("Authorization", tt.header)
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("expected %d, got %d", tt.wantStatus, rec.Code)
+			}
+		})
+	}
+}
+
 func TestExpiredToken(t *testing.T) {
 	raw := "expired-token"
 	expired := time.Now().UTC().Add(-time.Hour)
