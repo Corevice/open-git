@@ -119,7 +119,7 @@ func (h *WorkflowRunHandler) ListRuns(c echo.Context) error {
 
 	runs := make([]workflowRunResponse, 0, len(output.Runs))
 	for _, run := range output.Runs {
-		runs = append(runs, toWorkflowRunResponse(run, c.Param("owner"), c.Param("repo"), c.Request().Host))
+		runs = append(runs, toWorkflowRunResponse(run, c.Scheme(), c.Param("owner"), c.Param("repo"), c.Request().Host))
 	}
 
 	return c.JSON(http.StatusOK, listWorkflowRunsResponse{
@@ -154,7 +154,7 @@ func (h *WorkflowRunHandler) GetRun(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
 	}
 
-	return c.JSON(http.StatusOK, toWorkflowRunResponse(run, c.Param("owner"), c.Param("repo"), c.Request().Host))
+	return c.JSON(http.StatusOK, toWorkflowRunResponse(run, c.Scheme(), c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
 func (h *WorkflowRunHandler) CancelRun(c echo.Context) error {
@@ -255,7 +255,7 @@ func (h *WorkflowRunHandler) ListJobs(c echo.Context) error {
 	})
 }
 
-func toWorkflowRunResponse(run *entity.WorkflowRun, owner, repo, host string) workflowRunResponse {
+func toWorkflowRunResponse(run *entity.WorkflowRun, scheme, owner, repo, host string) workflowRunResponse {
 	var conclusion *string
 	if run.Conclusion != "" {
 		conclusion = &run.Conclusion
@@ -265,43 +265,25 @@ func toWorkflowRunResponse(run *entity.WorkflowRun, owner, repo, host string) wo
 		ID:         middleware.UUIDToInt64(run.ID),
 		NodeID:     NodeID("WorkflowRun", run.ID.String()),
 		Name:       run.Workflow,
+		HeadBranch: run.HeadBranch,
 		HeadSHA:    run.HeadSHA,
+		RunNumber:  run.RunNumber,
+		Event:      run.Event,
 		Status:     run.Status,
 		Conclusion: conclusion,
-		HTMLURL:    workflowRunHTMLURL(host, owner, repo, run.ID),
+		WorkflowID: middleware.UUIDToInt64(run.WorkflowID),
+		HTMLURL:    workflowRunHTMLURL(scheme, host, owner, repo, run.ID),
 		CreatedAt:  run.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:  run.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }
 
-func toWorkflowJobResponse(job *workflowusecase.WorkflowJob) workflowJobResponse {
-	var conclusion *string
-	if job.Conclusion != "" {
-		conclusion = &job.Conclusion
-	}
-
-	resp := workflowJobResponse{
-		ID:     middleware.UUIDToInt64(job.ID),
-		RunID:  middleware.UUIDToInt64(job.RunID),
-		NodeID: NodeID("WorkflowJob", job.ID.String()),
-		Name:   job.Name,
-		Status: job.Status,
-		Conclusion: conclusion,
-	}
-	if job.StartedAt != nil {
-		started := job.StartedAt.UTC().Format(time.RFC3339)
-		resp.StartedAt = &started
-	}
-	if job.CompletedAt != nil {
-		completed := job.CompletedAt.UTC().Format(time.RFC3339)
-		resp.CompletedAt = &completed
-	}
-	return resp
-}
-
-func workflowRunHTMLURL(host, owner, repo string, runID uuid.UUID) string {
+func workflowRunHTMLURL(scheme, host, owner, repo string, runID uuid.UUID) string {
 	if host == "" {
 		return "/repos/" + owner + "/" + repo + "/actions/runs/" + runID.String()
 	}
-	return "https://" + host + "/repos/" + owner + "/" + repo + "/actions/runs/" + runID.String()
+	if scheme == "" {
+		scheme = "https"
+	}
+	return scheme + "://" + host + "/repos/" + owner + "/" + repo + "/actions/runs/" + runID.String()
 }

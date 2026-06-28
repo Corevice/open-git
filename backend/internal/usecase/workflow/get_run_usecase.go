@@ -73,6 +73,7 @@ type RerunRunInput struct {
 }
 
 type rerunRunRepository interface {
+	GetByID(ctx context.Context, orgID, repoID, runID uuid.UUID) (*entity.WorkflowRun, error)
 	Rerun(ctx context.Context, orgID, repoID, runID, actorID uuid.UUID) (*entity.WorkflowRun, error)
 }
 
@@ -85,17 +86,16 @@ func NewRerunRunUsecase(runRepo rerunRunRepository) *RerunRunUsecase {
 }
 
 func (uc *RerunRunUsecase) Execute(ctx context.Context, input RerunRunInput) (*entity.WorkflowRun, error) {
+	run, err := uc.runRepo.GetByID(ctx, input.OrganizationID, input.RepositoryID, input.RunID)
+	if err != nil {
+		return nil, err
+	}
+	if run == nil {
+		return nil, apperror.ErrNotFound
+	}
 	return uc.runRepo.Rerun(ctx, input.OrganizationID, input.RepositoryID, input.RunID, input.ActorID)
 }
 
 func isTerminalRun(run *entity.WorkflowRun) bool {
-	if run.Status == entity.WorkflowStatusCompleted {
-		return true
-	}
-	switch run.Conclusion {
-	case entity.WorkflowConclusionSuccess, "failure", "cancelled", "skipped":
-		return true
-	default:
-		return false
-	}
+	return run.Status == entity.WorkflowStatusCompleted
 }

@@ -101,7 +101,7 @@ func newWorkflowRunHandlerEcho(t *testing.T, runRepo *wfHandlerFullRunRepo, reso
 
 type wfHandlerJobRepo struct{}
 
-func (wfHandlerJobRepo) ListByRunID(_ context.Context, _, _ uuid.UUID) ([]*workflowusecase.WorkflowJob, error) {
+func (wfHandlerJobRepo) ListByRunID(_ context.Context, _, _, _ uuid.UUID) ([]*workflowusecase.WorkflowJob, error) {
 	return []*workflowusecase.WorkflowJob{}, nil
 }
 
@@ -207,6 +207,9 @@ func TestCancelRun_AlreadyComplete(t *testing.T) {
 
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+	if runRepo.cancelled {
+		t.Fatal("expected cancel to be rejected before repository Cancel is called")
 	}
 }
 

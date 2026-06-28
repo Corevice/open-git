@@ -29,8 +29,6 @@ type ListRunsOutput struct {
 type ListRunsFilter struct {
 	OrganizationID uuid.UUID
 	RepositoryID   uuid.UUID
-	Page           int
-	PerPage        int
 }
 
 type listRunsRepository interface {
@@ -61,8 +59,6 @@ func (uc *ListRunsUsecase) Execute(ctx context.Context, input ListRunsInput) (*L
 	runs, _, err := uc.runRepo.List(ctx, ListRunsFilter{
 		OrganizationID: input.OrganizationID,
 		RepositoryID:   input.RepositoryID,
-		Page:           page,
-		PerPage:        perPage,
 	})
 	if err != nil {
 		return nil, err
@@ -72,11 +68,23 @@ func (uc *ListRunsUsecase) Execute(ctx context.Context, input ListRunsInput) (*L
 	total := len(filtered)
 
 	return &ListRunsOutput{
-		Runs:    filtered,
+		Runs:    paginateRuns(filtered, page, perPage),
 		Total:   total,
 		Page:    page,
 		PerPage: perPage,
 	}, nil
+}
+
+func paginateRuns(runs []*entity.WorkflowRun, page, perPage int) []*entity.WorkflowRun {
+	start := (page - 1) * perPage
+	if start >= len(runs) {
+		return []*entity.WorkflowRun{}
+	}
+	end := start + perPage
+	if end > len(runs) {
+		end = len(runs)
+	}
+	return runs[start:end]
 }
 
 func filterRuns(runs []*entity.WorkflowRun, status, branch, event, actor string) []*entity.WorkflowRun {
@@ -117,34 +125,13 @@ func matchesRunStatus(run *entity.WorkflowRun, status string) bool {
 }
 
 func runHeadBranch(run *entity.WorkflowRun) string {
-	type branchCarrier struct {
-		HeadBranch string
-	}
-	extended, ok := any(run).(*branchCarrier)
-	if ok {
-		return extended.HeadBranch
-	}
-	return ""
+	return run.HeadBranch
 }
 
 func runEvent(run *entity.WorkflowRun) string {
-	type eventCarrier struct {
-		Event string
-	}
-	extended, ok := any(run).(*eventCarrier)
-	if ok {
-		return extended.Event
-	}
-	return ""
+	return run.Event
 }
 
 func runActorLogin(run *entity.WorkflowRun) string {
-	type actorCarrier struct {
-		ActorLogin string
-	}
-	extended, ok := any(run).(*actorCarrier)
-	if ok {
-		return extended.ActorLogin
-	}
-	return ""
+	return run.ActorLogin
 }

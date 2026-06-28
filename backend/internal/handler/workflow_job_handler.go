@@ -49,17 +49,6 @@ func (h *WorkflowJobHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareF
 	g.GET("/repos/:owner/:repo/actions/jobs/:job_id/logs/stream", h.StreamJobLogs, auth, readScope)
 }
 
-type workflowJobDetailResponse struct {
-	ID          int64   `json:"id"`
-	RunID       int64   `json:"run_id"`
-	NodeID      string  `json:"node_id"`
-	Name        string  `json:"name"`
-	Status      string  `json:"status"`
-	Conclusion  *string `json:"conclusion"`
-	StartedAt   *string `json:"started_at"`
-	CompletedAt *string `json:"completed_at"`
-}
-
 func (h *WorkflowJobHandler) GetJob(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
@@ -85,7 +74,7 @@ func (h *WorkflowJobHandler) GetJob(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
 	}
 
-	return c.JSON(http.StatusOK, toWorkflowJobDetailResponse(job))
+	return c.JSON(http.StatusOK, toWorkflowJobResponse(job))
 }
 
 func (h *WorkflowJobHandler) GetLogs(c echo.Context) error {
@@ -94,11 +83,12 @@ func (h *WorkflowJobHandler) GetLogs(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid job_id")
 	}
 
-	if err := h.ensureJobAccess(c, jobID); err != nil {
+	repo, err := h.ensureJobAccess(c, jobID)
+	if err != nil {
 		return err
 	}
 
-	chunks, err := h.logRepo.ListChunks(c.Request().Context(), jobID, 0)
+	chunks, err := h.logRepo.ListChunks(c.Request().Context(), repo.OrganizationID, jobID, 0)
 	if err != nil {
 		return err
 	}
@@ -117,72 +107,86 @@ func (h *WorkflowJobHandler) StreamJobLogs(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid job_id")
 	}
 
-	if err := h.ensureJobAccess(c, jobID); err != nil {
+	repo, err := h.ensureJobAccess(c, jobID)
+	if err != nil {
 		return err
 	}
 
 	offset, _ := strconv.ParseInt(c.QueryParam("offset"), 10, 64)
-
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	c.Response().Header().Set("Cache-Control", "no-cache")
-	c.Response().Header().Set("Connection", "keep-alive")
-	c.Response().WriteHeader(http.StatusOK)
 
 	flusher, ok := c.Response().Writer.(http.Flusher)
 	if !ok {
 		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
 	}
 
-	chunks, err := h.logRepo.ListChunks(c.Request().Context(), jobID, offset)
+	chunks, err := h.logRepo.ListChunks(c.Request().Context(), repo.OrganizationID, jobID, offset)
 	if err != nil {
 		return err
 	}
 
+	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	c.Response().Header().Set("Connection", "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+
 	for _, chunk := range chunks {
-		if _, err := fmt.Fprintf(c.Response(), "data: %s\n\n", chunk.Chunk); err != nil {
+		if err := writeSSEData(c.Response(), flusher, chunk.Chunk); err != nil {
 			return err
 		}
-		flusher.Flush()
 	}
 
 	return nil
 }
 
-func (h *WorkflowJobHandler) ensureJobAccess(c echo.Context, jobID uuid.UUID) error {
+func (h *WorkflowJobHandler) ensureJobAccess(c echo.Context, jobID uuid.UUID) (*entity.Repository, error) {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if _, err := middleware.GetUserUUID(c); err != nil {
-		return err
+		return nil, err
 	}
 
 	job, err := h.jobRepo.GetByID(c.Request().Context(), repo.OrganizationID, jobID)
 	if err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+			return nil, echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
 		}
-		return err
+		return nil, err
 	}
 	if job == nil {
-		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return nil, echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
 	}
+	return repo, nil
+}
+
+func writeSSEData(w http.ResponseWriter, flusher http.Flusher, payload string) error {
+	normalized := strings.ReplaceAll(payload, "\r\n", "\n")
+	for _, line := range strings.Split(normalized, "\n") {
+		if _, err := fmt.Fprintf(w, "data: %s\n", line); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprint(w, "\n"); err != nil {
+		return err
+	}
+	flusher.Flush()
 	return nil
 }
 
-func toWorkflowJobDetailResponse(job *workflowusecase.WorkflowJob) workflowJobDetailResponse {
+func toWorkflowJobResponse(job *workflowusecase.WorkflowJob) workflowJobResponse {
 	var conclusion *string
 	if job.Conclusion != "" {
 		conclusion = &job.Conclusion
 	}
 
-	resp := workflowJobDetailResponse{
-		ID:     middleware.UUIDToInt64(job.ID),
-		RunID:  middleware.UUIDToInt64(job.RunID),
-		NodeID: NodeID("WorkflowJob", job.ID.String()),
-		Name:   job.Name,
-		Status: job.Status,
+	resp := workflowJobResponse{
+		ID:         middleware.UUIDToInt64(job.ID),
+		RunID:      middleware.UUIDToInt64(job.RunID),
+		NodeID:     NodeID("WorkflowJob", job.ID.String()),
+		Name:       job.Name,
+		Status:     job.Status,
 		Conclusion: conclusion,
 	}
 	if job.StartedAt != nil {

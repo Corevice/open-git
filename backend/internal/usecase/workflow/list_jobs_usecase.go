@@ -42,7 +42,7 @@ type ListJobsInput struct {
 }
 
 type listJobsRepository interface {
-	ListByRunID(ctx context.Context, orgID, runID uuid.UUID) ([]*WorkflowJob, error)
+	ListByRunID(ctx context.Context, orgID, repoID, runID uuid.UUID) ([]*WorkflowJob, error)
 }
 
 type ListJobsUsecase struct {
@@ -54,7 +54,7 @@ func NewListJobsUsecase(jobRepo listJobsRepository) *ListJobsUsecase {
 }
 
 func (uc *ListJobsUsecase) Execute(ctx context.Context, input ListJobsInput) ([]*WorkflowJob, error) {
-	return uc.jobRepo.ListByRunID(ctx, input.OrganizationID, input.RunID)
+	return uc.jobRepo.ListByRunID(ctx, input.OrganizationID, input.RepositoryID, input.RunID)
 }
 
 type GetJobInput struct {
@@ -100,7 +100,7 @@ func (uc *ListStepsUsecase) Execute(ctx context.Context, input ListStepsInput) (
 }
 
 type JobLogRepository interface {
-	ListChunks(ctx context.Context, jobID uuid.UUID, afterOffset int64) ([]*JobLog, error)
+	ListChunks(ctx context.Context, orgID, jobID uuid.UUID, afterOffset int64) ([]*JobLog, error)
 }
 
 type WorkflowJobRepository interface {
