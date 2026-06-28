@@ -54,7 +54,21 @@ func (m *mockPRRepo) SetMerged(_ context.Context, _ uuid.UUID, _ time.Time, _ uu
 	return nil
 }
 
+type mockRepositoryLookup struct {
+	repo *entity.Repository
+}
+
+func (m *mockRepositoryLookup) GetByID(_ context.Context, repositoryID, organizationID uuid.UUID) (*entity.Repository, error) {
+	if m.repo == nil || m.repo.ID != repositoryID || m.repo.OrganizationID != organizationID {
+		return nil, fmt.Errorf("repository not found")
+	}
+	return m.repo, nil
+}
+
 func TestEnqueuePRMergeableCheck(t *testing.T) {
+	client := asynq.NewClient(asynq.RedisClientOpt{Addr: "127.0.0.1:6379"})
+	defer func() { _ = client.Close() }()
+
 	prID := uuid.New()
 	payload := PRMergeableCheckPayload{
 		GitPath: "/tmp/repo.git",
@@ -63,17 +77,21 @@ func TestEnqueuePRMergeableCheck(t *testing.T) {
 		PRID:    prID,
 	}
 
-	data, err := json.Marshal(payload)
+	info, err := EnqueuePRMergeableCheck(context.Background(), client, payload)
 	if err != nil {
-		t.Fatalf("marshal payload: %v", err)
+		t.Skipf("redis unavailable: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected task info")
+	}
+	if info.Type != TypePRMergeableCheck {
+		t.Fatalf("expected task type %q, got %q", TypePRMergeableCheck, info.Type)
 	}
 
-	task := asynq.NewTask(TypePRMergeableCheck, data)
 	var decoded PRMergeableCheckPayload
-	if err := json.Unmarshal(task.Payload(), &decoded); err != nil {
+	if err := json.Unmarshal(info.Payload, &decoded); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-
 	if decoded.GitPath != payload.GitPath {
 		t.Fatalf("expected git path %q, got %q", payload.GitPath, decoded.GitPath)
 	}
@@ -90,14 +108,25 @@ func TestEnqueuePRMergeableCheck(t *testing.T) {
 
 func TestHandlePRMergeableCheckClean(t *testing.T) {
 	repoPath := initBareRepoWithDivergentBranches(t)
+	orgID := uuid.New()
+	repoID := uuid.New()
 	prID := uuid.New()
 	pr := &entity.PullRequest{
 		ID:             prID,
+		OrganizationID: orgID,
+		RepositoryID:   repoID,
+		HeadRef:        "feature",
+		BaseRef:        "main",
 		MergeableState: entity.MergeableStateUnknown,
 	}
 
 	prRepo := &mockPRRepo{pr: pr}
-	worker := NewPRMergeableWorker(prRepo, git.NewGitServiceAdapter())
+	repoLookup := &mockRepositoryLookup{repo: &entity.Repository{
+		ID:             repoID,
+		OrganizationID: orgID,
+		GitPath:        repoPath,
+	}}
+	worker := NewPRMergeableWorker(prRepo, repoLookup, git.NewGitServiceAdapter())
 
 	task, err := newPRMergeableTask(PRMergeableCheckPayload{
 		GitPath: repoPath,
@@ -137,6 +166,71 @@ func TestHandlePRMergeableCheckClean(t *testing.T) {
 	}
 	if mainRef.Hash() == featureRef.Hash() {
 		t.Fatal("expected main branch to remain unchanged after mergeable simulation")
+	}
+}
+
+func TestHandlePRMergeableCheckDirty(t *testing.T) {
+	repoPath := initBareRepoWithConflictingBranches(t)
+	orgID := uuid.New()
+	repoID := uuid.New()
+	prID := uuid.New()
+	pr := &entity.PullRequest{
+		ID:             prID,
+		OrganizationID: orgID,
+		RepositoryID:   repoID,
+		HeadRef:        "feature",
+		BaseRef:        "main",
+		MergeableState: entity.MergeableStateUnknown,
+	}
+
+	repo, err := gogit.PlainOpen(repoPath)
+	if err != nil {
+		t.Fatalf("PlainOpen: %v", err)
+	}
+	mainRefBefore, err := repo.Reference(plumbing.NewBranchReferenceName("main"), true)
+	if err != nil {
+		t.Fatalf("main ref before: %v", err)
+	}
+	mainSHA := mainRefBefore.Hash()
+
+	prRepo := &mockPRRepo{pr: pr}
+	repoLookup := &mockRepositoryLookup{repo: &entity.Repository{
+		ID:             repoID,
+		OrganizationID: orgID,
+		GitPath:        repoPath,
+	}}
+	worker := NewPRMergeableWorker(prRepo, repoLookup, git.NewGitServiceAdapter())
+
+	task, err := newPRMergeableTask(PRMergeableCheckPayload{
+		GitPath: repoPath,
+		HeadRef: "feature",
+		BaseRef: "main",
+		PRID:    prID,
+	})
+	if err != nil {
+		t.Fatalf("newPRMergeableTask: %v", err)
+	}
+
+	if err := worker.HandlePRMergeableCheck(context.Background(), task); err != nil {
+		t.Fatalf("HandlePRMergeableCheck: %v", err)
+	}
+
+	if prRepo.updated == nil {
+		t.Fatal("expected pull request update")
+	}
+	if prRepo.updated.MergeableState != entity.MergeableStateDirty {
+		t.Fatalf("expected mergeable state %q, got %q", entity.MergeableStateDirty, prRepo.updated.MergeableState)
+	}
+	if prRepo.updated.Mergeable == nil || *prRepo.updated.Mergeable {
+		t.Fatalf("expected mergeable false, got %v", prRepo.updated.Mergeable)
+	}
+
+	mainRefAfter, err := repo.Reference(plumbing.NewBranchReferenceName("main"), true)
+	if err != nil {
+		t.Fatalf("main ref after: %v", err)
+	}
+	if mainRefAfter.Hash() != mainSHA {
+		t.Fatalf("expected main ref %s to be restored, got %s", mainSHA, mainRefAfter.Hash())
 	}
 }
 
@@ -185,6 +279,53 @@ func initBareRepoWithDivergentBranches(t *testing.T) string {
 	}
 
 	featureHash, err := storeBlobCommit(repo, "feature change", map[string]string{"README": "base", "feature.txt": "feature"}, []plumbing.Hash{initHash})
+	if err != nil {
+		t.Fatalf("store feature commit: %v", err)
+	}
+	if err := repo.Storer.SetReference(plumbing.NewHashReference(plumbing.NewBranchReferenceName("feature"), featureHash)); err != nil {
+		t.Fatalf("update feature ref: %v", err)
+	}
+
+	return repoPath
+}
+
+func initBareRepoWithConflictingBranches(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	repoPath := filepath.Join(dir, "test.git")
+	if err := git.InitBare(repoPath); err != nil {
+		t.Fatalf("InitBare: %v", err)
+	}
+
+	repo, err := gogit.PlainOpen(repoPath)
+	if err != nil {
+		t.Fatalf("PlainOpen: %v", err)
+	}
+
+	initHash, err := storeBlobCommit(repo, "init", map[string]string{"README": "base"}, nil)
+	if err != nil {
+		t.Fatalf("store init commit: %v", err)
+	}
+
+	mainRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName("main"), initHash)
+	if err := repo.Storer.SetReference(mainRef); err != nil {
+		t.Fatalf("set main ref: %v", err)
+	}
+	featureRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName("feature"), initHash)
+	if err := repo.Storer.SetReference(featureRef); err != nil {
+		t.Fatalf("set feature ref: %v", err)
+	}
+
+	mainHash, err := storeBlobCommit(repo, "main change", map[string]string{"README": "main version"}, []plumbing.Hash{initHash})
+	if err != nil {
+		t.Fatalf("store main commit: %v", err)
+	}
+	if err := repo.Storer.SetReference(plumbing.NewHashReference(plumbing.NewBranchReferenceName("main"), mainHash)); err != nil {
+		t.Fatalf("update main ref: %v", err)
+	}
+
+	featureHash, err := storeBlobCommit(repo, "feature change", map[string]string{"README": "feature version"}, []plumbing.Hash{initHash})
 	if err != nil {
 		t.Fatalf("store feature commit: %v", err)
 	}
