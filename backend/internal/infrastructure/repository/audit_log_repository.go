@@ -15,7 +15,10 @@ type sqlxAuditLogRepository struct {
 	db *sqlx.DB
 }
 
-var _ domainrepo.IAuditLogRepository = (*sqlxAuditLogRepository)(nil)
+var (
+	_ domainrepo.IAuditLogRepository = (*sqlxAuditLogRepository)(nil)
+	_ domainrepo.AuditLogRepository  = (*sqlxAuditLogRepository)(nil)
+)
 
 func NewAuditLogRepository(db *sqlx.DB) domainrepo.IAuditLogRepository {
 	return &sqlxAuditLogRepository{db: db}
@@ -29,6 +32,7 @@ type AuditLogRow struct {
 	Action         string    `db:"action"`
 	TargetType     string    `db:"target_type"`
 	TargetID       string    `db:"target_id"`
+	IPAddress      string    `db:"ip_address"`
 	Metadata       string    `db:"metadata"`
 	CreatedAt      time.Time `db:"created_at"`
 }
@@ -169,6 +173,86 @@ func (r *sqlxAuditLogRepository) List(ctx context.Context, orgID uuid.UUID, acti
 	if err := countRows.Err(); err != nil {
 		return nil, 0, err
 	}
+
+	rows, err := r.db.NamedQueryContext(ctx, listQuery, args)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var logs []*entity.AuditLog
+	for rows.Next() {
+		var row AuditLogRow
+		if err := rows.StructScan(&row); err != nil {
+			return nil, 0, err
+		}
+		log, err := AuditLogRowToEntity(row)
+		if err != nil {
+			return nil, 0, err
+		}
+		logs = append(logs, log)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	return logs, total, nil
+}
+
+func (r *sqlxAuditLogRepository) ListByOrg(ctx context.Context, opts domainrepo.AuditLogListOpts) ([]*entity.AuditLog, int64, error) {
+	page := opts.Page
+	if page < 1 {
+		page = 1
+	}
+	perPage := opts.PerPage
+	if perPage < 1 {
+		perPage = 30
+	}
+	offset := (page - 1) * perPage
+
+	where := "WHERE organization_id = :org_id"
+	args := map[string]any{
+		"org_id": opts.OrgID,
+	}
+
+	if opts.Action != "" {
+		where += " AND action = :action"
+		args["action"] = opts.Action
+	}
+	if opts.ActorID != nil {
+		where += " AND actor_id = :actor_id"
+		args["actor_id"] = *opts.ActorID
+	}
+	if opts.Since != nil {
+		where += " AND created_at >= :since"
+		args["since"] = *opts.Since
+	}
+	if opts.Until != nil {
+		where += " AND created_at <= :until"
+		args["until"] = *opts.Until
+	}
+
+	countQuery := "SELECT COUNT(*) FROM audit_logs " + where
+	countRows, err := r.db.NamedQueryContext(ctx, countQuery, args)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer countRows.Close()
+
+	var total int64
+	if countRows.Next() {
+		if err := countRows.Scan(&total); err != nil {
+			return nil, 0, err
+		}
+	}
+	if err := countRows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	selectColumns := "id, organization_id, actor_id, actor_login, action, target_type, target_id, metadata, ip_address, created_at"
+	listQuery := "SELECT " + selectColumns + " FROM audit_logs " + where + " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
+	args["limit"] = perPage
+	args["offset"] = offset
 
 	rows, err := r.db.NamedQueryContext(ctx, listQuery, args)
 	if err != nil {
