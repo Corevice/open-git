@@ -27,6 +27,7 @@ import (
 	echoMiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/open-git/backend/internal/compat"
 	"github.com/open-git/backend/internal/config"
@@ -106,6 +107,7 @@ func main() {
 	e.HTTPErrorHandler = newHTTPErrorHandler()
 
 	e.Use(echoMiddleware.RequestID())
+	e.Use(middleware.SecurityHeadersMiddleware())
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.StructuredRecover())
 	e.Use(echoMiddleware.CORSWithConfig(echoMiddleware.CORSConfig{
@@ -586,13 +588,13 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	sshKeyHandler := handler.NewSSHKeyHandler(sshKeyRepo)
 
 	api := e.Group("")
-	e.POST("/register", authHandler.Register)
-	e.POST("/login", authHandler.Login)
+	e.POST("/register", authHandler.Register, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
+	e.POST("/login", authHandler.Login, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
 
 	tokens := api.Group("/user/tokens", authMiddleware)
 	tokens.GET("", tokenHandler.List)
-	tokens.POST("", tokenHandler.Create)
 	tokens.DELETE("/:id", tokenHandler.Revoke)
+	api.Group("", authMiddleware, middleware.RequireScope("repo")).POST("/user/tokens", tokenHandler.Create)
 
 	keys := api.Group("/user/keys", authMiddleware)
 	keys.GET("", sshKeyHandler.List)
@@ -612,11 +614,12 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	v3 := e.Group("/api/v3")
 	v3.Use(middleware.GitHubCompatHeaders())
-	v3.Use(middleware.RateLimitMiddleware(5000))
+	v3.Use(middleware.RateLimitMiddleware(5000, 60))
 	v3.Use(middleware.GitHubCommonHeadersMiddleware())
 
 	userHandler.RegisterRoutes(v3, authMiddleware)
 	userPreferencesHandler.RegisterRoutes(v3, authMiddleware)
+	v3.Group("", authMiddleware, middleware.RequireScope("admin:org")).PUT("/orgs/:org/memberships/:username", orgHandler.UpdateMembership)
 	orgHandler.RegisterRoutes(v3, authMiddleware)
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
@@ -630,8 +633,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	v3Tokens := v3.Group("/user/tokens", authMiddleware)
 	v3Tokens.GET("", tokenHandler.List)
-	v3Tokens.POST("", tokenHandler.Create)
 	v3Tokens.DELETE("/:id", tokenHandler.Revoke)
+	v3.Group("", authMiddleware, middleware.RequireScope("repo")).POST("/user/tokens", tokenHandler.Create)
 
 	v3Keys := v3.Group("/user/keys", authMiddleware)
 	v3Keys.GET("", sshKeyHandler.List)
@@ -639,6 +642,29 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3Keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	v1 := e.Group("/api/v1")
+
+	var healthMinioClient *minio.Client
+	if cfg.MinioEndpoint != "" {
+		client, minioErr := minio.New(cfg.MinioEndpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(os.Getenv("MINIO_ACCESS_KEY"), os.Getenv("MINIO_SECRET_KEY"), ""),
+			Secure: getenvBool("MINIO_USE_TLS", false),
+		})
+		if minioErr != nil {
+			return nil, fmt.Errorf("init health minio client: %w", minioErr)
+		}
+		healthMinioClient = client
+	}
+
+	var healthRedisClient *redis.Client
+	if cfg.RedisAddr != "" {
+		healthRedisClient = redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+	}
+
+	apiV1HealthHandler := handler.NewAPIV1HealthHandler(sqlxDB, healthMinioClient, healthRedisClient)
+	apiV1VersionHandler := handler.NewAPIV1VersionHandler()
+	v1.GET("/health", apiV1HealthHandler.Handle)
+	v1.GET("/version", apiV1VersionHandler.Handle)
+
 	compatHandler.RegisterRoutes(v1, authMiddleware)
 	mcpVerificationHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
