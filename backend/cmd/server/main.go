@@ -453,9 +453,13 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	prTxManager := infrarepo.NewTransactionManager(sqlxDB)
 	createPRUC := prusecase.NewCreatePRUsecase(prRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo)
 	mergePRUC := prusecase.NewMergePRUsecase(prRepo, bpRepo, prReviewRepo, wfRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo)
+	createReviewUC := prusecase.NewCreateReviewUsecase(prRepo, prReviewRepo, prAuditRepo, membershipRepo)
+	listReviewsUC := prusecase.NewListReviewsUsecase(prRepo, prReviewRepo)
 	pullRequestHandler := handler.NewPullRequestHandler(
 		createPRUC,
 		mergePRUC,
+		createReviewUC,
+		listReviewsUC,
 		prRepo,
 		prReviewRepo,
 		prReviewCommentRepo,
