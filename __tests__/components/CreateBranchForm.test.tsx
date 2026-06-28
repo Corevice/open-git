@@ -62,7 +62,7 @@ describe("CreateBranchForm", () => {
         "refs/heads/feature-x",
         "abc1234567890abcdef",
       );
+      expect(mockRefresh).toHaveBeenCalled();
     });
-    expect(mockRefresh).toHaveBeenCalled();
   });
 });
