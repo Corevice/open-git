@@ -193,10 +193,11 @@ func newTestImporterDB(t *testing.T) *sqlx.DB {
 func newTestImporterWorker(t *testing.T, db *sqlx.DB) *ImporterWorker {
 	t.Helper()
 
+	importRepo := repository.NewImportJobRepository(db)
 	return NewImporterWorker(
-		repository.NewImportJobRepository(db),
-		repository.NewImportJobRepository(db),
-		repository.NewImportJobRepository(db),
+		importRepo,
+		importRepo,
+		importRepo,
 		repository.NewIssueRepository(db),
 		repository.NewLabelRepository(db),
 		repository.NewMilestoneRepository(db),
@@ -250,9 +251,10 @@ func newMockGitHubServer(t *testing.T, failIssues bool) *httptest.Server {
 		switch {
 		case r.URL.Path == "/repos/owner/repo" && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"name":        "repo",
-				"description": "Imported repo",
-				"private":     false,
+				"name":            "repo",
+				"description":     "Imported repo",
+				"private":         false,
+				"default_branch":  "main",
 			})
 		case r.URL.Path == "/repos/owner/repo/issues":
 			if failIssues {
@@ -318,7 +320,7 @@ func TestHandleGitHubImport_CompletesJob(t *testing.T) {
 	worker := newTestImporterWorker(t, db).
 		WithAPIBase(server.URL).
 		WithGitStoragePath(gitRoot).
-		WithCloneFn(func(_ context.Context, _, _, destPath string) error {
+		WithCloneFn(func(_ context.Context, _, _, _, _ string) error {
 			return nil
 		})
 
@@ -369,16 +371,16 @@ func TestCheckRateLimitHeaders_ReturnsErrRateLimitExceeded(t *testing.T) {
 
 func TestMapUser_CreatesGhostMapping(t *testing.T) {
 	db := newTestImporterDB(t)
-	_, _, jobID := seedImportFixtures(t, db)
+	_, userID, jobID := seedImportFixtures(t, db)
 	worker := newTestImporterWorker(t, db)
 
-	localID := worker.mapUser(context.Background(), jobID, "ghost-user", "Ghost User")
-	if localID != uuid.Nil {
-		t.Fatalf("expected nil UUID for ghost user, got %s", localID)
+	localID := worker.mapUser(context.Background(), jobID, "ghost-user", "Ghost User", userID)
+	if localID != userID {
+		t.Fatalf("expected fallback author for ghost user, got %s", localID)
 	}
 
-	mappingRepo := repository.NewImportJobRepository(db)
-	mapping, err := mappingRepo.GetMappingByLogin(context.Background(), jobID, "ghost-user")
+	userMappingRepo := repository.NewImportJobRepository(db)
+	mapping, err := userMappingRepo.GetMappingByLogin(context.Background(), jobID, "ghost-user")
 	if err != nil {
 		t.Fatalf("GetMappingByLogin: %v", err)
 	}
@@ -400,7 +402,7 @@ func TestHandleGitHubImport_FailedPhaseSetsFailedStatus(t *testing.T) {
 	worker := newTestImporterWorker(t, db).
 		WithAPIBase(server.URL).
 		WithGitStoragePath(gitRoot).
-		WithCloneFn(func(_ context.Context, _, _, _ string) error {
+		WithCloneFn(func(_ context.Context, _, _, _, _ string) error {
 			return nil
 		})
 
@@ -436,7 +438,10 @@ func TestHandleGitHubImport_FailedPhaseSetsFailedStatus(t *testing.T) {
 func TestRepoGitPath(t *testing.T) {
 	worker := NewImporterWorker(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil).
 		WithGitStoragePath("/data/git")
-	got := worker.repoGitPath("acme", "demo")
+	got, err := worker.repoGitPath("acme", "demo")
+	if err != nil {
+		t.Fatalf("repoGitPath: %v", err)
+	}
 	want := filepath.Join("/data/git", "acme", "demo.git")
 	if got != want {
 		t.Fatalf("repoGitPath: got %q, want %q", got, want)
@@ -460,8 +465,8 @@ func TestMapUser_ReusesExistingMapping(t *testing.T) {
 	_, userID, jobID := seedImportFixtures(t, db)
 	worker := newTestImporterWorker(t, db)
 
-	first := worker.mapUser(context.Background(), jobID, "alice", "Alice")
-	second := worker.mapUser(context.Background(), jobID, "alice", "Alice")
+	first := worker.mapUser(context.Background(), jobID, "alice", "Alice", userID)
+	second := worker.mapUser(context.Background(), jobID, "alice", "Alice", userID)
 	if first != userID || second != userID {
 		t.Fatalf("expected mapped local user %s, got first=%s second=%s", userID, first, second)
 	}

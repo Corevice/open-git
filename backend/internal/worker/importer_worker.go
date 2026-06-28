@@ -10,12 +10,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/open-git/backend/internal/domain/entity"
@@ -49,7 +51,9 @@ type GitHubImportPayload struct {
 	ResumeFromPhase string `json:"resume_from_phase"`
 }
 
-type cloneFunc func(ctx context.Context, cloneURL, tmpDir, destPath string) error
+type cloneFunc func(ctx context.Context, repoURL, token, tmpDir, destPath string) error
+
+var githubIdentPattern = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$`)
 
 type ImporterWorker struct {
 	importJobs    domainrepo.IImportJobRepository
@@ -139,6 +143,12 @@ func (w *ImporterWorker) HandleGitHubImport(ctx context.Context, task *asynq.Tas
 	if payload.SourceOwner == "" || payload.SourceRepo == "" {
 		return fmt.Errorf("importer payload missing source repo: %w", asynq.SkipRetry)
 	}
+	if err := validateGitHubIdent(payload.SourceOwner); err != nil {
+		return fmt.Errorf("invalid source owner: %w: %w", err, asynq.SkipRetry)
+	}
+	if err := validateGitHubIdent(payload.SourceRepo); err != nil {
+		return fmt.Errorf("invalid source repo: %w: %w", err, asynq.SkipRetry)
+	}
 
 	jobID, err := uuid.Parse(payload.ImportJobID)
 	if err != nil {
@@ -149,13 +159,14 @@ func (w *ImporterWorker) HandleGitHubImport(ctx context.Context, task *asynq.Tas
 		return fmt.Errorf("invalid organization id: %w: %w", err, asynq.SkipRetry)
 	}
 
-	job, err := w.importJobs.GetByID(ctx, jobID)
+	job, err := w.importJobs.GetByIDAndOrg(ctx, jobID, orgID)
 	if err != nil {
 		return fmt.Errorf("load import job: %w", err)
 	}
 	if job == nil {
 		return fmt.Errorf("import job not found: %w", asynq.SkipRetry)
 	}
+	orgID = job.OrganizationID
 
 	if err := w.importJobs.UpdateStatus(ctx, jobID, entity.ImportJobStatusRunning); err != nil {
 		return fmt.Errorf("mark job running: %w", err)
@@ -179,7 +190,7 @@ func (w *ImporterWorker) HandleGitHubImport(ctx context.Context, task *asynq.Tas
 		if err := w.importJobs.UpdatePhase(ctx, jobID, entity.ImportJobPhaseClone); err != nil {
 			return fail(entity.ImportJobPhaseClone, err)
 		}
-		if err := w.runPhase(ctx, jobID, entity.ImportJobPhaseClone, func() error {
+		if err := w.runPhase(ctx, jobID, entity.ImportJobPhaseClone, func(_ *entity.ImportPhaseCheckpoint) error {
 			return w.ingestClone(ctx, jobID, orgID, job.TargetName, ownerLogin, payload.SourceOwner, payload.SourceRepo, payload.Token)
 		}); err != nil {
 			return fail(entity.ImportJobPhaseClone, err)
@@ -190,7 +201,7 @@ func (w *ImporterWorker) HandleGitHubImport(ctx context.Context, task *asynq.Tas
 		if err := w.importJobs.UpdatePhase(ctx, jobID, entity.ImportJobPhaseMetadata); err != nil {
 			return fail(entity.ImportJobPhaseMetadata, err)
 		}
-		if err := w.runPhase(ctx, jobID, entity.ImportJobPhaseMetadata, func() error {
+		if err := w.runPhase(ctx, jobID, entity.ImportJobPhaseMetadata, func(_ *entity.ImportPhaseCheckpoint) error {
 			var ingestErr error
 			repoID, gitPath, ingestErr = w.ingestMetadata(ctx, jobID, orgID, job, payload.SourceOwner, payload.SourceRepo, payload.Token, ownerLogin)
 			return ingestErr
@@ -199,11 +210,17 @@ func (w *ImporterWorker) HandleGitHubImport(ctx context.Context, task *asynq.Tas
 		}
 	}
 
-	if repoID == uuid.Nil {
+	if repoID == uuid.Nil || gitPath == "" {
 		var resolveErr error
-		repoID, gitPath, resolveErr = w.resolveTargetRepo(ctx, job)
+		resolvedID, resolvedPath, resolveErr := w.resolveTargetRepo(ctx, job)
 		if resolveErr != nil {
 			return fail(entity.ImportJobPhaseMetadata, resolveErr)
+		}
+		if repoID == uuid.Nil {
+			repoID = resolvedID
+		}
+		if gitPath == "" {
+			gitPath = resolvedPath
 		}
 	}
 
@@ -211,12 +228,8 @@ func (w *ImporterWorker) HandleGitHubImport(ctx context.Context, task *asynq.Tas
 		if err := w.importJobs.UpdatePhase(ctx, jobID, entity.ImportJobPhaseIssues); err != nil {
 			return fail(entity.ImportJobPhaseIssues, err)
 		}
-		if err := w.runPhase(ctx, jobID, entity.ImportJobPhaseIssues, func() error {
-			cp, err := w.checkpoints.GetCheckpoint(ctx, jobID, entity.ImportJobPhaseIssues)
-			if err != nil {
-				return err
-			}
-			return w.ingestIssues(ctx, jobID, orgID, repoID, payload.SourceOwner, payload.SourceRepo, payload.Token, cp)
+		if err := w.runPhase(ctx, jobID, entity.ImportJobPhaseIssues, func(cp *entity.ImportPhaseCheckpoint) error {
+			return w.ingestIssues(ctx, jobID, orgID, repoID, payload.SourceOwner, payload.SourceRepo, payload.Token, job.CreatedBy, cp)
 		}); err != nil {
 			return fail(entity.ImportJobPhaseIssues, err)
 		}
@@ -226,12 +239,8 @@ func (w *ImporterWorker) HandleGitHubImport(ctx context.Context, task *asynq.Tas
 		if err := w.importJobs.UpdatePhase(ctx, jobID, entity.ImportJobPhasePullRequests); err != nil {
 			return fail(entity.ImportJobPhasePullRequests, err)
 		}
-		if err := w.runPhase(ctx, jobID, entity.ImportJobPhasePullRequests, func() error {
-			cp, err := w.checkpoints.GetCheckpoint(ctx, jobID, entity.ImportJobPhasePullRequests)
-			if err != nil {
-				return err
-			}
-			return w.ingestPullRequests(ctx, jobID, orgID, repoID, gitPath, payload.SourceOwner, payload.SourceRepo, payload.Token, cp)
+		if err := w.runPhase(ctx, jobID, entity.ImportJobPhasePullRequests, func(cp *entity.ImportPhaseCheckpoint) error {
+			return w.ingestPullRequests(ctx, jobID, orgID, repoID, gitPath, payload.SourceOwner, payload.SourceRepo, payload.Token, job.CreatedBy, cp)
 		}); err != nil {
 			return fail(entity.ImportJobPhasePullRequests, err)
 		}
@@ -247,7 +256,7 @@ func (w *ImporterWorker) HandleGitHubImport(ctx context.Context, task *asynq.Tas
 }
 
 func (w *ImporterWorker) failImport(ctx context.Context, jobID uuid.UUID, phase entity.ImportJobPhase, err error) error {
-	w.logger.Error("import failed", "job_id", jobID.String(), "phase", string(phase), "error", err)
+	w.logger.Error("import failed", "job_id", jobID.String(), "phase", string(phase), "error", sanitizeLog(err.Error()))
 	_ = w.importJobs.SetError(ctx, jobID, err.Error())
 	_ = w.importJobs.UpdateStatus(ctx, jobID, entity.ImportJobStatusFailed)
 	return err
@@ -270,16 +279,14 @@ func phaseIndex(phase entity.ImportJobPhase) int {
 		return 2
 	case entity.ImportJobPhasePullRequests:
 		return 3
-	case entity.ImportJobPhaseWiki:
-		return 4
 	case entity.ImportJobPhaseDone:
-		return 5
+		return 4
 	default:
 		return 0
 	}
 }
 
-func (w *ImporterWorker) runPhase(ctx context.Context, jobID uuid.UUID, phase entity.ImportJobPhase, fn func() error) error {
+func (w *ImporterWorker) runPhase(ctx context.Context, jobID uuid.UUID, phase entity.ImportJobPhase, fn func(*entity.ImportPhaseCheckpoint) error) error {
 	cp, err := w.checkpoints.GetCheckpoint(ctx, jobID, phase)
 	if err != nil {
 		return err
@@ -287,23 +294,27 @@ func (w *ImporterWorker) runPhase(ctx context.Context, jobID uuid.UUID, phase en
 	if cp != nil && cp.Completed {
 		return nil
 	}
-	if err := fn(); err != nil {
+	if err := fn(cp); err != nil {
 		return err
 	}
 	return w.checkpoints.MarkPhaseComplete(ctx, jobID, phase)
 }
 
-func (w *ImporterWorker) mapUser(ctx context.Context, jobID uuid.UUID, githubLogin, displayName string) uuid.UUID {
+func (w *ImporterWorker) mapUser(ctx context.Context, jobID uuid.UUID, githubLogin, displayName string, fallbackAuthorID uuid.UUID) uuid.UUID {
 	if githubLogin == "" {
-		return uuid.Nil
+		return fallbackAuthorID
 	}
 
 	existing, err := w.userMappings.GetMappingByLogin(ctx, jobID, githubLogin)
-	if err == nil && existing != nil {
+	if err != nil {
+		w.logger.Warn("failed to load user mapping", "job_id", jobID.String(), "login", githubLogin, "error", sanitizeLog(err.Error()))
+		return fallbackAuthorID
+	}
+	if existing != nil {
 		if existing.LocalUserID != nil {
 			return *existing.LocalUserID
 		}
-		return uuid.Nil
+		return fallbackAuthorID
 	}
 
 	mapping := &entity.ImportUserMapping{
@@ -312,15 +323,22 @@ func (w *ImporterWorker) mapUser(ctx context.Context, jobID uuid.UUID, githubLog
 		GitHubDisplayName: displayName,
 	}
 
-	localUser, err := w.users.GetByLogin(ctx, githubLogin)
-	if err == nil && localUser != nil {
+	localUser, lookupErr := w.users.GetByLogin(ctx, githubLogin)
+	if lookupErr != nil {
+		w.logger.Warn("failed to lookup local user", "job_id", jobID.String(), "login", githubLogin, "error", sanitizeLog(lookupErr.Error()))
+	}
+	if lookupErr == nil && localUser != nil {
 		mapping.LocalUserID = &localUser.ID
-		_ = w.userMappings.UpsertMapping(ctx, mapping)
+		if upsertErr := w.userMappings.UpsertMapping(ctx, mapping); upsertErr != nil {
+			w.logger.Warn("failed to save user mapping", "job_id", jobID.String(), "login", githubLogin, "error", sanitizeLog(upsertErr.Error()))
+		}
 		return localUser.ID
 	}
 
-	_ = w.userMappings.UpsertMapping(ctx, mapping)
-	return uuid.Nil
+	if upsertErr := w.userMappings.UpsertMapping(ctx, mapping); upsertErr != nil {
+		w.logger.Warn("failed to save ghost user mapping", "job_id", jobID.String(), "login", githubLogin, "error", sanitizeLog(upsertErr.Error()))
+	}
+	return fallbackAuthorID
 }
 
 func (w *ImporterWorker) ingestMetadata(
@@ -336,12 +354,19 @@ func (w *ImporterWorker) ingestMetadata(
 	}
 
 	description := ghString(ghRepo, "description")
+	defaultBranch := ghString(ghRepo, "default_branch")
+	if defaultBranch == "" {
+		defaultBranch = "main"
+	}
 	visibility := entity.VisibilityPublic
 	if ghBool(ghRepo, "private") {
 		visibility = entity.VisibilityPrivate
 	}
 
-	gitPath := w.repoGitPath(ownerLogin, job.TargetName)
+	gitPath, err := w.repoGitPath(ownerLogin, job.TargetName)
+	if err != nil {
+		return uuid.Nil, "", err
+	}
 	repository := &entity.Repository{
 		OrganizationID: orgID,
 		OwnerID:        job.CreatedBy,
@@ -350,7 +375,7 @@ func (w *ImporterWorker) ingestMetadata(
 		GitPath:        gitPath,
 		OwnerLogin:     ownerLogin,
 		Visibility:     visibility,
-		DefaultBranch:  "main",
+		DefaultBranch:  defaultBranch,
 		CreatedAt:      w.now(),
 	}
 
@@ -367,6 +392,7 @@ func (w *ImporterWorker) ingestIssues(
 	ctx context.Context,
 	jobID, orgID, repoID uuid.UUID,
 	owner, repo, token string,
+	fallbackAuthorID uuid.UUID,
 	checkpoint *entity.ImportPhaseCheckpoint,
 ) error {
 	page := 1
@@ -390,8 +416,8 @@ func (w *ImporterWorker) ingestIssues(
 			if _, isPR := item["pull_request"]; isPR {
 				continue
 			}
-			if err := w.importIssue(ctx, jobID, orgID, repoID, owner, repo, token, item); err != nil {
-				w.logger.Warn("skipped issue", "job_id", jobID.String(), "error", err)
+			if err := w.importIssue(ctx, jobID, orgID, repoID, owner, repo, token, fallbackAuthorID, item); err != nil {
+				w.logger.Warn("skipped issue", "job_id", jobID.String(), "error", sanitizeLog(err.Error()))
 			}
 		}
 
@@ -416,6 +442,7 @@ func (w *ImporterWorker) importIssue(
 	ctx context.Context,
 	jobID, orgID, repoID uuid.UUID,
 	owner, repo, token string,
+	fallbackAuthorID uuid.UUID,
 	item map[string]any,
 ) error {
 	number := ghInt(item, "number")
@@ -427,7 +454,7 @@ func (w *ImporterWorker) importIssue(
 	}
 
 	authorLogin, authorName := ghUser(item, "user")
-	authorID := w.mapUser(ctx, jobID, authorLogin, authorName)
+	authorID := w.mapUser(ctx, jobID, authorLogin, authorName, fallbackAuthorID)
 
 	issue := &entity.Issue{
 		OrganizationID: orgID,
@@ -475,13 +502,14 @@ func (w *ImporterWorker) importIssue(
 		}
 	}
 
-	return w.importIssueComments(ctx, jobID, orgID, issue.ID, owner, repo, token, number)
+	return w.importIssueComments(ctx, jobID, orgID, issue.ID, owner, repo, token, fallbackAuthorID, number)
 }
 
 func (w *ImporterWorker) importIssueComments(
 	ctx context.Context,
 	jobID, orgID, issueID uuid.UUID,
 	owner, repo, token string,
+	fallbackAuthorID uuid.UUID,
 	issueNumber int,
 ) error {
 	page := 1
@@ -497,7 +525,7 @@ func (w *ImporterWorker) importIssueComments(
 
 		for _, item := range items {
 			login, displayName := ghUser(item, "user")
-			authorID := w.mapUser(ctx, jobID, login, displayName)
+			authorID := w.mapUser(ctx, jobID, login, displayName, fallbackAuthorID)
 			comment := &entity.Comment{
 				IssueID:        issueID,
 				OrganizationID: orgID,
@@ -580,6 +608,7 @@ func (w *ImporterWorker) ingestPullRequests(
 	ctx context.Context,
 	jobID, orgID, repoID uuid.UUID,
 	gitPath, owner, repo, token string,
+	fallbackAuthorID uuid.UUID,
 	checkpoint *entity.ImportPhaseCheckpoint,
 ) error {
 	page := 1
@@ -600,8 +629,8 @@ func (w *ImporterWorker) ingestPullRequests(
 		}
 
 		for _, item := range items {
-			if err := w.importPullRequest(ctx, jobID, orgID, repoID, gitPath, item); err != nil {
-				w.logger.Warn("skipped pull request", "job_id", jobID.String(), "error", err)
+			if err := w.importPullRequest(ctx, jobID, orgID, repoID, gitPath, fallbackAuthorID, item); err != nil {
+				w.logger.Warn("skipped pull request", "job_id", jobID.String(), "error", sanitizeLog(err.Error()))
 			}
 		}
 
@@ -626,6 +655,7 @@ func (w *ImporterWorker) importPullRequest(
 	ctx context.Context,
 	jobID, orgID, repoID uuid.UUID,
 	gitPath string,
+	fallbackAuthorID uuid.UUID,
 	item map[string]any,
 ) error {
 	headRef := ghNestedString(item, "head", "ref")
@@ -634,7 +664,7 @@ func (w *ImporterWorker) importPullRequest(
 	baseSHA := ghNestedString(item, "base", "sha")
 
 	login, displayName := ghUser(item, "user")
-	authorID := w.mapUser(ctx, jobID, login, displayName)
+	authorID := w.mapUser(ctx, jobID, login, displayName, fallbackAuthorID)
 
 	state := ghString(item, "state")
 	if state == "" {
@@ -692,8 +722,6 @@ func (w *ImporterWorker) ingestClone(
 	jobID, orgID uuid.UUID,
 	targetName, ownerLogin, sourceOwner, sourceRepo, token string,
 ) error {
-	_ = orgID
-
 	if w.gitStoragePath == "" {
 		return fmt.Errorf("%s is not configured", gitStorageEnv)
 	}
@@ -704,14 +732,18 @@ func (w *ImporterWorker) ingestClone(
 	}
 	defer os.RemoveAll(tmpDir)
 
-	destPath := w.repoGitPath(ownerLogin, targetName)
-	cloneURL := fmt.Sprintf("https://%s@github.com/%s/%s.git", token, sourceOwner, sourceRepo)
+	destPath, err := w.repoGitPath(ownerLogin, targetName)
+	if err != nil {
+		return err
+	}
+	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", sourceOwner, sourceRepo)
 
 	if w.cloneFn != nil {
-		return w.cloneFn(ctx, cloneURL, tmpDir, destPath)
+		return w.cloneFn(ctx, repoURL, token, tmpDir, destPath)
 	}
 
-	if _, err := gogit.PlainClone(tmpDir, false, &gogit.CloneOptions{URL: cloneURL}); err != nil {
+	auth := &githttp.BasicAuth{Username: "x-access-token", Password: token}
+	if _, err := gogit.PlainClone(tmpDir, false, &gogit.CloneOptions{URL: repoURL, Auth: auth}); err != nil {
 		return fmt.Errorf("clone source repository: %w", err)
 	}
 
@@ -725,12 +757,13 @@ func (w *ImporterWorker) ingestClone(
 	}
 
 	if _, err := gogit.PlainClone(destPath, true, &gogit.CloneOptions{
-		URL: "file://" + filepath.ToSlash(absTmp),
+		URL:    "file://" + filepath.ToSlash(absTmp),
+		Mirror: true,
 	}); err != nil {
 		return fmt.Errorf("mirror to local storage: %w", err)
 	}
 
-	w.logger.Info("clone complete", "job_id", jobID.String(), "dest", destPath)
+	w.logger.Info("clone complete", "job_id", jobID.String(), "org_id", orgID.String(), "dest", destPath)
 	return nil
 }
 
@@ -746,8 +779,21 @@ func (w *ImporterWorker) branchExists(gitPath, branch string) bool {
 	return err == nil
 }
 
-func (w *ImporterWorker) repoGitPath(ownerLogin, repoName string) string {
-	return filepath.Join(w.gitStoragePath, ownerLogin, repoName+".git")
+func (w *ImporterWorker) repoGitPath(ownerLogin, repoName string) (string, error) {
+	if err := validateGitHubIdent(ownerLogin); err != nil {
+		return "", fmt.Errorf("invalid owner login: %w", err)
+	}
+	if err := validateGitHubIdent(repoName); err != nil {
+		return "", fmt.Errorf("invalid repository name: %w", err)
+	}
+
+	root := filepath.Clean(w.gitStoragePath)
+	dest := filepath.Clean(filepath.Join(root, ownerLogin, repoName+".git"))
+	rel, err := filepath.Rel(root, dest)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("repository path escapes storage root")
+	}
+	return dest, nil
 }
 
 func (w *ImporterWorker) resolveOwnerLogin(ctx context.Context, job *entity.ImportJob) (string, error) {
@@ -773,42 +819,60 @@ func (w *ImporterWorker) resolveTargetRepo(ctx context.Context, job *entity.Impo
 }
 
 func (w *ImporterWorker) fetchObject(ctx context.Context, url, token string, jobID uuid.UUID) (*http.Response, map[string]any, error) {
-	resp, items, err := w.fetchList(ctx, url, token, jobID)
-	if err != nil {
-		return resp, nil, err
+	for {
+		resp, body, err := w.fetchPage(ctx, url, token)
+		if err != nil {
+			return resp, nil, err
+		}
+		retry, err := w.handleRateLimit(ctx, resp, jobID)
+		if err != nil {
+			return resp, nil, err
+		}
+		if retry {
+			continue
+		}
+		obj, err := decodeSingleObject(body)
+		if err != nil {
+			return resp, nil, fmt.Errorf("decode body: %w", err)
+		}
+		return resp, obj, nil
 	}
-	if len(items) == 0 {
-		return resp, nil, fmt.Errorf("empty response from %s", url)
-	}
-	return resp, items[0], nil
 }
 
 func (w *ImporterWorker) fetchList(ctx context.Context, url, token string, jobID uuid.UUID) (*http.Response, []map[string]any, error) {
 	for {
-		resp, items, err := w.fetchPage(ctx, url, token)
+		resp, body, err := w.fetchPage(ctx, url, token)
 		if err != nil {
 			return resp, nil, err
 		}
-		if err := w.handleRateLimit(ctx, resp, jobID); err != nil {
-			if errors.Is(err, ErrRateLimitExceeded) {
-				continue
-			}
+		retry, err := w.handleRateLimit(ctx, resp, jobID)
+		if err != nil {
 			return resp, nil, err
+		}
+		if retry {
+			continue
+		}
+		items, err := decodeItems(body)
+		if err != nil {
+			return resp, nil, fmt.Errorf("decode body: %w", err)
 		}
 		return resp, items, nil
 	}
 }
 
-func (w *ImporterWorker) handleRateLimit(ctx context.Context, resp *http.Response, jobID uuid.UUID) error {
+func (w *ImporterWorker) handleRateLimit(ctx context.Context, resp *http.Response, jobID uuid.UUID) (bool, error) {
 	err := w.checkRateLimitHeaders(ctx, resp)
+	if err == nil {
+		return false, nil
+	}
 	if !errors.Is(err, ErrRateLimitExceeded) {
-		return err
+		return false, err
 	}
 
 	resetStr := resp.Header.Get(rateLimitResetHeader)
 	resetTs, parseErr := strconv.ParseInt(resetStr, 10, 64)
 	if parseErr != nil || resetTs <= 0 {
-		return ErrRateLimitExceeded
+		return false, fmt.Errorf("rate limit exceeded without valid reset header: %w", ErrRateLimitExceeded)
 	}
 
 	wait := time.Until(time.Unix(resetTs, 0))
@@ -818,14 +882,14 @@ func (w *ImporterWorker) handleRateLimit(ctx context.Context, resp *http.Respons
 		defer timer.Stop()
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return false, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return ErrRateLimitExceeded
+	return true, nil
 }
 
-func (w *ImporterWorker) fetchPage(ctx context.Context, url, token string) (*http.Response, []map[string]any, error) {
+func (w *ImporterWorker) fetchPage(ctx context.Context, url, token string) (*http.Response, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, nil, err
@@ -850,14 +914,22 @@ func (w *ImporterWorker) fetchPage(ctx context.Context, url, token string) (*htt
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp, nil, fmt.Errorf("non-2xx response: %d body=%s", resp.StatusCode, truncate(string(body), 200))
+		return resp, nil, fmt.Errorf("non-2xx response: %d body=%s", resp.StatusCode, sanitizeLog(string(body)))
 	}
 
-	items, err := decodeItems(body)
-	if err != nil {
-		return resp, nil, fmt.Errorf("decode body: %w", err)
+	return resp, body, nil
+}
+
+func decodeSingleObject(body []byte) (map[string]any, error) {
+	trim := strings.TrimSpace(string(body))
+	if len(trim) == 0 {
+		return nil, fmt.Errorf("empty response body")
 	}
-	return resp, items, nil
+	var obj map[string]any
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 func decodeItems(body []byte) ([]map[string]any, error) {
@@ -944,15 +1016,29 @@ func ghNestedString(m map[string]any, outer, inner string) string {
 }
 
 func ghInt(m map[string]any, key string) int {
-	s := ghString(m, key)
-	if s == "" {
-		if v, ok := m[key].(float64); ok {
-			return int(v)
-		}
+	if m == nil {
 		return 0
 	}
-	n, _ := strconv.Atoi(s)
-	return n
+	v, ok := m[key]
+	if !ok || v == nil {
+		return 0
+	}
+	switch t := v.(type) {
+	case float64:
+		return int(t)
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case json.Number:
+		n, _ := t.Int64()
+		return int(n)
+	case string:
+		n, _ := strconv.Atoi(t)
+		return n
+	default:
+		return 0
+	}
 }
 
 func ghBool(m map[string]any, key string) bool {
@@ -1008,9 +1094,24 @@ func ghTimePtr(m map[string]any, key string) *time.Time {
 	return &t
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
+func validateGitHubIdent(name string) error {
+	if name == "" || len(name) > 100 {
+		return fmt.Errorf("invalid github identifier %q", name)
 	}
-	return s[:n] + "..."
+	if strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("invalid github identifier %q", name)
+	}
+	if !githubIdentPattern.MatchString(name) {
+		return fmt.Errorf("invalid github identifier %q", name)
+	}
+	return nil
+}
+
+func sanitizeLog(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	if len(s) > 200 {
+		return s[:200] + "..."
+	}
+	return s
 }
