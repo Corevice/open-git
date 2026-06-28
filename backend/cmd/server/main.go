@@ -24,6 +24,8 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
 	echoMiddleware "github.com/labstack/echo/v4/middleware"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"github.com/open-git/backend/internal/compat"
 	"github.com/open-git/backend/internal/config"
@@ -52,6 +54,7 @@ import (
 	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
 	"github.com/open-git/backend/internal/infrastructure/queue"
 	"github.com/open-git/backend/internal/worker"
+	artifactusecase "github.com/open-git/backend/internal/usecase/artifact"
 )
 
 var (
@@ -484,6 +487,39 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	triggerRunUC := compatusecase.NewTriggerRunUsecase(compatRepo, compatRunner)
 	compatHandler := handler.NewCompatHandler(getReportUC, triggerRunUC, compatRepo)
 
+	minioBucket := getenv("MINIO_BUCKET", "artifacts")
+	var artifactStorage artifactusecase.ArtifactStorage
+	if cfg.MinioEndpoint != "" {
+		minioStorage, err := newArtifactMinioStorage(
+			cfg.MinioEndpoint,
+			os.Getenv("MINIO_ACCESS_KEY"),
+			os.Getenv("MINIO_SECRET_KEY"),
+			getenvBool("MINIO_USE_TLS", false),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("init artifact storage: %w", err)
+		}
+		if err := minioStorage.EnsureBucket(context.Background(), minioBucket); err != nil {
+			return nil, fmt.Errorf("ensure artifact bucket: %w", err)
+		}
+		artifactStorage = minioStorage
+	}
+
+	artifactRepo := infrarepo.NewArtifactRepository(sqlxDB)
+	createArtifactUC := artifactusecase.NewCreateArtifactUsecase(artifactRepo, artifactStorage, minioBucket)
+	completeArtifactUC := artifactusecase.NewCompleteArtifactUsecase(artifactRepo)
+	listArtifactsUC := artifactusecase.NewListArtifactsUsecase(artifactRepo)
+	getArtifactDownloadURLUC := artifactusecase.NewGetArtifactDownloadURLUsecase(artifactRepo, artifactStorage, minioBucket)
+	deleteArtifactUC := artifactusecase.NewDeleteArtifactUsecase(artifactRepo, artifactStorage, minioBucket)
+	artifactHandler := handler.NewArtifactHandler(
+		createArtifactUC,
+		completeArtifactUC,
+		listArtifactsUC,
+		getArtifactDownloadURLUC,
+		deleteArtifactUC,
+		resolveRepo,
+	)
+
 	mcpVerificationRepo := infrarepo.NewSQLxMCPVerificationRepository(sqlxDB)
 	mcpAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
 	getLatestVerificationUC := mcpusecase.NewGetLatestVerificationUsecase(mcpVerificationRepo)
@@ -574,6 +610,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
 	branchProtectionHandler.RegisterRoutes(v3, authMiddleware)
 	webhookHandler.RegisterRoutes(v3, authMiddleware)
+	artifactHandler.RegisterRoutes(v3, authMiddleware)
 	v3.GET("/rate_limit", rateLimitHandler.Get)
 	v3.GET("", rootHandler.Get)
 
@@ -636,6 +673,71 @@ type noopMCPEnqueuer struct{}
 
 func (noopMCPEnqueuer) EnqueueMCPVerification(context.Context, queue.MCPVerificationPayload) error {
 	return errors.New("redis not configured")
+}
+
+type artifactMinioStorage struct {
+	client *minio.Client
+}
+
+func newArtifactMinioStorage(endpoint, accessKey, secretKey string, useTLS bool) (*artifactMinioStorage, error) {
+	client, err := minio.New(endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: useTLS,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &artifactMinioStorage{client: client}, nil
+}
+
+func (s *artifactMinioStorage) EnsureBucket(ctx context.Context, bucket string) error {
+	exists, err := s.client.BucketExists(ctx, bucket)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	return s.client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{})
+}
+
+func (s *artifactMinioStorage) PresignedPutURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
+	u, err := s.client.PresignedPutObject(ctx, bucket, key, expiry)
+	if err != nil {
+		return "", err
+	}
+	return u.String(), nil
+}
+
+func (s *artifactMinioStorage) PresignedGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
+	u, err := s.client.PresignedGetObject(ctx, bucket, key, expiry, nil)
+	if err != nil {
+		return "", err
+	}
+	return u.String(), nil
+}
+
+func (s *artifactMinioStorage) DeleteObject(ctx context.Context, bucket, key string) error {
+	return s.client.RemoveObject(ctx, bucket, key, minio.RemoveObjectOptions{})
+}
+
+func getenv(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultVal
+}
+
+func getenvBool(key string, defaultVal bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return defaultVal
+	}
+	return b
 }
 
 func corsAllowedOrigins() []string {
