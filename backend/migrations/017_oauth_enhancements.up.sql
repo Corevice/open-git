@@ -11,9 +11,8 @@ CREATE TABLE IF NOT EXISTS oauth_grants (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     oauth_application_id TEXT NOT NULL REFERENCES oauth_apps(id) ON DELETE CASCADE,
-    scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    scopes TEXT NOT NULL DEFAULT '[]',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, oauth_application_id)
 );
 
