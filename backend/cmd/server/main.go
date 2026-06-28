@@ -414,10 +414,16 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	keys.POST("", sshKeyHandler.Add)
 	keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
-	repositoryHandler.RegisterRoutes(api, authMiddleware)
-	contentHandler.RegisterRoutes(api)
-	issueHandler.RegisterRoutes(api, authMiddleware)
-	pullRequestHandler.RegisterRoutes(api, authMiddleware)
+	resolveOwner := appmiddleware.ResolveOwner(orgRepo)
+	noopAuth := func(next echo.HandlerFunc) echo.HandlerFunc { return next }
+
+	apiOwnerOrg := api.Group("", resolveOwner)
+	repositoryHandler.RegisterRoutes(apiOwnerOrg, authMiddleware)
+	contentHandler.RegisterRoutes(apiOwnerOrg)
+
+	apiOwnerOrgAuth := api.Group("", authMiddleware, resolveOwner)
+	issueHandler.RegisterRoutes(apiOwnerOrgAuth, noopAuth)
+	pullRequestHandler.RegisterRoutes(apiOwnerOrgAuth, noopAuth)
 	oauthHandler.RegisterRoutes(api, authMiddleware)
 	e.GET("/:owner/:repo.git/info/refs", gitHTTPHandler.InfoRefs, realOptionalGitAuth)
 	e.POST("/:owner/:repo.git/git-upload-pack", gitHTTPHandler.UploadPack, realOptionalGitAuth)
@@ -428,11 +434,15 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3.Use(appmiddleware.RateLimitMiddleware(5000))
 
 	userHandler.RegisterRoutes(v3, authMiddleware)
-	orgHandler.RegisterRoutes(v3, authMiddleware)
-	repositoryHandler.RegisterRoutes(v3, authMiddleware)
-	contentHandler.RegisterRoutes(v3)
-	issueHandler.RegisterRoutes(v3, authMiddleware)
-	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
+
+	v3OwnerOrg := v3.Group("", resolveOwner)
+	orgHandler.RegisterRoutes(v3OwnerOrg, authMiddleware)
+	repositoryHandler.RegisterRoutes(v3OwnerOrg, authMiddleware)
+	contentHandler.RegisterRoutes(v3OwnerOrg)
+
+	v3OwnerOrgAuth := v3.Group("", authMiddleware, resolveOwner)
+	issueHandler.RegisterRoutes(v3OwnerOrgAuth, noopAuth)
+	pullRequestHandler.RegisterRoutes(v3OwnerOrgAuth, noopAuth)
 
 	v3Tokens := v3.Group("/user/tokens", authMiddleware)
 	v3Tokens.GET("", tokenHandler.List)
