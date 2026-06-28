@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
-	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/usecase/repository"
 )
 
@@ -19,7 +18,7 @@ var (
 )
 
 type upsertMockBranchProtectionRepo struct {
-	byPattern   map[string]*entity.BranchProtection
+	byPattern   map[string]*repository.BranchProtectionRule
 	upsertCalls int
 }
 
@@ -27,7 +26,7 @@ func branchProtectionKey(orgID, repoID uuid.UUID, pattern string) string {
 	return fmt.Sprintf("%s:%s:%s", orgID, repoID, pattern)
 }
 
-func (m *upsertMockBranchProtectionRepo) GetByPattern(_ context.Context, orgID, repoID uuid.UUID, pattern string) (*entity.BranchProtection, error) {
+func (m *upsertMockBranchProtectionRepo) GetByPattern(_ context.Context, orgID, repoID uuid.UUID, pattern string) (*repository.BranchProtectionRule, error) {
 	if m.byPattern == nil {
 		return nil, apperror.ErrNotFound
 	}
@@ -38,10 +37,10 @@ func (m *upsertMockBranchProtectionRepo) GetByPattern(_ context.Context, orgID, 
 	return rule, nil
 }
 
-func (m *upsertMockBranchProtectionRepo) Upsert(_ context.Context, orgID, repoID uuid.UUID, rule *entity.BranchProtection) (*entity.BranchProtection, error) {
+func (m *upsertMockBranchProtectionRepo) Upsert(_ context.Context, orgID, repoID uuid.UUID, rule *repository.BranchProtectionRule) (*repository.BranchProtectionRule, error) {
 	m.upsertCalls++
 	if m.byPattern == nil {
-		m.byPattern = map[string]*entity.BranchProtection{}
+		m.byPattern = map[string]*repository.BranchProtectionRule{}
 	}
 	m.byPattern[branchProtectionKey(orgID, repoID, rule.Pattern)] = rule
 	return rule, nil
@@ -69,8 +68,8 @@ func TestUpsertBranchProtectionUsecase(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		rule          *entity.BranchProtection
-		existing      *entity.BranchProtection
+		rule          *repository.BranchProtectionRule
+		existing      *repository.BranchProtectionRule
 		wantErr       error
 		wantAction    string
 		wantUpsert    bool
@@ -78,9 +77,9 @@ func TestUpsertBranchProtectionUsecase(t *testing.T) {
 	}{
 		{
 			name: "happy path create",
-			rule: &entity.BranchProtection{
-				Pattern:                        "main",
-				RequiredApprovingReviewCount:   1,
+			rule: &repository.BranchProtectionRule{
+				Pattern:                      "main",
+				RequiredApprovingReviewCount: 1,
 			},
 			wantAction:    "branch_protection.create",
 			wantUpsert:    true,
@@ -88,13 +87,13 @@ func TestUpsertBranchProtectionUsecase(t *testing.T) {
 		},
 		{
 			name: "happy path update",
-			rule: &entity.BranchProtection{
-				Pattern:                        "release/*",
-				RequiredApprovingReviewCount:   2,
+			rule: &repository.BranchProtectionRule{
+				Pattern:                      "release/*",
+				RequiredApprovingReviewCount: 2,
 			},
-			existing: &entity.BranchProtection{
-				Pattern:                        "release/*",
-				RequiredApprovingReviewCount:   1,
+			existing: &repository.BranchProtectionRule{
+				Pattern:                      "release/*",
+				RequiredApprovingReviewCount: 1,
 			},
 			wantAction:    "branch_protection.update",
 			wantUpsert:    true,
@@ -102,7 +101,7 @@ func TestUpsertBranchProtectionUsecase(t *testing.T) {
 		},
 		{
 			name: "empty pattern",
-			rule: &entity.BranchProtection{
+			rule: &repository.BranchProtectionRule{
 				Pattern:                      "",
 				RequiredApprovingReviewCount: 0,
 			},
@@ -112,7 +111,7 @@ func TestUpsertBranchProtectionUsecase(t *testing.T) {
 		},
 		{
 			name: "invalid glob pattern",
-			rule: &entity.BranchProtection{
+			rule: &repository.BranchProtectionRule{
 				Pattern:                      "[",
 				RequiredApprovingReviewCount: 0,
 			},
@@ -122,7 +121,7 @@ func TestUpsertBranchProtectionUsecase(t *testing.T) {
 		},
 		{
 			name: "review count -1",
-			rule: &entity.BranchProtection{
+			rule: &repository.BranchProtectionRule{
 				Pattern:                      "main",
 				RequiredApprovingReviewCount: -1,
 			},
@@ -132,7 +131,7 @@ func TestUpsertBranchProtectionUsecase(t *testing.T) {
 		},
 		{
 			name: "review count 7",
-			rule: &entity.BranchProtection{
+			rule: &repository.BranchProtectionRule{
 				Pattern:                      "main",
 				RequiredApprovingReviewCount: 7,
 			},
@@ -148,7 +147,7 @@ func TestUpsertBranchProtectionUsecase(t *testing.T) {
 			t.Parallel()
 
 			branchProtectionRepo := &upsertMockBranchProtectionRepo{
-				byPattern: map[string]*entity.BranchProtection{},
+				byPattern: map[string]*repository.BranchProtectionRule{},
 			}
 			if tt.existing != nil {
 				branchProtectionRepo.byPattern[branchProtectionKey(

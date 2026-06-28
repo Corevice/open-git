@@ -7,16 +7,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
-	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/usecase/repository"
 )
 
 type deleteMockBranchProtectionRepo struct {
-	byPattern    map[string]*entity.BranchProtection
+	byPattern    map[string]*repository.BranchProtectionRule
 	deleteCalled bool
 }
 
-func (m *deleteMockBranchProtectionRepo) GetByPattern(_ context.Context, orgID, repoID uuid.UUID, pattern string) (*entity.BranchProtection, error) {
+func (m *deleteMockBranchProtectionRepo) GetByPattern(_ context.Context, orgID, repoID uuid.UUID, pattern string) (*repository.BranchProtectionRule, error) {
 	if m.byPattern == nil {
 		return nil, apperror.ErrNotFound
 	}
@@ -27,7 +26,7 @@ func (m *deleteMockBranchProtectionRepo) GetByPattern(_ context.Context, orgID, 
 	return rule, nil
 }
 
-func (m *deleteMockBranchProtectionRepo) Upsert(context.Context, uuid.UUID, uuid.UUID, *entity.BranchProtection) (*entity.BranchProtection, error) {
+func (m *deleteMockBranchProtectionRepo) Upsert(context.Context, uuid.UUID, uuid.UUID, *repository.BranchProtectionRule) (*repository.BranchProtectionRule, error) {
 	return nil, nil
 }
 
@@ -56,7 +55,7 @@ func TestDeleteBranchProtectionUsecase(t *testing.T) {
 
 		pattern := "main"
 		branchProtectionRepo := &deleteMockBranchProtectionRepo{
-			byPattern: map[string]*entity.BranchProtection{
+			byPattern: map[string]*repository.BranchProtectionRule{
 				branchProtectionKey(testBranchProtectionOrgID, testBranchProtectionRepoID, pattern): {
 					Pattern: pattern,
 				},
@@ -90,7 +89,7 @@ func TestDeleteBranchProtectionUsecase(t *testing.T) {
 		t.Parallel()
 
 		branchProtectionRepo := &deleteMockBranchProtectionRepo{
-			byPattern: map[string]*entity.BranchProtection{},
+			byPattern: map[string]*repository.BranchProtectionRule{},
 		}
 		auditLogRepo := &deleteMockAuditLogRepo{}
 		uc := repository.NewDeleteBranchProtectionUsecase(branchProtectionRepo, auditLogRepo)

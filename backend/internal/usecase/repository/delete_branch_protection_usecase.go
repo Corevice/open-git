@@ -8,12 +8,12 @@ import (
 )
 
 type DeleteBranchProtectionUsecase struct {
-	branchProtectionRepo repo.IBranchProtectionRepository
+	branchProtectionRepo BranchProtectionRepository
 	auditLogRepo         repo.IAuditLogRepository
 }
 
 func NewDeleteBranchProtectionUsecase(
-	branchProtectionRepo repo.IBranchProtectionRepository,
+	branchProtectionRepo BranchProtectionRepository,
 	auditLogRepo repo.IAuditLogRepository,
 ) *DeleteBranchProtectionUsecase {
 	return &DeleteBranchProtectionUsecase{

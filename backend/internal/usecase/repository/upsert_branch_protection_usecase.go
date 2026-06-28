@@ -7,17 +7,27 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
-	"github.com/open-git/backend/internal/domain/entity"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
+type BranchProtectionRule struct {
+	Pattern                      string
+	RequiredApprovingReviewCount int
+}
+
+type BranchProtectionRepository interface {
+	GetByPattern(ctx context.Context, orgID, repoID uuid.UUID, pattern string) (*BranchProtectionRule, error)
+	Upsert(ctx context.Context, orgID, repoID uuid.UUID, rule *BranchProtectionRule) (*BranchProtectionRule, error)
+	DeleteByPattern(ctx context.Context, orgID, repoID uuid.UUID, pattern string) error
+}
+
 type UpsertBranchProtectionUsecase struct {
-	branchProtectionRepo repo.IBranchProtectionRepository
+	branchProtectionRepo BranchProtectionRepository
 	auditLogRepo         repo.IAuditLogRepository
 }
 
 func NewUpsertBranchProtectionUsecase(
-	branchProtectionRepo repo.IBranchProtectionRepository,
+	branchProtectionRepo BranchProtectionRepository,
 	auditLogRepo repo.IAuditLogRepository,
 ) *UpsertBranchProtectionUsecase {
 	return &UpsertBranchProtectionUsecase{
@@ -29,8 +39,8 @@ func NewUpsertBranchProtectionUsecase(
 func (u *UpsertBranchProtectionUsecase) Execute(
 	ctx context.Context,
 	orgID, repoID, actorID uuid.UUID,
-	rule *entity.BranchProtection,
-) (*entity.BranchProtection, error) {
+	rule *BranchProtectionRule,
+) (*BranchProtectionRule, error) {
 	if rule.Pattern == "" {
 		return nil, apperror.ErrValidation
 	}
