@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
 	"github.com/open-git/backend/internal/domain/entity"
@@ -16,10 +17,7 @@ import (
 	"github.com/open-git/backend/internal/infrastructure/runner"
 )
 
-const (
-	defaultJobTimeoutMinutes = 360
-	conclusionTimedOut       = "timed_out"
-)
+const defaultJobTimeoutMinutes = 360
 
 type workflowStepRepository interface {
 	ListByJobID(ctx context.Context, orgID, jobID string) ([]*runner.Step, error)
@@ -96,17 +94,30 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 		return fmt.Errorf("workflow job exec payload missing identifiers: %w", asynq.SkipRetry)
 	}
 
-	job, err := h.jobRepo.GetByID(ctx, payload.OrgID, payload.JobID)
+	orgUUID, err := uuid.Parse(payload.OrgID)
+	if err != nil {
+		return fmt.Errorf("parse org id: %v: %w", err, asynq.SkipRetry)
+	}
+	runUUID, err := uuid.Parse(payload.RunID)
+	if err != nil {
+		return fmt.Errorf("parse run id: %v: %w", err, asynq.SkipRetry)
+	}
+	jobUUID, err := uuid.Parse(payload.JobID)
+	if err != nil {
+		return fmt.Errorf("parse job id: %v: %w", err, asynq.SkipRetry)
+	}
+
+	job, err := h.jobRepo.GetByID(ctx, jobUUID)
 	if err != nil {
 		return fmt.Errorf("load workflow job: %w", err)
 	}
-	if job.OrganizationID != payload.OrgID {
+	if job.OrganizationID != orgUUID {
 		return fmt.Errorf("job organization mismatch: %w", asynq.SkipRetry)
 	}
-	if job.RepositoryID == "" {
+	if job.RepositoryID == uuid.Nil {
 		return fmt.Errorf("job repository id missing: %w", asynq.SkipRetry)
 	}
-	if job.WorkflowRunID != payload.RunID {
+	if job.WorkflowRunID == nil || *job.WorkflowRunID != runUUID {
 		return fmt.Errorf("job run mismatch: %w", asynq.SkipRetry)
 	}
 
@@ -115,7 +126,7 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 		return fmt.Errorf("load workflow steps: %w", err)
 	}
 
-	if err := h.jobRepo.UpdateStatus(ctx, payload.JobID, entity.WorkflowJobStatusInProgress, "", nil); err != nil {
+	if err := h.jobRepo.UpdateStatus(ctx, jobUUID, entity.WorkflowJobStatusInProgress, ""); err != nil {
 		return fmt.Errorf("set job in_progress: %w", err)
 	}
 
@@ -125,7 +136,7 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 
 	secretMap := map[string]string{}
 	if h.secrets != nil {
-		secretMap, err = h.secrets.GetSecrets(ctx, payload.OrgID, job.RepositoryID)
+		secretMap, err = h.secrets.GetSecrets(ctx, payload.OrgID, job.RepositoryID.String())
 		if err != nil {
 			return fmt.Errorf("load secrets: %w", err)
 		}
@@ -149,8 +160,15 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 	}
 
 	completedAt := time.Now().UTC()
-	if err := h.jobRepo.UpdateStatus(ctx, payload.JobID, status, conclusion, &completedAt); err != nil {
-		return fmt.Errorf("update job terminal status: %w", err)
+	switch status {
+	case entity.WorkflowJobStatusCompleted:
+		if err := h.jobRepo.Complete(ctx, jobUUID, conclusion, completedAt); err != nil {
+			return fmt.Errorf("update job terminal status: %w", err)
+		}
+	default:
+		if err := h.jobRepo.UpdateStatus(ctx, jobUUID, status, conclusion); err != nil {
+			return fmt.Errorf("update job terminal status: %w", err)
+		}
 	}
 
 	if err := h.enqueuer.EnqueueSchedule(ctx, WorkflowSchedulePayload{
@@ -178,7 +196,7 @@ func (h *WorkflowJobExecHandler) buildLogCallback(
 		}
 		line := &entity.JobLogLine{
 			OrganizationID: payload.OrgID,
-			RepositoryID:   job.RepositoryID,
+			RepositoryID:   job.RepositoryID.String(),
 			RunID:          payload.RunID,
 			JobID:          payload.JobID,
 			LineNumber:     offset,

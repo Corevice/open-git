@@ -11,6 +11,7 @@ import (
 
 	gossh "github.com/gliderlabs/ssh"
 	"github.com/google/uuid"
+	xssh "golang.org/x/crypto/ssh"
 
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/repository"
@@ -108,16 +109,13 @@ func (h *SSHServer) Close() error {
 	return h.server.Close()
 }
 
-func (h *SSHServer) authenticateKey(ctx gossh.Context, key gossh.PublicKey) (*gossh.Permissions, error) {
-	fingerprint := gossh.FingerprintSHA256(key)
+func (h *SSHServer) authenticateKey(ctx gossh.Context, key gossh.PublicKey) bool {
+	fingerprint := xssh.FingerprintSHA256(key)
 	stored, err := h.keyStore.FindByFingerprint(ctx, fingerprint)
-	if err != nil {
-		return nil, fmt.Errorf("lookup ssh key: %w", err)
+	if err != nil || stored == nil {
+		return false
 	}
-	if stored == nil {
-		return nil, gossh.ErrKeyRejected
-	}
-	return nil, nil
+	return true
 }
 
 func (h *SSHServer) handleSession(s gossh.Session) {
