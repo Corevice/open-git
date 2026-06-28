@@ -167,8 +167,8 @@ func TestProtectionNotSatisfied(t *testing.T) {
 		&mockPullRequestRepo{prs: []*entity.PullRequest{pr}},
 		&mockBranchProtectionRepo{
 			protection: &entity.BranchProtection{
-				RequiredReviews: 2,
-				RequiredChecks:  []string{"ci/build"},
+				RequiredApprovingReviews: 2,
+				RequiredStatusChecks:     []string{"ci/build"},
 			},
 		},
 		&mockReviewRepo{satisfiedReviews: 1},

@@ -117,11 +117,11 @@ func (uc *MergePRUsecase) checkBranchProtection(ctx context.Context, repositoryI
 	if err != nil {
 		return err
 	}
-	if satisfiedReviews < protection.RequiredReviews {
+	if satisfiedReviews < protection.RequiredApprovingReviews {
 		return apperror.ErrProtectionNotSatisfied
 	}
 
-	if len(protection.RequiredChecks) == 0 {
+	if len(protection.RequiredStatusChecks) == 0 {
 		return nil
 	}
 
@@ -134,7 +134,7 @@ func (uc *MergePRUsecase) checkBranchProtection(ctx context.Context, repositoryI
 	if err != nil {
 		return err
 	}
-	if !allRequiredChecksPassed(protection.RequiredChecks, runs) {
+	if !allRequiredChecksPassed(protection.RequiredStatusChecks, runs) {
 		return apperror.ErrProtectionNotSatisfied
 	}
 
