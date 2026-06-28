@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -15,12 +16,13 @@ import (
 )
 
 type RepositoryHandler struct {
-	create    *repoUC.CreateRepositoryUsecase
-	get       *repoUC.GetRepositoryUsecase
-	listRepos *repoUC.ListRepositoriesUsecase
-	repos     repo.IRepositoryRepository
-	orgs      repo.IOrganizationRepository
-	auditLog  repo.IAuditLogRepository
+	create        *repoUC.CreateRepositoryUsecase
+	get           *repoUC.GetRepositoryUsecase
+	listRepos     *repoUC.ListRepositoriesUsecase
+	repos         repo.IRepositoryRepository
+	orgs          repo.IOrganizationRepository
+	auditLog      repo.IAuditLogRepository
+	listAuditLogs *repoUC.ListAuditLogsUsecase
 }
 
 func NewRepositoryHandler(
@@ -30,14 +32,16 @@ func NewRepositoryHandler(
 	repos repo.IRepositoryRepository,
 	orgs repo.IOrganizationRepository,
 	auditLog repo.IAuditLogRepository,
+	listAuditLogs *repoUC.ListAuditLogsUsecase,
 ) *RepositoryHandler {
 	return &RepositoryHandler{
-		create:    create,
-		get:       get,
-		listRepos: listRepos,
-		repos:     repos,
-		orgs:      orgs,
-		auditLog:  auditLog,
+		create:        create,
+		get:           get,
+		listRepos:     listRepos,
+		repos:         repos,
+		orgs:          orgs,
+		auditLog:      auditLog,
+		listAuditLogs: listAuditLogs,
 	}
 }
 
@@ -50,6 +54,7 @@ func (h *RepositoryHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.Mi
 	g.GET("/repos/:owner/:repo", h.GetRepository, middleware.OptionalAuth())
 	g.PATCH("/repos/:owner/:repo", h.UpdateRepository, authMiddleware, repoScope)
 	g.DELETE("/repos/:owner/:repo", h.DeleteRepository, authMiddleware, repoScope)
+	g.GET("/repos/:owner/:repo/audit-log", h.GetAuditLog, authMiddleware)
 }
 
 type createRepositoryRequest struct {
@@ -351,6 +356,87 @@ func (h *RepositoryHandler) UpdateRepository(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, toRepositoryResponse(repository, c.Request().Host))
+}
+
+type auditLogEntryResponse struct {
+	ID         string         `json:"id"`
+	ActorLogin string         `json:"actor_login"`
+	Action     string         `json:"action"`
+	TargetType string         `json:"target_type"`
+	TargetID   string         `json:"target_id"`
+	CreatedAt  string         `json:"created_at"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+}
+
+func toAuditLogResponse(log *entity.AuditLog) auditLogEntryResponse {
+	return auditLogEntryResponse{
+		ID:         log.ID.String(),
+		ActorLogin: log.ActorLogin,
+		Action:     log.Action,
+		TargetType: log.TargetType,
+		TargetID:   log.TargetID,
+		CreatedAt:  log.CreatedAt.Format(time.RFC3339),
+		Metadata:   log.Metadata,
+	}
+}
+
+func (h *RepositoryHandler) GetAuditLog(c echo.Context) error {
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		return err
+	}
+	userUUID, err := middleware.GetUserUUID(c)
+	if err != nil {
+		return err
+	}
+
+	ctx := c.Request().Context()
+	repository, err := h.get.Execute(ctx, repoUC.GetRepositoryInput{
+		RequestUserID: userUUID,
+		OwnerLogin:    c.Param("owner"),
+		Name:          c.Param("repo"),
+	})
+	if err != nil {
+		if errors.Is(err, repoUC.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to get repository"})
+	}
+
+	role, err := h.orgs.GetMemberRole(ctx, middleware.UUIDToInt64(repository.OrganizationID), userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to check membership"})
+	}
+	if role != "admin" && role != "owner" {
+		return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "Forbidden"})
+	}
+
+	page, perPage, err := middleware.ParsePaginationParams(c)
+	if err != nil {
+		return err
+	}
+
+	action := c.QueryParam("action")
+
+	output, err := h.listAuditLogs.Execute(ctx, repoUC.ListAuditLogsInput{
+		OrganizationID: repository.OrganizationID,
+		Action:         action,
+		Page:           page,
+		PerPage:        perPage,
+	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to list audit logs"})
+	}
+
+	if link := middleware.BuildLinkHeader(c.Request().URL.Path, page, perPage, output.Total); link != "" {
+		c.Response().Header().Set("Link", link)
+	}
+
+	resp := make([]auditLogEntryResponse, 0, len(output.Logs))
+	for _, log := range output.Logs {
+		resp = append(resp, toAuditLogResponse(log))
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {

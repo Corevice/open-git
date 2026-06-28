@@ -45,6 +45,7 @@ import (
 	prusecase "github.com/open-git/backend/internal/usecase/pr"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
 	userUC "github.com/open-git/backend/internal/usecase/user"
+	userpreferencesUC "github.com/open-git/backend/internal/usecase/user_preferences"
 	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
 )
 
@@ -362,12 +363,19 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	)
 	getRepoUC := repoUC.NewGetRepositoryUsecase(repoRepo, userRepo, legacyMembershipRepo)
 	listReposUC := repoUC.NewListRepositoriesUsecase(repoRepo, legacyMembershipRepo, userRepo)
-	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, listReposUC, repoRepo, orgRepo, auditLogRepo)
+	auditListRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	listAuditLogsUC := repoUC.NewListAuditLogsUsecase(auditListRepo)
+	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, listReposUC, repoRepo, orgRepo, auditLogRepo, listAuditLogsUC)
 
 	getCurrentUserUC := userUC.NewGetCurrentUserUsecase(userRepo)
 	getUserByLoginUC := userUC.NewGetUserByLoginUsecase(userRepo)
 	updateUserUC := userUC.NewUpdateUserUsecase(entityUserRepo)
 	userHandler := handler.NewUserHandler(getCurrentUserUC, getUserByLoginUC, updateUserUC)
+
+	userPrefsRepo := infrarepo.NewUserPreferencesRepository(sqlxDB)
+	getUserPrefsUC := userpreferencesUC.NewGetUserPreferencesUsecase(userPrefsRepo)
+	updateUserPrefsUC := userpreferencesUC.NewUpdateUserPreferencesUsecase(userPrefsRepo)
+	userPreferencesHandler := handler.NewUserPreferencesHandler(getUserPrefsUC, updateUserPrefsUC)
 
 	getOrgUC := orgUC.NewGetOrgUsecase(orgRepo)
 	listUserOrgsUC := orgUC.NewListUserOrgsUsecase(orgRepo)
@@ -521,6 +529,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3.Use(appmiddleware.GitHubCommonHeadersMiddleware())
 
 	userHandler.RegisterRoutes(v3, authMiddleware)
+	userPreferencesHandler.RegisterRoutes(v3, authMiddleware)
 	orgHandler.RegisterRoutes(v3, authMiddleware)
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)

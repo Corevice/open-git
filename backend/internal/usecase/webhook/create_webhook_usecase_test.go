@@ -68,6 +68,14 @@ func (m *mockCreateAuditLogRepo) InsertAuditLog(
 	return nil
 }
 
+func (m *mockCreateAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (m *mockCreateAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 func TestCreateWebhookUsecaseSuccess(t *testing.T) {
 	repo := &mockWebhookRepo{}
 	auditRepo := &mockCreateAuditLogRepo{}
