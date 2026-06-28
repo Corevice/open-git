@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
-type Label = { name: string; color: string };
-type Milestone = { number: number; title: string; open_issues: number };
+import IssueFilters from "@/components/issue/IssueFilters";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Pagination } from "@/components/ui/pagination";
+
 type PullRequestItem = {
   number: number;
   title: string;
@@ -24,6 +25,7 @@ type Props = {
     state?: string;
     labels?: string;
     milestone?: string;
+    assignee?: string;
     page?: string;
   }>;
 };
@@ -36,15 +38,6 @@ function parseLinkHeader(header: string | null): Record<string, string> {
     if (match) links[match[2]] = match[1];
   }
   return links;
-}
-
-function linkToPath(url: string): string {
-  try {
-    const parsed = new URL(url, "http://localhost");
-    return `${parsed.pathname}${parsed.search}`;
-  } catch {
-    return url;
-  }
 }
 
 function formatAge(dateStr: string): string {
@@ -60,11 +53,6 @@ function formatAge(dateStr: string): string {
   if (months < 12) return `${months} month${months === 1 ? "" : "s"} ago`;
   const years = Math.floor(months / 12);
   return `${years} year${years === 1 ? "" : "s"} ago`;
-}
-
-function labelStyle(color: string): React.CSSProperties {
-  const hex = color.startsWith("#") ? color : `#${color}`;
-  return { backgroundColor: hex, color: "#fff" };
 }
 
 function hasConflicts(pr: PullRequestItem): boolean {
@@ -108,18 +96,16 @@ function prStatusBadge(pr: PullRequestItem): { label: string; className: string;
 }
 
 export default function PullsPage({ params, searchParams }: Props) {
-  const router = useRouter();
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
   const [state, setState] = useState("open");
   const [labelsParam, setLabelsParam] = useState("");
   const [milestone, setMilestone] = useState("");
+  const [assignee, setAssignee] = useState("");
   const [page, setPage] = useState("1");
 
   const [pulls, setPulls] = useState<PullRequestItem[]>([]);
-  const [allLabels, setAllLabels] = useState<Label[]>([]);
-  const [milestones, setMilestones] = useState<Milestone[]>([]);
-  const [pagination, setPagination] = useState<Record<string, string>>({});
+  const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -130,43 +116,13 @@ export default function PullsPage({ params, searchParams }: Props) {
       setState(sp.state ?? "open");
       setLabelsParam(sp.labels ?? "");
       setMilestone(sp.milestone ?? "");
+      setAssignee(sp.assignee ?? "");
       setPage(sp.page ?? "1");
     });
   }, [params, searchParams]);
 
   const basePath = owner && repo ? `/${owner}/${repo}/pulls` : "";
-  const selectedLabels = labelsParam ? labelsParam.split(",").filter(Boolean) : [];
-
-  const buildQuery = useCallback(
-    (overrides: Record<string, string | undefined> = {}) => {
-      const params = new URLSearchParams();
-      const nextState = overrides.state ?? state;
-      const nextLabels = overrides.labels ?? labelsParam;
-      const nextMilestone = overrides.milestone ?? milestone;
-      const nextPage = overrides.page ?? page;
-
-      if (nextState && nextState !== "all") params.set("state", nextState);
-      if (nextLabels) params.set("labels", nextLabels);
-      if (nextMilestone) params.set("milestone", nextMilestone);
-      if (nextPage && nextPage !== "1") params.set("page", nextPage);
-
-      const qs = params.toString();
-      return qs ? `?${qs}` : "";
-    },
-    [state, labelsParam, milestone, page],
-  );
-
-  const navigate = (overrides: Record<string, string | undefined>) => {
-    if (!basePath) return;
-    router.push(`${basePath}${buildQuery(overrides)}`);
-  };
-
-  const toggleLabel = (name: string) => {
-    const next = selectedLabels.includes(name)
-      ? selectedLabels.filter((l) => l !== name)
-      : [...selectedLabels, name];
-    navigate({ labels: next.join(","), page: "1" });
-  };
+  const currentPage = Math.max(1, parseInt(page, 10) || 1);
 
   useEffect(() => {
     if (!owner || !repo) return;
@@ -181,14 +137,11 @@ export default function PullsPage({ params, searchParams }: Props) {
         if (state && state !== "all") query.set("state", state);
         if (labelsParam) query.set("labels", labelsParam);
         if (milestone) query.set("milestone", milestone);
+        if (assignee) query.set("assignee", assignee);
         if (page) query.set("page", page);
         query.set("per_page", "30");
 
-        const [pullsRes, labelsRes, milestonesRes] = await Promise.all([
-          fetch(`/repos/${owner}/${repo}/pulls?${query.toString()}`),
-          fetch(`/repos/${owner}/${repo}/labels?per_page=100`),
-          fetch(`/repos/${owner}/${repo}/milestones?state=open&per_page=100`),
-        ]);
+        const pullsRes = await fetch(`/repos/${owner}/${repo}/pulls?${query.toString()}`);
 
         if (!pullsRes.ok) throw new Error("Failed to load pull requests");
 
@@ -196,10 +149,8 @@ export default function PullsPage({ params, searchParams }: Props) {
         if (cancelled) return;
 
         setPulls(pullsData);
-        setPagination(parseLinkHeader(pullsRes.headers.get("Link")));
-
-        if (labelsRes.ok) setAllLabels((await labelsRes.json()) as Label[]);
-        if (milestonesRes.ok) setMilestones((await milestonesRes.json()) as Milestone[]);
+        const pagination = parseLinkHeader(pullsRes.headers.get("Link"));
+        setHasNext(!!pagination.next);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load pull requests");
       } finally {
@@ -211,7 +162,7 @@ export default function PullsPage({ params, searchParams }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [owner, repo, state, labelsParam, milestone, page]);
+  }, [owner, repo, state, labelsParam, milestone, assignee, page]);
 
   const openCount = pulls.filter((p) => p.state === "open" && !p.merged_at).length;
   const closedCount = pulls.filter((p) => p.state === "closed" || p.merged_at).length;
@@ -241,57 +192,15 @@ export default function PullsPage({ params, searchParams }: Props) {
           </Link>
         </div>
 
-        <div className="flex flex-wrap gap-3 items-center mb-4 p-3 bg-[#f6f8fa] border border-[#d0d7de] rounded-md">
-          <div className="flex gap-1">
-            {(["open", "closed", "all"] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => navigate({ state: s, page: "1" })}
-                className={`px-3 py-1.5 text-sm rounded-md border ${
-                  state === s
-                    ? "bg-white border-[#0969da] text-[#0969da] font-semibold"
-                    : "bg-white border-[#d0d7de] hover:bg-[#f6f8fa]"
-                }`}
-              >
-                {s === "open" ? "Open" : s === "closed" ? "Closed" : "All"}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap gap-1.5 items-center">
-            <span className="text-xs text-[#656d76] font-semibold uppercase">Labels:</span>
-            {allLabels.map((label) => {
-              const selected = selectedLabels.includes(label.name);
-              return (
-                <button
-                  key={label.name}
-                  type="button"
-                  onClick={() => toggleLabel(label.name)}
-                  className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
-                    selected ? "ring-2 ring-[#0969da] ring-offset-1" : "opacity-80 hover:opacity-100"
-                  }`}
-                  style={labelStyle(label.color)}
-                >
-                  {label.name}
-                </button>
-              );
-            })}
-          </div>
-
-          <select
-            value={milestone}
-            onChange={(e) => navigate({ milestone: e.target.value, page: "1" })}
-            className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-white"
-          >
-            <option value="">All milestones</option>
-            {milestones.map((m) => (
-              <option key={m.number} value={String(m.number)}>
-                {m.title} ({m.open_issues} open)
-              </option>
-            ))}
-          </select>
-        </div>
+        <IssueFilters
+          owner={owner}
+          repo={repo}
+          state={state}
+          labels={labelsParam}
+          milestone={milestone}
+          assignee={assignee}
+          basePath={basePath}
+        />
 
         <div className="flex gap-4 items-center bg-[#f6f8fa] border border-[#d0d7de] border-b-0 rounded-t-md px-4 py-3 text-sm">
           <span className="font-semibold text-[#1a7f37]">⇆ {openCount} Open</span>
@@ -313,7 +222,10 @@ export default function PullsPage({ params, searchParams }: Props) {
         {!loading && !error && (
           <div className="bg-white border border-[#d0d7de] border-t-0 rounded-b-md">
             {pulls.length === 0 ? (
-              <div className="px-4 py-8 text-center text-[#656d76]">No pull requests found.</div>
+              <EmptyState
+                title="No pull requests"
+                description="There are no pull requests matching your filters."
+              />
             ) : (
               pulls.map((pr) => {
                 const badge = prStatusBadge(pr);
@@ -349,25 +261,13 @@ export default function PullsPage({ params, searchParams }: Props) {
           </div>
         )}
 
-        {(pagination.prev || pagination.next) && (
-          <div className="flex justify-center gap-2 py-5">
-            {pagination.prev && (
-              <Link
-                href={linkToPath(pagination.prev).replace(/^\/repos\/[^/]+\/[^/]+\/pulls/, basePath)}
-                className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#0969da]"
-              >
-                ← Prev
-              </Link>
-            )}
-            {pagination.next && (
-              <Link
-                href={linkToPath(pagination.next).replace(/^\/repos\/[^/]+\/[^/]+\/pulls/, basePath)}
-                className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#0969da]"
-              >
-                Next →
-              </Link>
-            )}
-          </div>
+        {!loading && !error && (
+          <Pagination
+            page={currentPage}
+            hasNext={hasNext}
+            hasPrev={currentPage > 1}
+            basePath={basePath}
+          />
         )}
       </div>
     </div>
