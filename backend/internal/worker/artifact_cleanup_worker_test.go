@@ -94,11 +94,11 @@ func TestArtifactCleanupWorker_HandleCleanup(t *testing.T) {
 	repoID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	runID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
 
-	mustExecArtifactCleanup(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`,
+	mustExec(t, db.DB, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`,
 		orgID.String(), "acme", "Acme", "free")
-	mustExecArtifactCleanup(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`,
+	mustExec(t, db.DB, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`,
 		repoID.String(), orgID.String(), "widgets")
-	mustExecArtifactCleanup(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`,
+	mustExec(t, db.DB, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`,
 		runID.String(), orgID.String(), repoID.String(), "ci.yml", "completed")
 
 	now := time.Now().UTC()
@@ -160,12 +160,5 @@ func TestArtifactCleanupWorker_HandleCleanup(t *testing.T) {
 
 	if len(storage.deletedKeys) != 1 || storage.deletedKeys[0] != expiredKey {
 		t.Fatalf("DeleteObject calls = %v, want [%q]", storage.deletedKeys, expiredKey)
-	}
-}
-
-func mustExecArtifactCleanup(t *testing.T, db *sqlx.DB, q string, args ...any) {
-	t.Helper()
-	if _, err := db.Exec(q, args...); err != nil {
-		t.Fatalf("exec %q: %v", q, err)
 	}
 }
