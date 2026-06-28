@@ -1,6 +1,10 @@
 import type {
   AccessTokenMeta,
   CreateTokenResult,
+  OAuthApp,
+  OAuthAppCreateInput,
+  OAuthAppWithSecret,
+  OAuthAuthorizationInfo,
   OrgMember,
   OrgProfile,
   SSHKey,
@@ -151,6 +155,27 @@ export class ApiClient {
     create: (data: { note: string; scopes: string[]; expires_at?: string }) =>
       this.post<CreateTokenResult>("/api/v3/user/tokens", data),
     revoke: (id: number) => this.del(`/api/v3/user/tokens/${id}`),
+  };
+
+  oauthApps = {
+    list: () => this.get<OAuthApp[]>("/api/v3/user/oauth-apps"),
+    create: (input: OAuthAppCreateInput) =>
+      this.post<OAuthAppWithSecret>("/api/v3/oauth-apps", input),
+    get: (id: string) => this.get<OAuthApp>(`/api/v3/oauth-apps/${id}`),
+    update: (id: string, body: Partial<OAuthAppCreateInput>) =>
+      this.patch<OAuthApp>(`/api/v3/oauth-apps/${id}`, body),
+    regenerateSecret: (id: string) =>
+      this.post<{ client_secret: string }>(`/api/v3/oauth-apps/${id}/secret`),
+    delete: (id: string) => this.del(`/api/v3/oauth-apps/${id}`),
+  };
+
+  userAuthorizations = {
+    list: () =>
+      this.get<OAuthAuthorizationInfo[]>(
+        "/api/v3/user/installations/authorizations",
+      ),
+    revoke: (appId: string) =>
+      this.del(`/api/v3/user/authorizations/${appId}`),
   };
 }
 

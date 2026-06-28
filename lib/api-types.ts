@@ -78,8 +78,30 @@ export interface Token {
   createdAt: string;
 }
 
-export interface OAuthApp {
-  id: number;
+export type OAuthApp = {
+  id: string;
+  client_id: string;
   name: string;
-  clientId: string;
-}
+  homepage_url: string;
+  callback_urls: string[];
+  owner_type: string;
+  created_at: string;
+};
+
+export type OAuthAppWithSecret = OAuthApp & { client_secret: string };
+
+export type OAuthAppCreateInput = {
+  name: string;
+  homepage_url: string;
+  callback_urls: string[];
+  owner_type: "user" | "organization";
+  owner_user_id?: number;
+  organization_id?: number;
+};
+
+export type OAuthAuthorizationInfo = {
+  oauth_app_id: string;
+  app_name: string;
+  granted_scopes: string[];
+  updated_at: string;
+};
