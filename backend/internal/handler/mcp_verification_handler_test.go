@@ -158,7 +158,7 @@ func (handlerMCPAuditRepo) List(context.Context, uuid.UUID, string, int, int) ([
 	return nil, 0, nil
 }
 
-func (handlerMCPAuditRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID, string, string, uuid.UUID, []byte) error {
+func (handlerMCPAuditRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID, string, string, uuid.UUID, json.RawMessage) error {
 	return nil
 }
 
