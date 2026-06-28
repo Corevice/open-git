@@ -128,7 +128,6 @@ type PullRequest implements Node & Labelable {
   repository: Repository!
   headRefName: String!
   baseRefName: String!
-  mergeable: MergeableState!
   mergeableState: MergeableState!
   labels(first: Int, after: String, last: Int, before: String): LabelConnection!
   comments(first: Int, after: String, last: Int, before: String): IssueCommentConnection!

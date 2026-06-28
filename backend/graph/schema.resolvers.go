@@ -24,75 +24,75 @@ type queryResolver struct{ *Resolver }
 
 // CreateIssue is the resolver for the createIssue field.
 func (r *mutationResolver) CreateIssue(ctx context.Context, input model.CreateIssueInput) (*model.CreateIssuePayload, error) {
-	panic(fmt.Errorf("not implemented: CreateIssue - createIssue"))
+	return nil, fmt.Errorf("not implemented: CreateIssue - createIssue")
 }
 
 // UpdateIssue is the resolver for the updateIssue field.
 func (r *mutationResolver) UpdateIssue(ctx context.Context, input model.UpdateIssueInput) (*model.UpdateIssuePayload, error) {
-	panic(fmt.Errorf("not implemented: UpdateIssue - updateIssue"))
+	return nil, fmt.Errorf("not implemented: UpdateIssue - updateIssue")
 }
 
 // CloseIssue is the resolver for the closeIssue field.
 func (r *mutationResolver) CloseIssue(ctx context.Context, input model.CloseIssueInput) (*model.CloseIssuePayload, error) {
-	panic(fmt.Errorf("not implemented: CloseIssue - closeIssue"))
+	return nil, fmt.Errorf("not implemented: CloseIssue - closeIssue")
 }
 
 // ReopenIssue is the resolver for the reopenIssue field.
 func (r *mutationResolver) ReopenIssue(ctx context.Context, input model.ReopenIssueInput) (*model.ReopenIssuePayload, error) {
-	panic(fmt.Errorf("not implemented: ReopenIssue - reopenIssue"))
+	return nil, fmt.Errorf("not implemented: ReopenIssue - reopenIssue")
 }
 
 // AddComment is the resolver for the addComment field.
 func (r *mutationResolver) AddComment(ctx context.Context, input model.AddCommentInput) (*model.AddCommentPayload, error) {
-	panic(fmt.Errorf("not implemented: AddComment - addComment"))
+	return nil, fmt.Errorf("not implemented: AddComment - addComment")
 }
 
 // CreatePullRequest is the resolver for the createPullRequest field.
 func (r *mutationResolver) CreatePullRequest(ctx context.Context, input model.CreatePullRequestInput) (*model.CreatePullRequestPayload, error) {
-	panic(fmt.Errorf("not implemented: CreatePullRequest - createPullRequest"))
+	return nil, fmt.Errorf("not implemented: CreatePullRequest - createPullRequest")
 }
 
 // MergePullRequest is the resolver for the mergePullRequest field.
 func (r *mutationResolver) MergePullRequest(ctx context.Context, input model.MergePullRequestInput) (*model.MergePullRequestPayload, error) {
-	panic(fmt.Errorf("not implemented: MergePullRequest - mergePullRequest"))
+	return nil, fmt.Errorf("not implemented: MergePullRequest - mergePullRequest")
 }
 
 // ClosePullRequest is the resolver for the closePullRequest field.
 func (r *mutationResolver) ClosePullRequest(ctx context.Context, input model.ClosePullRequestInput) (*model.ClosePullRequestPayload, error) {
-	panic(fmt.Errorf("not implemented: ClosePullRequest - closePullRequest"))
+	return nil, fmt.Errorf("not implemented: ClosePullRequest - closePullRequest")
 }
 
 // AddLabelsToLabelable is the resolver for the addLabelsToLabelable field.
 func (r *mutationResolver) AddLabelsToLabelable(ctx context.Context, input model.AddLabelsToLabelableInput) (*model.AddLabelsToLabelablePayload, error) {
-	panic(fmt.Errorf("not implemented: AddLabelsToLabelable - addLabelsToLabelable"))
+	return nil, fmt.Errorf("not implemented: AddLabelsToLabelable - addLabelsToLabelable")
 }
 
 // RemoveLabelsFromLabelable is the resolver for the removeLabelsFromLabelable field.
 func (r *mutationResolver) RemoveLabelsFromLabelable(ctx context.Context, input model.RemoveLabelsFromLabelableInput) (*model.RemoveLabelsFromLabelablePayload, error) {
-	panic(fmt.Errorf("not implemented: RemoveLabelsFromLabelable - removeLabelsFromLabelable"))
+	return nil, fmt.Errorf("not implemented: RemoveLabelsFromLabelable - removeLabelsFromLabelable")
 }
 
 // Viewer is the resolver for the viewer field.
 func (r *queryResolver) Viewer(ctx context.Context) (*model.User, error) {
-	panic(fmt.Errorf("not implemented: Viewer - viewer"))
+	return nil, fmt.Errorf("not implemented: Viewer - viewer")
 }
 
 // Node is the resolver for the node field.
 func (r *queryResolver) Node(ctx context.Context, id string) (model.Node, error) {
-	panic(fmt.Errorf("not implemented: Node - node"))
+	return nil, fmt.Errorf("not implemented: Node - node")
 }
 
 // Repository is the resolver for the repository field.
 func (r *queryResolver) Repository(ctx context.Context, owner string, name string) (*model.Repository, error) {
-	panic(fmt.Errorf("not implemented: Repository - repository"))
+	return nil, fmt.Errorf("not implemented: Repository - repository")
 }
 
 // Organization is the resolver for the organization field.
 func (r *queryResolver) Organization(ctx context.Context, login string) (*model.Organization, error) {
-	panic(fmt.Errorf("not implemented: Organization - organization"))
+	return nil, fmt.Errorf("not implemented: Organization - organization")
 }
 
 // User is the resolver for the user field.
 func (r *queryResolver) User(ctx context.Context, login string) (*model.User, error) {
-	panic(fmt.Errorf("not implemented: User - user"))
+	return nil, fmt.Errorf("not implemented: User - user")
 }

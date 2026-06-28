@@ -11,5 +11,4 @@ resolver:
   dir: graph
   package: graph
   filename: schema.resolvers.go
-  filename_template: "{name}.resolvers.go"
 omit_slice_element_pointers: false

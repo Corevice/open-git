@@ -217,7 +217,6 @@ type ComplexityRoot struct {
 		HeadRefName    func(childComplexity int) int
 		ID             func(childComplexity int) int
 		Labels         func(childComplexity int, first *int, after *string, last *int, before *string) int
-		Mergeable      func(childComplexity int) int
 		MergeableState func(childComplexity int) int
 		MergedAt       func(childComplexity int) int
 		Number         func(childComplexity int) int
@@ -1132,12 +1131,6 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 
 		return e.complexity.PullRequest.Labels(childComplexity, args["first"].(*int), args["after"].(*string), args["last"].(*int), args["before"].(*string)), true
 
-	case "PullRequest.mergeable":
-		if e.complexity.PullRequest.Mergeable == nil {
-			break
-		}
-
-		return e.complexity.PullRequest.Mergeable(childComplexity), true
 
 	case "PullRequest.mergeableState":
 		if e.complexity.PullRequest.MergeableState == nil {
@@ -1654,7 +1647,7 @@ func (ec *executionContext) introspectType(name string) (*introspection.Type, er
 }
 
 var sources = []*ast.Source{
-	{Name: "../schema.graphqls", Input: `"""An ISO-8601 encoded UTC date/time string."""
+	{Name: "graph/schema.graphqls", Input: `"""An ISO-8601 encoded UTC date/time string."""
 scalar DateTime
 
 interface Node {
@@ -1784,7 +1777,6 @@ type PullRequest implements Node & Labelable {
   repository: Repository!
   headRefName: String!
   baseRefName: String!
-  mergeable: MergeableState!
   mergeableState: MergeableState!
   labels(first: Int, after: String, last: Int, before: String): LabelConnection!
   comments(first: Int, after: String, last: Int, before: String): IssueCommentConnection!
@@ -3928,8 +3920,6 @@ func (ec *executionContext) fieldContext_ClosePullRequestPayload_pullRequest(_ c
 				return ec.fieldContext_PullRequest_headRefName(ctx, field)
 			case "baseRefName":
 				return ec.fieldContext_PullRequest_baseRefName(ctx, field)
-			case "mergeable":
-				return ec.fieldContext_PullRequest_mergeable(ctx, field)
 			case "mergeableState":
 				return ec.fieldContext_PullRequest_mergeableState(ctx, field)
 			case "labels":
@@ -4156,8 +4146,6 @@ func (ec *executionContext) fieldContext_CreatePullRequestPayload_pullRequest(_ 
 				return ec.fieldContext_PullRequest_headRefName(ctx, field)
 			case "baseRefName":
 				return ec.fieldContext_PullRequest_baseRefName(ctx, field)
-			case "mergeable":
-				return ec.fieldContext_PullRequest_mergeable(ctx, field)
 			case "mergeableState":
 				return ec.fieldContext_PullRequest_mergeableState(ctx, field)
 			case "labels":
@@ -6336,8 +6324,6 @@ func (ec *executionContext) fieldContext_MergePullRequestPayload_pullRequest(_ c
 				return ec.fieldContext_PullRequest_headRefName(ctx, field)
 			case "baseRefName":
 				return ec.fieldContext_PullRequest_baseRefName(ctx, field)
-			case "mergeable":
-				return ec.fieldContext_PullRequest_mergeable(ctx, field)
 			case "mergeableState":
 				return ec.fieldContext_PullRequest_mergeableState(ctx, field)
 			case "labels":
@@ -8623,50 +8609,6 @@ func (ec *executionContext) fieldContext_PullRequest_baseRefName(_ context.Conte
 	return fc, nil
 }
 
-func (ec *executionContext) _PullRequest_mergeable(ctx context.Context, field graphql.CollectedField, obj *model.PullRequest) (ret graphql.Marshaler) {
-	fc, err := ec.fieldContext_PullRequest_mergeable(ctx, field)
-	if err != nil {
-		return graphql.Null
-	}
-	ctx = graphql.WithFieldContext(ctx, fc)
-	defer func() {
-		if r := recover(); r != nil {
-			ec.Error(ctx, ec.Recover(ctx, r))
-			ret = graphql.Null
-		}
-	}()
-	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return obj.Mergeable, nil
-	})
-	if err != nil {
-		ec.Error(ctx, err)
-		return graphql.Null
-	}
-	if resTmp == nil {
-		if !graphql.HasFieldError(ctx, fc) {
-			ec.Errorf(ctx, "must not be null")
-		}
-		return graphql.Null
-	}
-	res := resTmp.(model.MergeableState)
-	fc.Result = res
-	return ec.marshalNMergeableState2githubᚗcomᚋopenᚑgitᚋbackendᚋgraphᚋmodelᚐMergeableState(ctx, field.Selections, res)
-}
-
-func (ec *executionContext) fieldContext_PullRequest_mergeable(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	fc = &graphql.FieldContext{
-		Object:     "PullRequest",
-		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
-		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type MergeableState does not have child fields")
-		},
-	}
-	return fc, nil
-}
-
 func (ec *executionContext) _PullRequest_mergeableState(ctx context.Context, field graphql.CollectedField, obj *model.PullRequest) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_PullRequest_mergeableState(ctx, field)
 	if err != nil {
@@ -9112,8 +9054,6 @@ func (ec *executionContext) fieldContext_PullRequestConnection_nodes(_ context.C
 				return ec.fieldContext_PullRequest_headRefName(ctx, field)
 			case "baseRefName":
 				return ec.fieldContext_PullRequest_baseRefName(ctx, field)
-			case "mergeable":
-				return ec.fieldContext_PullRequest_mergeable(ctx, field)
 			case "mergeableState":
 				return ec.fieldContext_PullRequest_mergeableState(ctx, field)
 			case "labels":
@@ -9334,8 +9274,6 @@ func (ec *executionContext) fieldContext_PullRequestEdge_node(_ context.Context,
 				return ec.fieldContext_PullRequest_headRefName(ctx, field)
 			case "baseRefName":
 				return ec.fieldContext_PullRequest_baseRefName(ctx, field)
-			case "mergeable":
-				return ec.fieldContext_PullRequest_mergeable(ctx, field)
 			case "mergeableState":
 				return ec.fieldContext_PullRequest_mergeableState(ctx, field)
 			case "labels":
@@ -10622,8 +10560,6 @@ func (ec *executionContext) fieldContext_Repository_pullRequest(ctx context.Cont
 				return ec.fieldContext_PullRequest_headRefName(ctx, field)
 			case "baseRefName":
 				return ec.fieldContext_PullRequest_baseRefName(ctx, field)
-			case "mergeable":
-				return ec.fieldContext_PullRequest_mergeable(ctx, field)
 			case "mergeableState":
 				return ec.fieldContext_PullRequest_mergeableState(ctx, field)
 			case "labels":
@@ -15125,11 +15061,6 @@ func (ec *executionContext) _PullRequest(ctx context.Context, sel ast.SelectionS
 			}
 		case "baseRefName":
 			out.Values[i] = ec._PullRequest_baseRefName(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
-			}
-		case "mergeable":
-			out.Values[i] = ec._PullRequest_mergeable(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
