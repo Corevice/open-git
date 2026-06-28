@@ -369,9 +369,19 @@ func isForcePush(repo *gogit.Repository, oldHash, newHash plumbing.Hash) bool {
 	if oldHash == plumbing.ZeroHash || newHash == plumbing.ZeroHash {
 		return false
 	}
-	merged, err := repo.MergeBase(oldHash, newHash)
+
+	oldCommit, err := repo.CommitObject(oldHash)
 	if err != nil {
 		return true
 	}
-	return merged != oldHash
+	newCommit, err := repo.CommitObject(newHash)
+	if err != nil {
+		return true
+	}
+
+	mergeBases, err := oldCommit.MergeBase(newCommit)
+	if err != nil || len(mergeBases) == 0 {
+		return true
+	}
+	return mergeBases[0].Hash != oldHash
 }
