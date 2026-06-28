@@ -11,6 +11,9 @@ import (
 
 	"github.com/hibiken/asynq"
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/open-git/backend/internal/domain/entity"
+	domainrepo "github.com/open-git/backend/internal/domain/repository"
 )
 
 const ciTestSchema = `
@@ -239,6 +242,90 @@ func mustExec(t *testing.T, db *sql.DB, q string, args ...any) {
 	t.Helper()
 	if _, err := db.Exec(q, args...); err != nil {
 		t.Fatalf("exec %q: %v", q, err)
+	}
+}
+
+type ciFakeJobLogRepo struct {
+	lines []*entity.JobLogLine
+}
+
+func (f *ciFakeJobLogRepo) AppendLines(_ context.Context, lines []*entity.JobLogLine) error {
+	f.lines = append(f.lines, lines...)
+	return nil
+}
+
+func (f *ciFakeJobLogRepo) ListLines(_ context.Context, _, _ string, _ int64, _ int) ([]*entity.JobLogLine, error) {
+	return f.lines, nil
+}
+
+func (f *ciFakeJobLogRepo) CountLines(_ context.Context, _, _ string) (int64, error) {
+	return int64(len(f.lines)), nil
+}
+
+func (f *ciFakeJobLogRepo) SetMeta(_ context.Context, _ *domainrepo.JobLogMeta) error {
+	return nil
+}
+
+func (f *ciFakeJobLogRepo) GetMeta(_ context.Context, _, _ string) (*domainrepo.JobLogMeta, error) {
+	return nil, nil
+}
+
+func TestHandleCIRun_AppendsJobLogLinesWhenLogRepoInjected(t *testing.T) {
+	db := newCITestDB(t)
+	ctx := context.Background()
+
+	orgID := "org-log"
+	repoID := "repo-log"
+	runID := "run-log"
+
+	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`,
+		orgID, "acme", "Acme", planTierPro)
+	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`,
+		repoID, orgID, "widgets")
+	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`,
+		runID, orgID, repoID, "ci.yml", ciStatusQueued)
+
+	yamlSrc := []byte(`name: CI
+on: push
+jobs:
+  build:
+    steps:
+      - name: greet
+        run: echo hello
+      - name: world
+        run: echo world
+`)
+
+	logRepo := &ciFakeJobLogRepo{}
+	worker := NewCIWorker(db).
+		WithLogRepository(logRepo).
+		WithStreamingCommandRunner(func(_ context.Context, _ []string, _ string, _ int, sink func(stream, line string)) error {
+			sink(entity.LogStreamStdout, "hello")
+			return nil
+		})
+
+	payload, err := json.Marshal(CIRunPayload{
+		WorkflowRunID:  runID,
+		RepositoryID:   repoID,
+		OrganizationID: orgID,
+		WorkflowYAML:   yamlSrc,
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	task := asynq.NewTask(TypeCIRun, payload)
+	if err := worker.HandleCIRun(ctx, task); err != nil {
+		t.Fatalf("HandleCIRun returned error: %v", err)
+	}
+
+	if len(logRepo.lines) < 2 {
+		t.Fatalf("expected at least one log line per step, got %d", len(logRepo.lines))
+	}
+	for _, line := range logRepo.lines {
+		if line.RunID != runID || line.RepositoryID != repoID || line.OrganizationID != orgID {
+			t.Fatalf("unexpected log line scope: %+v", line)
+		}
 	}
 }
 
