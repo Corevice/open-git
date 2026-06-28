@@ -32,11 +32,12 @@ type systemSettingRow struct {
 }
 
 func (r *sqlxSystemSettingRepository) Get(ctx context.Context, key string) (*entity.SystemSetting, error) {
-	const query = `
+	query := `
 		SELECT key, value, updated_by, updated_at
 		FROM system_settings
-		WHERE key = $1
+		WHERE key = ?
 	`
+	query = r.db.Rebind(query)
 
 	var row systemSettingRow
 	err := r.db.GetContext(ctx, &row, query, key)
