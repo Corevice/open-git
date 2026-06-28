@@ -22,6 +22,8 @@ export function SecretForm({
   const isEditing = existingName !== undefined;
   const [name, setName] = useState(existingName ?? "");
   const [value, setValue] = useState("");
+  const trimmedValue = value.trim();
+  const canSubmitEdit = !isEditing || trimmedValue.length > 0;
 
   useEffect(() => {
     setName(existingName ?? "");
@@ -30,8 +32,21 @@ export function SecretForm({
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     const secretName = existingName ?? name.trim();
-    await onSubmit(secretName, value);
-    setValue("");
+
+    if (isEditing && !trimmedValue) {
+      return;
+    }
+
+    if (!isEditing && !trimmedValue) {
+      return;
+    }
+
+    try {
+      await onSubmit(secretName, trimmedValue);
+      setValue("");
+    } catch {
+      // Preserve the value so the user can retry after an error.
+    }
   };
 
   return (
@@ -56,9 +71,9 @@ export function SecretForm({
           className="w-full rounded-md border border-[#d0d7de] px-3 py-2 text-sm font-mono disabled:cursor-not-allowed disabled:bg-[#f6f8fa] disabled:text-[#656d76]"
           required
         />
-        {fieldErrors["name"] && (
-          <p className="text-red-500 text-xs mt-1">{fieldErrors["name"]}</p>
-        )}
+        {fieldErrors["name"] ? (
+          <p className="text-red-500 text-xs mt-1">{String(fieldErrors["name"])}</p>
+        ) : null}
       </div>
 
       <div>
@@ -78,9 +93,9 @@ export function SecretForm({
           required={!isEditing}
           autoComplete="new-password"
         />
-        {fieldErrors["value"] && (
-          <p className="text-red-500 text-xs mt-1">{fieldErrors["value"]}</p>
-        )}
+        {fieldErrors["value"] ? (
+          <p className="text-red-500 text-xs mt-1">{String(fieldErrors["value"])}</p>
+        ) : null}
       </div>
 
       {formError && (
@@ -99,7 +114,7 @@ export function SecretForm({
         </button>
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || !canSubmitEdit}
           className="rounded-md bg-[#1f883d] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1a7f37] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting

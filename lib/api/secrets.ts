@@ -14,21 +14,22 @@ export interface PublicKey {
   key: string;
 }
 
-export class SecretValidationError extends ApiError {
+export interface SecretValidationError extends ApiError {
   fieldErrors: Record<string, string>;
-
-  constructor(
-    status: number,
-    message: string,
-    fieldErrors: Record<string, string>,
-  ) {
-    super(status, message);
-    this.name = "SecretValidationError";
-    this.fieldErrors = fieldErrors;
-  }
 }
 
 type HttpMethod = "GET" | "PUT" | "DELETE";
+
+function createSecretValidationError(
+  status: number,
+  message: string,
+  fieldErrors: Record<string, string>,
+): SecretValidationError {
+  const error = new ApiError(status, message) as SecretValidationError;
+  error.name = "SecretValidationError";
+  error.fieldErrors = fieldErrors;
+  return error;
+}
 
 function resolveBaseUrl(): string {
   return env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, "");
@@ -41,7 +42,7 @@ function buildHeaders(): Record<string, string> {
   };
 
   if (typeof window !== "undefined") {
-    const token = localStorage.getItem(API_TOKEN_KEY);
+    const token = localStorage.getItem(API_TOKEN_KEY)?.trim();
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
@@ -50,12 +51,33 @@ function buildHeaders(): Record<string, string> {
   return headers;
 }
 
+function validatePathSegment(value: string, label: string): void {
+  if (
+    !value ||
+    value.includes("/") ||
+    value.includes("\\") ||
+    value === "." ||
+    value === ".."
+  ) {
+    throw new ApiError(400, `Invalid ${label}`);
+  }
+}
+
 function repoSecretsPath(owner: string, repo: string, name?: string): string {
+  validatePathSegment(owner, "owner");
+  validatePathSegment(repo, "repo");
+  if (name !== undefined) {
+    validatePathSegment(name, "secret name");
+  }
   const base = `/api/v3/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/secrets`;
   return name !== undefined ? `${base}/${encodeURIComponent(name)}` : base;
 }
 
 function orgSecretsPath(org: string, name?: string): string {
+  validatePathSegment(org, "organization");
+  if (name !== undefined) {
+    validatePathSegment(name, "secret name");
+  }
   const base = `/api/v3/orgs/${encodeURIComponent(org)}/actions/secrets`;
   return name !== undefined ? `${base}/${encodeURIComponent(name)}` : base;
 }
@@ -75,6 +97,10 @@ function parseFieldErrors(
     }
   }
   return Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined;
+}
+
+function isEmptySuccessResponse(status: number): boolean {
+  return status === 204 || status === 201;
 }
 
 async function request<T>(
@@ -101,13 +127,13 @@ async function request<T>(
 
     if (response.status === 422) {
       const fieldErrors = parseFieldErrors(errorBody) ?? {};
-      throw new SecretValidationError(response.status, message, fieldErrors);
+      throw createSecretValidationError(response.status, message, fieldErrors);
     }
 
     throw new ApiError(response.status, message);
   }
 
-  if (response.status === 204) {
+  if (isEmptySuccessResponse(response.status)) {
     return undefined as T;
   }
 
@@ -124,12 +150,13 @@ export async function sealSecret(
   publicKey: PublicKey,
 ): Promise<{ encrypted_value: string; key_id: string }> {
   await sodium.ready;
-  const variant = sodium.base64_variants.ORIGINAL;
-  const publicKeyBytes = sodium.from_base64(publicKey.key, variant);
+  // GitHub returns standard Base64; libsodium's URL-safe default is incompatible.
+  const base64Variant = sodium.base64_variants.ORIGINAL;
+  const publicKeyBytes = sodium.from_base64(publicKey.key, base64Variant);
   const valueBytes = sodium.from_string(value);
   const sealed = sodium.crypto_box_seal(valueBytes, publicKeyBytes);
   return {
-    encrypted_value: sodium.to_base64(sealed, variant),
+    encrypted_value: sodium.to_base64(sealed, base64Variant),
     key_id: publicKey.key_id,
   };
 }
@@ -166,11 +193,11 @@ export function upsertRepoSecret(
   owner: string,
   repo: string,
   name: string,
-  sealedEncryptedValue: string,
+  encryptedValue: string,
   keyId: string,
 ): Promise<void> {
   return request<void>("PUT", repoSecretsPath(owner, repo, name), {
-    encrypted_value: sealedEncryptedValue,
+    encrypted_value: encryptedValue,
     key_id: keyId,
   });
 }
@@ -195,13 +222,13 @@ export function listOrgSecrets(
 export function upsertOrgSecret(
   org: string,
   name: string,
-  sealedEncryptedValue: string,
+  encryptedValue: string,
   keyId: string,
   visibility: string,
   selectedRepoIds?: number[],
 ): Promise<void> {
   const body: Record<string, unknown> = {
-    encrypted_value: sealedEncryptedValue,
+    encrypted_value: encryptedValue,
     key_id: keyId,
     visibility,
   };
@@ -218,5 +245,10 @@ export function deleteOrgSecret(org: string, name: string): Promise<void> {
 export function isSecretValidationError(
   error: unknown,
 ): error is SecretValidationError {
-  return error instanceof SecretValidationError;
+  return (
+    error instanceof ApiError &&
+    (error as SecretValidationError).name === "SecretValidationError" &&
+    typeof (error as SecretValidationError).fieldErrors === "object" &&
+    (error as SecretValidationError).fieldErrors !== null
+  );
 }
