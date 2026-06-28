@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import BlobViewer from "@/components/repo/BlobViewer";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   apiClient,
   decodeBase64Content,
@@ -24,15 +26,17 @@ function isBinaryContent(data: ContentResponse): boolean {
   return data.content == null;
 }
 
-export default async function BlobPage({
-  params,
+async function BlobViewerContent({
+  owner,
+  repo,
+  branch,
+  decodedPath,
 }: {
-  params: Promise<{ owner: string; repo: string; branch: string; path: string[] }>;
+  owner: string;
+  repo: string;
+  branch: string;
+  decodedPath: string;
 }) {
-  const { owner, repo, branch: rawBranch, path: rawPathSegments } = await params;
-  const branch = decodeURIComponent(rawBranch);
-  const decodedPath = decodePathSegments(rawPathSegments ?? []).join("/");
-
   let contentData: ContentResponse;
   try {
     contentData = await apiClient.getContents<ContentResponse>(
@@ -49,9 +53,86 @@ export default async function BlobPage({
   if (contentData.type !== "file") notFound();
 
   const downloadUrl = contentData.download_url ?? "";
-  const pathParts = decodedPath.split("/");
   const binary = isBinaryContent(contentData);
   const truncated = contentData.truncated === true;
+
+  return (
+    <>
+      {downloadUrl && (
+        <div className="p-3 border-b border-[#d0d7de] flex justify-end gap-2">
+          <a
+            href={downloadUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-[#f6f8fa] text-[#24292f] no-underline hover:bg-[#eaeef2]"
+          >
+            Raw
+          </a>
+          <a
+            href={downloadUrl}
+            download={contentData.name}
+            className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-[#f6f8fa] text-[#24292f] no-underline hover:bg-[#eaeef2]"
+          >
+            Download
+          </a>
+        </div>
+      )}
+
+      {truncated ? (
+        <div className="p-8 text-center text-sm text-[#57606a] bg-[#f6f8fa] border-t border-[#d0d7de]">
+          This file is too large to display.{" "}
+          {downloadUrl && (
+            <a
+              href={downloadUrl}
+              download={contentData.name}
+              className="text-[#0969da] hover:underline font-medium"
+            >
+              Download file
+            </a>
+          )}
+        </div>
+      ) : binary ? (
+        <div className="p-8 text-center text-sm text-[#57606a] bg-[#f6f8fa] border-t border-[#d0d7de]">
+          Binary file not shown.
+          {downloadUrl && (
+            <>
+              {" "}
+              <a
+                href={downloadUrl}
+                download={contentData.name}
+                className="text-[#0969da] hover:underline font-medium"
+              >
+                Download file
+              </a>
+            </>
+          )}
+        </div>
+      ) : (
+        <BlobViewer
+          content={
+            contentData.content && contentData.encoding === "base64"
+              ? decodeBase64Content(contentData.content)
+              : ""
+          }
+          filename={contentData.name}
+          binary={false}
+          truncated={false}
+          rawUrl={downloadUrl}
+        />
+      )}
+    </>
+  );
+}
+
+export default async function BlobPage({
+  params,
+}: {
+  params: Promise<{ owner: string; repo: string; branch: string; path: string[] }>;
+}) {
+  const { owner, repo, branch: rawBranch, path: rawPathSegments } = await params;
+  const branch = decodeURIComponent(rawBranch);
+  const decodedPath = decodePathSegments(rawPathSegments ?? []).join("/");
+  const pathParts = decodedPath.split("/");
 
   return (
     <div className="min-h-screen bg-[#f6f8fa]">
@@ -106,70 +187,24 @@ export default async function BlobPage({
                 );
               })}
             </nav>
-
-            {downloadUrl && (
-              <div className="flex gap-2 shrink-0">
-                <a
-                  href={downloadUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-[#f6f8fa] text-[#24292f] no-underline hover:bg-[#eaeef2]"
-                >
-                  Raw
-                </a>
-                <a
-                  href={downloadUrl}
-                  download={contentData.name}
-                  className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-[#f6f8fa] text-[#24292f] no-underline hover:bg-[#eaeef2]"
-                >
-                  Download
-                </a>
-              </div>
-            )}
           </div>
 
-          {truncated ? (
-            <div className="p-8 text-center text-sm text-[#57606a] bg-[#f6f8fa] border-t border-[#d0d7de]">
-              This file is too large to display.{" "}
-              {downloadUrl && (
-                <a
-                  href={downloadUrl}
-                  download={contentData.name}
-                  className="text-[#0969da] hover:underline font-medium"
-                >
-                  Download file
-                </a>
-              )}
-            </div>
-          ) : binary ? (
-            <div className="p-8 text-center text-sm text-[#57606a] bg-[#f6f8fa] border-t border-[#d0d7de]">
-              Binary file not shown.
-              {downloadUrl && (
-                <>
-                  {" "}
-                  <a
-                    href={downloadUrl}
-                    download={contentData.name}
-                    className="text-[#0969da] hover:underline font-medium"
-                  >
-                    Download file
-                  </a>
-                </>
-              )}
-            </div>
-          ) : (
-            <BlobViewer
-              content={
-                contentData.content && contentData.encoding === "base64"
-                  ? decodeBase64Content(contentData.content)
-                  : ""
-              }
-              filename={contentData.name}
-              binary={false}
-              truncated={false}
-              rawUrl={downloadUrl}
+          <Suspense
+            fallback={
+              <div className="space-y-2 p-4">
+                {[...Array(8)].map((_, i) => (
+                  <Skeleton key={i} className="h-4 w-full" />
+                ))}
+              </div>
+            }
+          >
+            <BlobViewerContent
+              owner={owner}
+              repo={repo}
+              branch={branch}
+              decodedPath={decodedPath}
             />
-          )}
+          </Suspense>
         </div>
       </div>
     </div>

@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { RepoRefSelector } from "@/components/repo/BranchSelector";
 import CloneUrlCopy from "@/components/repo/CloneUrlCopy";
+import EmptyRepoState from "@/components/repo/EmptyRepoState";
 import FileTree, { type TreeEntry } from "@/components/repo/FileTree";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   apiClient,
   decodeBase64Content,
@@ -18,6 +21,7 @@ interface RepoMetadata {
   private: boolean;
   visibility?: string;
   default_branch: string;
+  clone_url?: string;
   stargazers_count: number;
   watchers_count: number;
   forks_count: number;
@@ -60,6 +64,83 @@ function mapContents(items: ContentItem[]): TreeEntry[] {
     type: item.type === "dir" ? "dir" : "file",
     commit_message: "Update " + item.name,
   }));
+}
+
+function RepoPageSkeleton() {
+  return (
+    <div className="space-y-2 p-3">
+      <Skeleton className="h-5 w-full" />
+      <Skeleton className="h-5 w-full" />
+      <Skeleton className="h-5 w-full" />
+    </div>
+  );
+}
+
+async function RepoFileTree({
+  owner,
+  repo,
+  branch,
+  cloneUrl,
+}: {
+  owner: string;
+  repo: string;
+  branch: string;
+  cloneUrl: string;
+}) {
+  let contentsRaw: ContentItem[] | ContentItem | null = null;
+  let contentsNotFound = false;
+  try {
+    contentsRaw = await apiClient.getContents<ContentItem[] | ContentItem>(
+      owner,
+      repo,
+      "",
+      branch,
+    );
+  } catch (err) {
+    if (isApiError(err) && err.status === 404) {
+      contentsNotFound = true;
+    } else {
+      throw err;
+    }
+  }
+
+  let commitsEmpty = false;
+  try {
+    const result = await apiClient.getCommits<{ sha: string }[]>(
+      owner,
+      repo,
+      branch,
+      1,
+    );
+    commitsEmpty = result.commits.length === 0;
+  } catch (err) {
+    if (isApiError(err) && err.status === 404) {
+      commitsEmpty = true;
+    } else {
+      throw err;
+    }
+  }
+
+  if (contentsNotFound || commitsEmpty) {
+    return <EmptyRepoState cloneUrl={cloneUrl} />;
+  }
+
+  const contents: ContentItem[] = Array.isArray(contentsRaw)
+    ? contentsRaw
+    : contentsRaw
+      ? [contentsRaw]
+      : [];
+  const entries = mapContents(contents);
+
+  return (
+    <FileTree
+      entries={entries}
+      owner={owner}
+      repo={repo}
+      branch={branch}
+      currentPath=""
+    />
+  );
 }
 
 async function fetchReadme(
@@ -110,26 +191,12 @@ export default async function RepoPage({
   const branches = branchesRaw.length > 0 ? branchesRaw : [{ name: metadata.default_branch ?? "main" }];
   const branch = resolveBranchRef(refParam, branches, metadata.default_branch ?? "main");
 
-  let contentsRaw: ContentItem[] | ContentItem | null = null;
-  try {
-    contentsRaw = await apiClient.getContents<ContentItem[] | ContentItem>(
-      owner,
-      repo,
-      "",
-      branch,
-    );
-  } catch (err) {
-    if (!isApiError(err) || err.status !== 404) throw err;
-  }
+  const cloneUrl =
+    metadata.clone_url ??
+    `${process.env.NEXT_PUBLIC_API_URL ?? ""}/${owner}/${repo}.git`;
 
   const [readmeRaw] = await Promise.all([fetchReadme(owner, repo, branch)]);
 
-  const contents: ContentItem[] = Array.isArray(contentsRaw)
-    ? contentsRaw
-    : contentsRaw
-      ? [contentsRaw]
-      : [];
-  const entries = mapContents(contents);
   const readmeHtml = readmeRaw ? renderMarkdown(readmeRaw) : null;
 
   return (
@@ -263,13 +330,14 @@ export default async function RepoPage({
                 </div>
               </div>
 
-              <FileTree
-                entries={entries}
-                owner={owner}
-                repo={repo}
-                branch={branch}
-                currentPath=""
-              />
+              <Suspense fallback={<RepoPageSkeleton />}>
+                <RepoFileTree
+                  owner={owner}
+                  repo={repo}
+                  branch={branch}
+                  cloneUrl={cloneUrl}
+                />
+              </Suspense>
             </div>
 
             {readmeHtml && (
