@@ -33,7 +33,7 @@ func ResolveOwner(orgs OrgByLoginLookup) echo.MiddlewareFunc {
 			}
 
 			SetActor(c, Actor{
-				UserID:         UserIDFromContext(c),
+				UserID:         UserUUIDFromContext(c),
 				OrganizationID: Int64ToUUID(org.ID),
 			})
 			return next(c)

@@ -6,7 +6,7 @@ import (
 )
 
 type Actor struct {
-	UserID         int64
+	UserID         uuid.UUID
 	OrganizationID uuid.UUID
 }
 

@@ -52,7 +52,7 @@ func TestGetActorAbsent(t *testing.T) {
 func TestGetActorSet(t *testing.T) {
 	orgID := uuid.New()
 	want := middleware.Actor{
-		UserID:         42,
+		UserID:         middleware.Int64ToUUID(42),
 		OrganizationID: orgID,
 	}
 
@@ -69,7 +69,7 @@ func TestGetActorSet(t *testing.T) {
 			t.Fatalf("GetActor: %v", err)
 		}
 		if actor.UserID != want.UserID {
-			t.Fatalf("UserID: got %d want %d", actor.UserID, want.UserID)
+			t.Fatalf("UserID: got %v want %v", actor.UserID, want.UserID)
 		}
 		if actor.OrganizationID != want.OrganizationID {
 			t.Fatalf("OrganizationID: got %v want %v", actor.OrganizationID, want.OrganizationID)
@@ -105,6 +105,7 @@ func TestResolveOwnerUnknown(t *testing.T) {
 func TestResolveOwnerKnown(t *testing.T) {
 	orgID := int64(7)
 	userID := int64(99)
+	userUUID := middleware.Int64ToUUID(userID)
 	orgUUID := middleware.Int64ToUUID(orgID)
 
 	orgs := &mockOrgByLoginLookup{
@@ -126,8 +127,8 @@ func TestResolveOwnerKnown(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetActor: %v", err)
 		}
-		if actor.UserID != userID {
-			t.Fatalf("UserID: got %d want %d", actor.UserID, userID)
+		if actor.UserID != userUUID {
+			t.Fatalf("UserID: got %v want %v", actor.UserID, userUUID)
 		}
 		if actor.OrganizationID != orgUUID {
 			t.Fatalf("OrganizationID: got %v want %v", actor.OrganizationID, orgUUID)
