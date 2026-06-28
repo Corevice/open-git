@@ -427,7 +427,7 @@ func (h *PullRequestHandler) CreateReview(c echo.Context) error {
 	}
 
 	review, err := h.createReviewUC.Execute(c.Request().Context(), prusecase.CreateReviewInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		Number:         number,
 		ActorID:        actor.UserID,

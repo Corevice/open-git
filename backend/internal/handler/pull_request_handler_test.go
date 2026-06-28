@@ -191,7 +191,7 @@ func prTestRepo() *entity.Repository {
 
 func prTestAuth(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		middleware.SetAuthContext(c, prTestUserID, []string{"repo"})
+		middleware.SetActorContext(c, prTestUserID, prTestOrgUUID, []string{"repo"})
 		return next(c)
 	}
 }
