@@ -2,34 +2,25 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { ArtifactList } from "@/components/actions/ArtifactList";
+import { JobLogViewer } from "@/components/actions/JobLogViewer";
+import { RunActions } from "@/components/actions/RunActions";
 import { RunStatusBadge } from "@/components/actions/RunStatusBadge";
-import { useJobLogStream } from "@/hooks/useJobLogStream";
-import { API_TOKEN_KEY } from "@/lib/api";
+import {
+  getRun,
+  listArtifacts,
+  listJobs,
+  type Artifact,
+  type WorkflowJob,
+  type WorkflowRun,
+} from "@/lib/api/actions";
 
-type WorkflowJob = {
-  id: number;
-  name: string;
-  status: string;
-  conclusion: string | null;
-};
-
-type WorkflowRunDetail = {
-  id: number;
-  name: string;
-  run_number: number;
-  status: string;
-  conclusion: string | null;
-  head_branch: string;
-  head_sha: string;
-  parse_error_line?: number;
-  parse_error_message?: string;
-};
-
-type WorkflowJobsResponse = {
-  total_count: number;
-  jobs: WorkflowJob[];
-};
+function getUserCanWrite(): boolean {
+  if (typeof window === "undefined") return true;
+  const stored = localStorage.getItem("open-git-user-can-write");
+  return stored === null ? true : stored === "true";
+}
 
 function EmptyState({ title, description }: { title: string; description: string }) {
   return (
@@ -40,140 +31,85 @@ function EmptyState({ title, description }: { title: string; description: string
   );
 }
 
-function StreamingIndicator() {
-  return (
-    <span className="inline-flex items-center gap-2 text-xs text-[#656d76]">
-      <span
-        className="inline-block h-2 w-2 animate-pulse rounded-full bg-[#0969da]"
-        aria-hidden
-      />
-      <span>Streaming</span>
-    </span>
-  );
-}
-
-function LogViewer({ lines, streaming }: { lines: string[]; streaming: boolean }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [lines]);
-
-  return (
-    <div
-      ref={scrollRef}
-      className="max-h-[480px] overflow-y-auto rounded-md border border-[#d0d7de] bg-[#0d1117] p-4 font-mono text-sm text-[#e6edf3]"
-    >
-      {lines.length === 0 ? (
-        <div className="text-[#656d76]">
-          {streaming ? "Waiting for log output…" : "No log output."}
-        </div>
-      ) : (
-        lines.map((line, index) => (
-          <div key={index} className="whitespace-pre-wrap break-all">
-            {line}
-          </div>
-        ))
-      )}
-    </div>
-  );
-}
-
 export default function ActionRunDetailPage() {
   const params = useParams();
   const owner = params.owner as string;
   const repo = params.repo as string;
   const runId = params.id as string;
 
-  const [run, setRun] = useState<WorkflowRunDetail | null>(null);
+  const [run, setRun] = useState<WorkflowRun | null>(null);
   const [jobs, setJobs] = useState<WorkflowJob[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [artifactsLoading, setArtifactsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedJobIds, setExpandedJobIds] = useState<Set<number>>(new Set());
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
 
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const [runData, jobsData] = await Promise.all([
+        getRun(owner, repo, runId),
+        listJobs(owner, repo, runId),
+      ]);
+
+      setRun(runData);
+      const loadedJobs = jobsData.jobs ?? [];
+      setJobs(loadedJobs);
+
+      const inProgressJob = loadedJobs.find(
+        (job) => job.status === "in_progress" || job.status === "queued",
+      );
+      const initialJob = inProgressJob ?? loadedJobs[0] ?? null;
+      if (initialJob) {
+        setSelectedJobId(initialJob.id);
+        setExpandedJobIds(new Set([initialJob.id]));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load workflow run");
+    } finally {
+      setLoading(false);
+    }
+  }, [owner, repo, runId]);
+
   useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!run) return;
+
     let cancelled = false;
 
-    async function load() {
-      setLoading(true);
-      setError(null);
-
-      const headers: Record<string, string> = {
-        Accept: "application/vnd.github+json",
-      };
-      const token =
-        typeof window !== "undefined" ? localStorage.getItem(API_TOKEN_KEY) : null;
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-
+    async function loadArtifacts() {
+      setArtifactsLoading(true);
       try {
-        const [runRes, jobsRes] = await Promise.all([
-          fetch(`/api/v3/repos/${owner}/${repo}/actions/runs/${runId}`, {
-            headers,
-          }),
-          fetch(`/api/v3/repos/${owner}/${repo}/actions/runs/${runId}/jobs`, {
-            headers,
-          }),
-        ]);
-
-        if (!runRes.ok) throw new Error("Failed to load workflow run");
-        if (!jobsRes.ok) throw new Error("Failed to load workflow jobs");
-
-        const runData = (await runRes.json()) as WorkflowRunDetail;
-        const jobsData = (await jobsRes.json()) as WorkflowJobsResponse;
-
-        if (cancelled) return;
-
-        setRun(runData);
-        const loadedJobs = jobsData.jobs ?? [];
-        setJobs(loadedJobs);
-
-        const inProgressJob = loadedJobs.find(
-          (job) => job.status === "in_progress" || job.status === "queued",
-        );
-        const initialJob = inProgressJob ?? loadedJobs[0] ?? null;
-        if (initialJob) {
-          setSelectedJobId(initialJob.id);
-          setExpandedJobIds(new Set([initialJob.id]));
-        }
-      } catch (e) {
+        const data = await listArtifacts(owner, repo, runId);
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Failed to load workflow run");
+          setArtifacts(data.artifacts ?? []);
+        }
+      } catch {
+        if (!cancelled) {
+          setArtifacts([]);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setArtifactsLoading(false);
+        }
       }
     }
 
-    load();
+    loadArtifacts();
+
     return () => {
       cancelled = true;
     };
-  }, [owner, repo, runId]);
+  }, [owner, repo, runId, run]);
 
-  const activeJob =
-    jobs.find((job) => job.id === selectedJobId) ??
-    jobs.find((job) => job.status === "in_progress" || job.status === "queued") ??
-    jobs[0] ??
-    null;
-
-  const streamEnabled =
-    activeJob != null &&
-    (activeJob.status === "in_progress" ||
-      activeJob.status === "queued" ||
-      activeJob.id === selectedJobId);
-
-  const { lines, status } = useJobLogStream({
-    owner,
-    repo,
-    jobId: activeJob?.id ?? null,
-    enabled: streamEnabled,
-  });
+  const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? null;
 
   function toggleJobExpanded(jobId: number) {
     setExpandedJobIds((prev) => {
@@ -211,6 +147,11 @@ export default function ActionRunDetailPage() {
     );
   }
 
+  const parseErrorRun = run as WorkflowRun & {
+    parse_error_line?: number;
+    parse_error_message?: string;
+  };
+
   return (
     <div className="min-h-screen bg-[#f6f8fa] text-[#1f2328]">
       <div className="mx-auto max-w-[1280px] px-6 py-6">
@@ -239,10 +180,20 @@ export default function ActionRunDetailPage() {
             role="alert"
             className="mb-4 rounded-md border border-[#cf222e] bg-[#ffebe9] px-4 py-3 text-sm text-[#cf222e]"
           >
-            Workflow parse error on line {run.parse_error_line ?? "?"}:{" "}
-            {run.parse_error_message ?? "Unknown parse error"}
+            Workflow parse error on line {parseErrorRun.parse_error_line ?? "?"}:{" "}
+            {parseErrorRun.parse_error_message ?? "Unknown parse error"}
           </div>
         )}
+
+        <RunActions
+          owner={owner}
+          repo={repo}
+          runId={runId}
+          status={run.status}
+          conclusion={run.conclusion}
+          userCanWrite={getUserCanWrite()}
+          onActionComplete={load}
+        />
 
         {jobs.length === 0 ? (
           <EmptyState
@@ -278,12 +229,6 @@ export default function ActionRunDetailPage() {
                     {isExpanded && (
                       <div className="border-t border-[#d8dee4] bg-[#f6f8fa] px-4 py-3 text-xs text-[#656d76]">
                         Job #{job.id}
-                        {isSelected && activeJob?.id === job.id && status === "streaming" && (
-                          <span className="ml-3 inline-flex items-center gap-1">
-                            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#0969da]" />
-                            Live
-                          </span>
-                        )}
                       </div>
                     )}
                   </section>
@@ -292,18 +237,29 @@ export default function ActionRunDetailPage() {
             </aside>
 
             <main>
-              <div className="mb-3 flex items-center justify-between">
-                <div className="text-sm font-semibold text-[#656d76]">
-                  {activeJob ? `Logs — ${activeJob.name}` : "Logs"}
-                </div>
-                {status === "streaming" && <StreamingIndicator />}
+              <div className="mb-3 text-sm font-semibold text-[#656d76]">
+                {selectedJob ? `Logs — ${selectedJob.name}` : "Logs"}
               </div>
-              {activeJob ? (
-                <LogViewer lines={lines} streaming={status === "streaming"} />
-              ) : null}
+              {selectedJobId != null && (
+                <JobLogViewer
+                  owner={owner}
+                  repo={repo}
+                  jobId={String(selectedJobId)}
+                  isActive={selectedJob?.status === "in_progress"}
+                />
+              )}
             </main>
           </div>
         )}
+
+        <div className="mt-6">
+          <ArtifactList
+            owner={owner}
+            repo={repo}
+            artifacts={artifacts}
+            loading={artifactsLoading}
+          />
+        </div>
       </div>
     </div>
   );
