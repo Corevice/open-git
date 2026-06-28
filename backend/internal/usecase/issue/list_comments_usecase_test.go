@@ -57,7 +57,7 @@ func (m *listCommentsRepo) Create(_ context.Context, _ *entity.Comment) error {
 	return nil
 }
 
-func (m *listCommentsRepo) ListByIssue(_ uuid.UUID, page, perPage int) ([]*entity.Comment, int, error) {
+func (m *listCommentsRepo) ListByIssue(_ context.Context, _ uuid.UUID, page, perPage int) ([]*entity.Comment, int, error) {
 	start := (page - 1) * perPage
 	if start >= len(m.comments) {
 		return []*entity.Comment{}, m.total, nil
@@ -100,12 +100,14 @@ func TestListCommentsNotFoundWhenIssueMissing(t *testing.T) {
 }
 
 func TestListCommentsEmptySliceWhenNoComments(t *testing.T) {
+	orgID := uuid.New()
 	repoID := uuid.New()
 	issue := &entity.Issue{
-		ID:           uuid.New(),
-		RepositoryID: repoID,
-		Number:       1,
-		State:        "open",
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		RepositoryID:   repoID,
+		Number:         1,
+		State:          "open",
 	}
 
 	uc := issueusecase.NewListCommentsUsecase(
@@ -114,7 +116,7 @@ func TestListCommentsEmptySliceWhenNoComments(t *testing.T) {
 	)
 
 	output, err := uc.Execute(context.Background(), issueusecase.ListCommentsInput{
-		OrganizationID: uuid.New(),
+		OrganizationID: orgID,
 		RepositoryID:   repoID,
 		IssueNumber:    1,
 		Page:           1,
@@ -132,13 +134,15 @@ func TestListCommentsEmptySliceWhenNoComments(t *testing.T) {
 }
 
 func TestListCommentsReturnsCommentsAndPage(t *testing.T) {
+	orgID := uuid.New()
 	repoID := uuid.New()
 	issueID := uuid.New()
 	issue := &entity.Issue{
-		ID:           issueID,
-		RepositoryID: repoID,
-		Number:       1,
-		State:        "open",
+		ID:             issueID,
+		OrganizationID: orgID,
+		RepositoryID:   repoID,
+		Number:         1,
+		State:          "open",
 	}
 	comments := []*entity.Comment{
 		{ID: uuid.New(), IssueID: issueID, Body: "first"},
@@ -151,7 +155,7 @@ func TestListCommentsReturnsCommentsAndPage(t *testing.T) {
 	)
 
 	output, err := uc.Execute(context.Background(), issueusecase.ListCommentsInput{
-		OrganizationID: uuid.New(),
+		OrganizationID: orgID,
 		RepositoryID:   repoID,
 		IssueNumber:    1,
 		Page:           1,

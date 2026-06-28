@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/repository"
 )
 
@@ -41,12 +42,15 @@ func (uc *DeleteCommentUsecase) Execute(ctx context.Context, input DeleteComment
 	if comment.OrganizationID != input.OrganizationID {
 		return apperror.ErrNotFound
 	}
+	if comment.AuthorID != input.ActorID {
+		return domain.ErrForbidden
+	}
 
 	if err := uc.commentRepo.Delete(ctx, input.CommentID); err != nil {
 		return err
 	}
 
-	_ = uc.auditLogRepo.InsertAuditLog(
+	if err := uc.auditLogRepo.InsertAuditLog(
 		ctx,
 		input.OrganizationID,
 		input.ActorID,
@@ -54,6 +58,8 @@ func (uc *DeleteCommentUsecase) Execute(ctx context.Context, input DeleteComment
 		"comment",
 		input.CommentID,
 		json.RawMessage(`{}`),
-	)
+	); err != nil {
+		return err
+	}
 	return nil
 }

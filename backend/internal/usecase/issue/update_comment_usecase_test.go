@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
 )
@@ -23,7 +24,7 @@ func (m *mockCommentRepo) Create(_ context.Context, _ *entity.Comment) error {
 	return nil
 }
 
-func (m *mockCommentRepo) ListByIssue(_ uuid.UUID, _, _ int) ([]*entity.Comment, int, error) {
+func (m *mockCommentRepo) ListByIssue(_ context.Context, _ uuid.UUID, _, _ int) ([]*entity.Comment, int, error) {
 	return nil, 0, nil
 }
 
@@ -80,6 +81,64 @@ func TestUpdateCommentNotFoundWhenNil(t *testing.T) {
 	})
 	if !errors.Is(err, apperror.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestUpdateCommentNotFoundWhenOrgMismatch(t *testing.T) {
+	commentID := uuid.New()
+	orgID := uuid.New()
+	otherOrgID := uuid.New()
+	actorID := uuid.New()
+
+	uc := issueusecase.NewUpdateCommentUsecase(
+		&mockCommentRepo{
+			comment: &entity.Comment{
+				ID:             commentID,
+				OrganizationID: orgID,
+				AuthorID:       actorID,
+				Body:           "original",
+			},
+		},
+		&mockCommentAuditLogRepo{},
+	)
+
+	_, err := uc.Execute(context.Background(), issueusecase.UpdateCommentInput{
+		CommentID:      commentID,
+		OrganizationID: otherOrgID,
+		ActorID:        actorID,
+		Body:           "updated",
+	})
+	if !errors.Is(err, apperror.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestUpdateCommentForbiddenWhenActorMismatch(t *testing.T) {
+	commentID := uuid.New()
+	orgID := uuid.New()
+	authorID := uuid.New()
+	otherActorID := uuid.New()
+
+	uc := issueusecase.NewUpdateCommentUsecase(
+		&mockCommentRepo{
+			comment: &entity.Comment{
+				ID:             commentID,
+				OrganizationID: orgID,
+				AuthorID:       authorID,
+				Body:           "original",
+			},
+		},
+		&mockCommentAuditLogRepo{},
+	)
+
+	_, err := uc.Execute(context.Background(), issueusecase.UpdateCommentInput{
+		CommentID:      commentID,
+		OrganizationID: orgID,
+		ActorID:        otherActorID,
+		Body:           "updated",
+	})
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
 	}
 }
 

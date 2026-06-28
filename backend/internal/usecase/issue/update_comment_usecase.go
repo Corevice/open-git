@@ -50,9 +50,6 @@ func (uc *UpdateCommentUsecase) Execute(ctx context.Context, input UpdateComment
 		return nil, domain.ErrForbidden
 	}
 
-	if input.Body == "" {
-		return nil, apperror.ErrValidation
-	}
 	if len(input.Body) > maxCommentBodyLength {
 		return nil, apperror.ErrValidation
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
 )
@@ -27,6 +28,62 @@ func TestDeleteCommentNotFoundWhenNil(t *testing.T) {
 	}
 }
 
+func TestDeleteCommentNotFoundWhenOrgMismatch(t *testing.T) {
+	commentID := uuid.New()
+	orgID := uuid.New()
+	otherOrgID := uuid.New()
+	actorID := uuid.New()
+
+	uc := issueusecase.NewDeleteCommentUsecase(
+		&mockCommentRepo{
+			comment: &entity.Comment{
+				ID:             commentID,
+				OrganizationID: orgID,
+				AuthorID:       actorID,
+				Body:           "to delete",
+			},
+		},
+		&mockCommentAuditLogRepo{},
+	)
+
+	err := uc.Execute(context.Background(), issueusecase.DeleteCommentInput{
+		CommentID:      commentID,
+		OrganizationID: otherOrgID,
+		ActorID:        actorID,
+	})
+	if !errors.Is(err, apperror.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestDeleteCommentForbiddenWhenActorMismatch(t *testing.T) {
+	commentID := uuid.New()
+	orgID := uuid.New()
+	authorID := uuid.New()
+	otherActorID := uuid.New()
+
+	uc := issueusecase.NewDeleteCommentUsecase(
+		&mockCommentRepo{
+			comment: &entity.Comment{
+				ID:             commentID,
+				OrganizationID: orgID,
+				AuthorID:       authorID,
+				Body:           "to delete",
+			},
+		},
+		&mockCommentAuditLogRepo{},
+	)
+
+	err := uc.Execute(context.Background(), issueusecase.DeleteCommentInput{
+		CommentID:      commentID,
+		OrganizationID: orgID,
+		ActorID:        otherActorID,
+	})
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
 func TestDeleteCommentSuccess(t *testing.T) {
 	commentID := uuid.New()
 	orgID := uuid.New()
@@ -35,6 +92,7 @@ func TestDeleteCommentSuccess(t *testing.T) {
 		comment: &entity.Comment{
 			ID:             commentID,
 			OrganizationID: orgID,
+			AuthorID:       actorID,
 			Body:           "to delete",
 		},
 	}
