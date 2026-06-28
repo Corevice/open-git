@@ -3,6 +3,7 @@ package workflow
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -78,14 +79,15 @@ type IRJob struct {
 }
 
 type IRStep struct {
-	ID      string
-	Uses    string
-	UsesRef *UsesRef
-	Run     string
-	Env     map[string]string
-	With    map[string]string
-	If      string
-	IfAST   []ExprNode
+	ID         string
+	Uses       string
+	UsesRef    *UsesRef
+	Run        string
+	Env        map[string]string
+	With       map[string]string
+	If         string
+	IfExprAST  []ExprNode
+	RunExprAST []ExprNode
 }
 
 type DAGInfo struct {
@@ -112,6 +114,13 @@ func (e *ParseError) Error() string {
 }
 
 func ParseWorkflow(data []byte) (*Workflow, error) {
+	if len(data) > maxWorkflowSize {
+		return nil, &ParseError{
+			Line:    1,
+			Message: fmt.Sprintf("workflow file exceeds maximum size of %d bytes", maxWorkflowSize),
+		}
+	}
+
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
 		line := extractLineFromMessage(err.Error())
@@ -136,8 +145,7 @@ func ParseWorkflow(data []byte) (*Workflow, error) {
 		return nil, &ParseError{Line: doc.Line, Message: "workflow root must be a mapping"}
 	}
 
-	_, diags, _ := ParseWorkflowFull(data)
-	for _, d := range diags {
+	for _, d := range validateWorkflowDocument(doc) {
 		if d.Severity == "error" {
 			return nil, &ParseError{Line: d.Line, Message: d.Message}
 		}
@@ -148,6 +156,10 @@ func ParseWorkflow(data []byte) (*Workflow, error) {
 		return nil, &ParseError{Line: doc.Line, Message: err.Error()}
 	}
 
+	if len(wf.Jobs) == 0 {
+		return nil, &ParseError{Line: doc.Line, Message: "workflow must contain at least one job"}
+	}
+
 	for jobID, job := range wf.Jobs {
 		if len(job.Steps) == 0 {
 			return nil, &ParseError{Line: doc.Line, Message: fmt.Sprintf("job %q must define at least one step", jobID)}
@@ -155,6 +167,39 @@ func ParseWorkflow(data []byte) (*Workflow, error) {
 	}
 
 	return &wf, nil
+}
+
+func validateWorkflowDocument(doc *yaml.Node) []Diagnostic {
+	var diags []Diagnostic
+	var onNode *yaml.Node
+	var jobsNode *yaml.Node
+	for i := 0; i < len(doc.Content)-1; i += 2 {
+		key := doc.Content[i].Value
+		val := doc.Content[i+1]
+		switch key {
+		case "on":
+			onNode = val
+		case "jobs":
+			jobsNode = val
+		}
+	}
+	if onNode == nil {
+		diags = append(diags, Diagnostic{
+			Line:     doc.Line,
+			Col:      doc.Col,
+			Severity: "error",
+			Message:  "workflow must define trigger 'on'",
+		})
+	}
+	if jobsNode == nil {
+		diags = append(diags, Diagnostic{
+			Line:     doc.Line,
+			Col:      doc.Col,
+			Severity: "error",
+			Message:  "workflow must contain at least one job",
+		})
+	}
+	return diags
 }
 
 func ParseWorkflowFull(data []byte) (*WorkflowIR, []Diagnostic, error) {
@@ -294,12 +339,12 @@ func ParseWorkflowFull(data []byte) (*WorkflowIR, []Diagnostic, error) {
 					ifAST = parsed
 				}
 				diags = append(diags, ifDiags...)
-				irStep.IfAST = ifAST
+				irStep.IfExprAST = ifAST
 			}
 			if step.Run != "" {
 				runAST, runDiags := ExtractExpressions(step.Run, stepLine)
 				diags = append(diags, runDiags...)
-				irStep.IfAST = append(irStep.IfAST, runAST...)
+				irStep.RunExprAST = runAST
 			}
 
 			irJob.Steps = append(irJob.Steps, irStep)
@@ -341,6 +386,14 @@ func resolveUses(s string, line int) (UsesRef, *Diagnostic) {
 		return UsesRef{Kind: "docker", Image: strings.TrimPrefix(s, "docker://")}, nil
 	}
 	if strings.HasPrefix(s, "./") {
+		if strings.Contains(s, "..") {
+			return UsesRef{}, &Diagnostic{
+				Line:     line,
+				Col:      1,
+				Severity: "error",
+				Message:  "local action path must not contain '..'",
+			}
+		}
 		return UsesRef{Kind: "local", LocalPath: s}, nil
 	}
 	if strings.Contains(s, "@") {
@@ -392,7 +445,16 @@ func expandMatrix(node yaml.Node) ([]map[string]any, []Diagnostic) {
 		}
 	}
 
-	combos := cartesianProduct(axes)
+	combos, overflow := cartesianProduct(axes)
+	if overflow {
+		diags = append(diags, Diagnostic{
+			Line:     node.Line,
+			Col:      node.Col,
+			Severity: "error",
+			Message:  fmt.Sprintf("matrix expansion exceeds maximum of %d combinations", maxMatrixCombinations),
+		})
+		return nil, diags
+	}
 	combos = applyInclude(combos, include)
 	combos = applyExclude(combos, exclude)
 
@@ -427,13 +489,14 @@ func decodeMatrixRows(val any, line int, diags *[]Diagnostic) []map[string]any {
 	return rows
 }
 
-func cartesianProduct(axes map[string][]any) []map[string]any {
+func cartesianProduct(axes map[string][]any) ([]map[string]any, bool) {
 	keys := make([]string, 0, len(axes))
 	for k := range axes {
 		keys = append(keys, k)
 	}
+	sort.Strings(keys)
 	if len(keys) == 0 {
-		return []map[string]any{{}}
+		return []map[string]any{{}}, false
 	}
 
 	result := []map[string]any{{}}
@@ -448,32 +511,64 @@ func cartesianProduct(axes map[string][]any) []map[string]any {
 				}
 				newCombo[key] = val
 				next = append(next, newCombo)
+				if len(next) > maxMatrixCombinations {
+					return next, true
+				}
 			}
 		}
 		result = next
 	}
-	return result
+	return result, false
 }
 
 func applyInclude(combos []map[string]any, include []map[string]any) []map[string]any {
 	if len(include) == 0 {
 		return combos
 	}
-	result := make([]map[string]any, len(combos))
-	copy(result, combos)
+	result := append([]map[string]any(nil), combos...)
 	for _, row := range include {
-		merged := make(map[string]any)
-		if len(combos) > 0 {
-			for k, v := range combos[0] {
-				merged[k] = v
+		if len(combos) == 0 {
+			result = append(result, mergeMatrixCombo(nil, row))
+			continue
+		}
+		matched := false
+		for _, combo := range combos {
+			if includeRowMatches(combo, row) {
+				result = append(result, mergeMatrixCombo(combo, row))
+				matched = true
 			}
 		}
-		for k, v := range row {
-			merged[k] = v
+		if !matched {
+			if len(row) >= len(combos[0]) {
+				result = append(result, mergeMatrixCombo(nil, row))
+			} else {
+				for _, combo := range combos {
+					result = append(result, mergeMatrixCombo(combo, row))
+				}
+			}
 		}
-		result = append(result, merged)
 	}
 	return result
+}
+
+func includeRowMatches(combo, include map[string]any) bool {
+	for k, v := range include {
+		if cv, ok := combo[k]; ok && cv != v {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeMatrixCombo(base, overlay map[string]any) map[string]any {
+	merged := make(map[string]any, len(base)+len(overlay))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range overlay {
+		merged[k] = v
+	}
+	return merged
 }
 
 func applyExclude(combos []map[string]any, exclude []map[string]any) []map[string]any {
@@ -521,6 +616,7 @@ func buildDAG(jobs map[string]IRJob) (DAGInfo, []Diagnostic) {
 					Severity: "error",
 					Message:  fmt.Sprintf("job %q needs unknown job %q", jobID, need),
 				})
+				inDegree[jobID]++
 				continue
 			}
 			adj[need] = append(adj[need], jobID)
@@ -535,6 +631,7 @@ func buildDAG(jobs map[string]IRJob) (DAGInfo, []Diagnostic) {
 			queue = append(queue, jobID)
 		}
 	}
+	sort.Strings(queue)
 
 	var order []string
 	for len(queue) > 0 {
@@ -545,6 +642,7 @@ func buildDAG(jobs map[string]IRJob) (DAGInfo, []Diagnostic) {
 			inDegree[next]--
 			if inDegree[next] == 0 {
 				queue = append(queue, next)
+				sort.Strings(queue)
 			}
 		}
 	}
@@ -591,9 +689,7 @@ func detectCycleMessage(jobs map[string]IRJob) string {
 
 	for jobID := range jobs {
 		if visited[jobID] == 0 && dfs(jobID) && len(cyclePath) >= 2 {
-			a := cyclePath[0]
-			b := cyclePath[1]
-			return fmt.Sprintf("cyclic dependency detected: %s → %s → %s", a, b, a)
+			return fmt.Sprintf("cyclic dependency detected: %s", strings.Join(cyclePath, " → "))
 		}
 	}
 

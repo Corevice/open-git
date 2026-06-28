@@ -65,6 +65,8 @@ func ParseExpression(raw string) ([]ExprNode, []Diagnostic) {
 	return []ExprNode{*node}, diags
 }
 
+const maxExpressionNestDepth = 10
+
 // ExtractExpressions scans s for ${{ ... }} spans and parses each expression.
 func ExtractExpressions(s string, baseLine int) ([]ExprNode, []Diagnostic) {
 	var nodes []ExprNode
@@ -76,13 +78,22 @@ func ExtractExpressions(s string, baseLine int) ([]ExprNode, []Diagnostic) {
 			break
 		}
 		start += i
-		innerStart := start + 3
+		innerStart := start + len("${{")
 		end := innerStart
 		depth := 1
 		for end < len(s) {
-			if end+1 < len(s) && s[end:end+2] == "${{" {
+			if end+len("${{") <= len(s) && s[end:end+len("${{")] == "${{" {
 				depth++
-				end += 2
+				if depth > maxExpressionNestDepth {
+					diags = append(diags, Diagnostic{
+						Line:     baseLine,
+						Col:      1,
+						Severity: "error",
+						Message:  fmt.Sprintf("expression nesting exceeds maximum depth of %d", maxExpressionNestDepth),
+					})
+					return nodes, diags
+				}
+				end += len("${{")
 				continue
 			}
 			if end+1 < len(s) && s[end:end+2] == "}}" {
@@ -199,9 +210,17 @@ func (p *exprParser) parsePrimary() (*ExprNode, []Diagnostic) {
 		return node, diags
 	}
 
-	if p.peek() == '\'' || p.peek() == '"' {
-		val, diags := p.parseString()
+	if p.peek() == '\'' {
+		val, diags := p.parseString('\'')
 		return &ExprNode{Kind: "literal", Value: val}, diags
+	}
+	if p.peek() == '"' {
+		return nil, []Diagnostic{{
+			Line:     p.line,
+			Col:      p.col,
+			Severity: "error",
+			Message:  "double-quoted string literals are not supported in GitHub Actions expressions",
+		}}
 	}
 
 	if p.matchKeyword("true") {
@@ -263,8 +282,7 @@ func (p *exprParser) parseFunctionCall(name string) (*ExprNode, []Diagnostic) {
 	return &ExprNode{Kind: "call", Fn: name, Args: args}, diags
 }
 
-func (p *exprParser) parseString() (string, []Diagnostic) {
-	quote := p.peek()
+func (p *exprParser) parseString(quote byte) (string, []Diagnostic) {
 	p.advance()
 	var sb strings.Builder
 	for p.pos < len(p.input) {
@@ -287,6 +305,9 @@ func (p *exprParser) parseString() (string, []Diagnostic) {
 
 func (p *exprParser) parseNumber() string {
 	start := p.pos
+	if p.peek() == '.' {
+		return ""
+	}
 	for p.pos < len(p.input) && (unicode.IsDigit(rune(p.peek())) || p.peek() == '.') {
 		p.advance()
 	}

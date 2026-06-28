@@ -93,6 +93,24 @@ func TestBackwardCompatParseWorkflow(t *testing.T) {
 	t.Run("invalidYAML", TestParseInvalidYAML)
 	t.Run("emptyDocument", TestParseEmptyDocument)
 	t.Run("missingJobs", TestParseMissingJobs)
+	t.Run("missingOn", func(t *testing.T) {
+		yamlSrc := []byte(`jobs:
+  build:
+    steps:
+      - run: echo ok
+`)
+		_, err := ParseWorkflow(yamlSrc)
+		if err == nil {
+			t.Fatal("expected ParseWorkflow to reject missing on trigger")
+		}
+		var pe *ParseError
+		if !errors.As(err, &pe) {
+			t.Fatalf("expected *ParseError, got %T: %v", err, err)
+		}
+		if !strings.Contains(pe.Message, "trigger 'on'") {
+			t.Errorf("expected missing on message, got %q", pe.Message)
+		}
+	})
 }
 
 func TestParseWorkflowFull_FullSchema(t *testing.T) {
@@ -173,7 +191,7 @@ jobs:
 	if step.UsesRef == nil || step.UsesRef.Kind != "remote" {
 		t.Error("expected remote uses ref")
 	}
-	if len(step.IfAST) == 0 {
+	if len(step.IfExprAST) == 0 {
 		t.Error("expected if expression AST on step")
 	}
 
@@ -266,6 +284,16 @@ func TestUsesResolution_Local(t *testing.T) {
 	}
 }
 
+func TestUsesResolution_LocalPathTraversal(t *testing.T) {
+	_, diag := resolveUses("./.github/actions/../secrets", 1)
+	if diag == nil {
+		t.Fatal("expected diagnostic for path traversal in local action")
+	}
+	if diag.Severity != "error" || !strings.Contains(diag.Message, "..") {
+		t.Errorf("got diagnostic: %+v", diag)
+	}
+}
+
 func TestUsesResolution_Docker(t *testing.T) {
 	ref, diag := resolveUses("docker://node:18", 1)
 	if diag != nil {
@@ -286,7 +314,7 @@ func TestUsesResolution_MissingRef(t *testing.T) {
 	}
 }
 
-func TestMatrixExpansion_IncludeExclude(t *testing.T) {
+func TestMatrixExpansion_ExcludeOnly(t *testing.T) {
 	yamlSrc := []byte(`on: push
 jobs:
   build:
@@ -307,9 +335,47 @@ jobs:
 		}
 	}
 	expansion := ir.Jobs["build"].MatrixExpansion
-	// 2 os x 2 node = 4, minus 1 excluded = 3
 	if len(expansion) != 3 {
 		t.Errorf("matrix expansion count: got %d, want 3", len(expansion))
+	}
+}
+
+func TestMatrixExpansion_IncludeExclude(t *testing.T) {
+	yamlSrc := []byte(`on: push
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu, windows]
+        node-version: [18, 20]
+        include:
+          - os: macos
+            node-version: 21
+        exclude:
+          - os: windows
+            node-version: 18
+    steps:
+      - run: echo ok
+`)
+	ir, diags, _ := ParseWorkflowFull(yamlSrc)
+	for _, d := range diags {
+		if d.Severity == "error" {
+			t.Fatalf("unexpected error: %v", d)
+		}
+	}
+	expansion := ir.Jobs["build"].MatrixExpansion
+	// 2 os x 2 node = 4, plus 1 include, minus 1 excluded = 4
+	if len(expansion) != 4 {
+		t.Errorf("matrix expansion count: got %d, want 4", len(expansion))
+	}
+	foundMacOS := false
+	for _, combo := range expansion {
+		if combo["os"] == "macos" && combo["node-version"] == 21 {
+			foundMacOS = true
+		}
+	}
+	if !foundMacOS {
+		t.Errorf("expected included macos/21 combo, got %v", expansion)
 	}
 }
 
@@ -429,6 +495,35 @@ jobs:
 	}
 	if !found {
 		t.Errorf("expected uses+run conflict diagnostic with line, got %v", diags)
+	}
+}
+
+func TestStepRunExpressionAST(t *testing.T) {
+	yamlSrc := []byte(`on: push
+jobs:
+  build:
+    steps:
+      - if: success()
+        run: echo ${{ github.ref }}
+`)
+	ir, diags, _ := ParseWorkflowFull(yamlSrc)
+	for _, d := range diags {
+		if d.Severity == "error" {
+			t.Fatalf("unexpected error: %v", d)
+		}
+	}
+	step := ir.Jobs["build"].Steps[0]
+	if len(step.IfExprAST) == 0 {
+		t.Fatal("expected if expression AST")
+	}
+	if len(step.RunExprAST) == 0 {
+		t.Fatal("expected run expression AST")
+	}
+	if step.IfExprAST[0].Kind != "call" || step.IfExprAST[0].Fn != "success" {
+		t.Errorf("if AST: got %+v", step.IfExprAST[0])
+	}
+	if step.RunExprAST[0].Kind != "context" || step.RunExprAST[0].Value != "github.ref" {
+		t.Errorf("run AST: got %+v", step.RunExprAST[0])
 	}
 }
 
