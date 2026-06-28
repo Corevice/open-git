@@ -51,6 +51,7 @@ import (
 	orgUC "github.com/open-git/backend/internal/usecase/org"
 	prusecase "github.com/open-git/backend/internal/usecase/pr"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
+	securityUC "github.com/open-git/backend/internal/usecase/security"
 	userUC "github.com/open-git/backend/internal/usecase/user"
 	userpreferencesUC "github.com/open-git/backend/internal/usecase/user_preferences"
 	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
@@ -105,6 +106,10 @@ func main() {
 	e := echo.New()
 	e.HideBanner = true
 	e.HTTPErrorHandler = newHTTPErrorHandler()
+
+	if err := middleware.SetupProxyTrust(e, cfg.TrustedProxyCIDRs); err != nil {
+		log.Printf("warning: setup proxy trust: %v", err)
+	}
 
 	e.Use(echoMiddleware.RequestID())
 	e.Use(middleware.SecurityHeadersMiddleware())
@@ -351,6 +356,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	entityUserRepo := infrarepo.NewUserRepository(sqlxDB)
 	userRepo := &legacyUserRepoAdapter{users: entityUserRepo}
 	repoRepo := infrarepo.NewRepositoryRepository(sqlxDB)
+	collaboratorRepo := infrarepo.NewRepositoryCollaboratorRepository(sqlxDB)
 	membershipRepo := infrarepo.NewMembershipRepository(sqlxDB)
 	legacyMembershipRepo := &legacyMembershipRepoAdapter{inner: membershipRepo}
 	orgRepo := infraDB.NewOrganizationRepository(db)
@@ -383,6 +389,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	listReposUC := repoUC.NewListRepositoriesUsecase(repoRepo, legacyMembershipRepo, userRepo)
 	auditListRepo := infrarepo.NewAuditLogRepository(sqlxDB)
 	listAuditLogsUC := repoUC.NewListAuditLogsUsecase(auditListRepo)
+	searchAuditLogsUC := securityUC.NewSearchAuditLogsUsecase(auditListRepo)
 	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, listReposUC, repoRepo, orgRepo, auditLogRepo, listAuditLogsUC)
 
 	getCurrentUserUC := userUC.NewGetCurrentUserUsecase(userRepo)
@@ -446,9 +453,13 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	prTxManager := infrarepo.NewTransactionManager(sqlxDB)
 	createPRUC := prusecase.NewCreatePRUsecase(prRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo)
 	mergePRUC := prusecase.NewMergePRUsecase(prRepo, bpRepo, prReviewRepo, wfRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo)
+	createReviewUC := prusecase.NewCreateReviewUsecase(prRepo, prReviewRepo, prAuditRepo, membershipRepo)
+	listReviewsUC := prusecase.NewListReviewsUsecase(prRepo, prReviewRepo)
 	pullRequestHandler := handler.NewPullRequestHandler(
 		createPRUC,
 		mergePRUC,
+		createReviewUC,
+		listReviewsUC,
 		prRepo,
 		prReviewRepo,
 		prReviewCommentRepo,
@@ -544,8 +555,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	deleteVerificationUC := mcpusecase.NewDeleteVerificationUsecase(mcpVerificationRepo, mcpAuditRepo)
 
 	var runVerificationUC *mcpusecase.RunVerificationUsecase
+	var asynqClient *asynq.Client
 	if cfg.RedisAddr != "" {
-		asynqClient := queue.NewAsynqClient(cfg.RedisAddr)
+		asynqClient = queue.NewAsynqClient(cfg.RedisAddr)
 		runVerificationUC = mcpusecase.NewRunVerificationUsecase(mcpVerificationRepo, mcpAuditRepo, asynqClient)
 
 		asynqServer := queue.NewAsynqServer(cfg.RedisAddr, 10)
@@ -574,6 +586,14 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		deleteVerificationUC,
 	)
 
+	exportAuditLogsUC := securityUC.NewExportAuditLogsUsecase(asynqClient)
+	orgAuditLogHandler := handler.NewOrgAuditLogHandler(
+		getOrgUC,
+		membershipRepo,
+		searchAuditLogsUC,
+		exportAuditLogsUC,
+	)
+
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 	rateLimitHandler := handler.NewRateLimitHandler()
 	rootHandler := handler.NewRootHandler()
@@ -583,9 +603,11 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		repoGitResolver,
 		membershipAdapter,
 		nil,
+		collaboratorRepo,
 		realGitBasicAuth,
 	)
 	sshKeyHandler := handler.NewSSHKeyHandler(sshKeyRepo)
+	collaboratorHandler := handler.NewCollaboratorHandler(repoGitResolver, repoRepo, collaboratorRepo, entityUserRepo)
 
 	api := e.Group("")
 	e.POST("/register", authHandler.Register, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
@@ -602,6 +624,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	repositoryHandler.RegisterRoutes(api, authMiddleware)
+	collaboratorHandler.RegisterRoutes(api, authMiddleware)
 	contentHandler.RegisterRoutes(api)
 	issueHandler.RegisterRoutes(api, authMiddleware)
 	pullRequestHandler.RegisterRoutes(api, authMiddleware)
@@ -621,7 +644,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	userPreferencesHandler.RegisterRoutes(v3, authMiddleware)
 	v3.Group("", authMiddleware, middleware.RequireScope("admin:org")).PUT("/orgs/:org/memberships/:username", orgHandler.UpdateMembership)
 	orgHandler.RegisterRoutes(v3, authMiddleware)
+	orgAuditLogHandler.RegisterRoutes(v3, authMiddleware)
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
+	collaboratorHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
 	issueHandler.RegisterRoutes(v3, authMiddleware)
 	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
