@@ -1,0 +1,100 @@
+name: Load Test
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+concurrency:
+  group: load-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      K6_TARGET_URL: http://localhost:3000
+      K6_AUTH_TOKEN: ${{ secrets.K6_AUTH_TOKEN }}
+      BENCHMARK_API_URL: http://localhost:3000
+      INTERNAL_PERF_TOKEN: ${{ secrets.INTERNAL_PERF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Docker Compose
+        run: |
+          docker compose -f docker-compose.prod.yml up -d
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/health; then
+              break
+            fi
+            sleep 5
+          done
+          curl -sf http://localhost:3000/health
+
+      - name: Install k6
+        run: |
+          curl -sL https://github.com/grafana/k6/releases/download/v0.50.0/k6-v0.50.0-linux-amd64.tar.gz | tar xzf - --strip-components=1 k6-v0.50.0-linux-amd64/k6
+          sudo mv k6 /usr/local/bin/k6
+          k6 version
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Smoke tests
+        run: bash test/load/smoke-test.sh
+        env:
+          K6_TARGET_URL: http://localhost:3000
+          K6_AUTH_TOKEN: ${{ secrets.K6_AUTH_TOKEN }}
+
+      - name: Run rest-api-read
+        run: k6 run --out json=/tmp/k6-rest-read.json test/load/rest-api-read.js
+
+      - name: Submit rest-api-read results
+        run: bash test/load/submit-results.sh rest-api-read ci /tmp/k6-rest-read.json
+        env:
+          BENCHMARK_API_URL: http://localhost:3000
+          INTERNAL_PERF_TOKEN: ${{ secrets.INTERNAL_PERF_TOKEN }}
+
+      - name: Run rest-api-write
+        run: k6 run --out json=/tmp/k6-rest-write.json test/load/rest-api-write.js
+
+      - name: Submit rest-api-write results
+        run: bash test/load/submit-results.sh rest-api-write ci /tmp/k6-rest-write.json
+        env:
+          BENCHMARK_API_URL: http://localhost:3000
+          INTERNAL_PERF_TOKEN: ${{ secrets.INTERNAL_PERF_TOKEN }}
+
+      - name: Run graphql
+        run: k6 run --out json=/tmp/k6-graphql.json test/load/graphql.js
+
+      - name: Submit graphql results
+        run: bash test/load/submit-results.sh graphql ci /tmp/k6-graphql.json
+        env:
+          BENCHMARK_API_URL: http://localhost:3000
+          INTERNAL_PERF_TOKEN: ${{ secrets.INTERNAL_PERF_TOKEN }}
+
+      - name: Run auth
+        run: k6 run --out json=/tmp/k6-auth.json test/load/auth.js
+
+      - name: Submit auth results
+        run: bash test/load/submit-results.sh auth ci /tmp/k6-auth.json
+        env:
+          BENCHMARK_API_URL: http://localhost:3000
+          INTERNAL_PERF_TOKEN: ${{ secrets.INTERNAL_PERF_TOKEN }}
+
+      - name: Run git-clone
+        run: k6 run --out json=/tmp/k6-git-clone.json test/load/git-clone.js
+
+      - name: Submit git-clone results
+        run: bash test/load/submit-results.sh git-clone ci /tmp/k6-git-clone.json
+        env:
+          BENCHMARK_API_URL: http://localhost:3000
+          INTERNAL_PERF_TOKEN: ${{ secrets.INTERNAL_PERF_TOKEN }}
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
