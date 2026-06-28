@@ -138,9 +138,26 @@ func stripPEP508Extras(name string) string {
 
 func findRequirementOperator(spec string) (op string, idx int) {
 	for _, candidate := range requirementOperators {
-		if i := strings.Index(spec, candidate); i >= 0 {
-			return candidate, i
+		if strings.HasPrefix(spec, candidate) {
+			return candidate, 0
 		}
+	}
+
+	bestIdx := -1
+	bestLen := 0
+	for _, candidate := range requirementOperators {
+		i := strings.Index(spec, candidate)
+		if i < 0 {
+			continue
+		}
+		if len(candidate) > bestLen || (len(candidate) == bestLen && (bestIdx < 0 || i < bestIdx)) {
+			op = candidate
+			bestIdx = i
+			bestLen = len(candidate)
+		}
+	}
+	if bestIdx >= 0 {
+		return op, bestIdx
 	}
 	return "", -1
 }
@@ -227,44 +244,43 @@ func parseRequirementLine(line string) (name, version string, ok bool) {
 	return pkgName, version, true
 }
 
+// npmVersionPrefixes lists npm semver range prefixes in longest-match-first order.
+// Exclusion (!=) and compound ranges are intentionally excluded: they do not denote
+// a single concrete version suitable for OSV queries.
+var npmVersionPrefixes = []string{">=", "<=", "^", "~", ">", "<", "="}
+
 func stripSemverPrefix(version string) string {
 	version = strings.TrimSpace(version)
-	for {
-		changed := false
-		switch {
-		case strings.HasPrefix(version, ">="):
-			version = strings.TrimSpace(version[2:])
-			changed = true
-		case strings.HasPrefix(version, "<="):
-			version = strings.TrimSpace(version[2:])
-			changed = true
-		case strings.HasPrefix(version, "!="):
-			version = strings.TrimSpace(version[2:])
-			changed = true
-		case strings.HasPrefix(version, "~"):
-			version = strings.TrimSpace(version[1:])
-			changed = true
-		case strings.HasPrefix(version, "^"):
-			version = strings.TrimSpace(version[1:])
-			changed = true
-		case strings.HasPrefix(version, ">"):
-			version = strings.TrimSpace(version[1:])
-			changed = true
-		case strings.HasPrefix(version, "<"):
-			version = strings.TrimSpace(version[1:])
-			changed = true
-		case strings.HasPrefix(version, "="):
-			version = strings.TrimSpace(version[1:])
-			changed = true
-		case strings.HasPrefix(version, "v") && len(version) > 1 && version[1] >= '0' && version[1] <= '9':
-			version = strings.TrimSpace(version[1:])
-			changed = true
-		}
-		if !changed {
-			break
+	if version == "" || strings.Contains(version, ",") || strings.HasPrefix(version, "!=") {
+		return ""
+	}
+	for _, prefix := range npmVersionPrefixes {
+		if strings.HasPrefix(version, prefix) {
+			return strings.TrimSpace(version[len(prefix):])
 		}
 	}
+	if strings.HasPrefix(version, "v") && len(version) > 1 && version[1] >= '0' && version[1] <= '9' {
+		return strings.TrimSpace(version[1:])
+	}
 	return version
+}
+
+func isRequirementsTxtOptionLine(line string) bool {
+	if !strings.HasPrefix(line, "-") {
+		return false
+	}
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return true
+	}
+	switch fields[0] {
+	case "-r", "--requirement", "-c", "--constraint", "-e", "--editable",
+		"-i", "--index-url", "--extra-index-url", "--find-links", "-f",
+		"--no-index", "--pre", "--use-feature":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseRequirementsTxt(content []byte) ([]Dependency, error) {
@@ -274,6 +290,10 @@ func parseRequirementsTxt(content []byte) ([]Dependency, error) {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if isRequirementsTxtOptionLine(line) {
 			continue
 		}
 
