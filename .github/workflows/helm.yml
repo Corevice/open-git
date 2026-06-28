@@ -11,6 +11,11 @@ on:
 jobs:
   helm-validate:
     runs-on: ubuntu-latest
+    env:
+      HELM_CI_JWT_SECRET: ci-test-jwt-secret
+      HELM_CI_DB_PASSWORD: ci-test-db-password
+      HELM_CI_MINIO_ROOT_PASSWORD: ci-test-minio-password
+      HELM_CI_MINIO_ACCESS_KEY: ci-test-minio-access-key
     steps:
       - uses: actions/checkout@v4
 
@@ -22,16 +27,18 @@ jobs:
       - name: Lint chart
         run: |
           helm lint helm/ --strict \
-            --set secrets.jwtSecret=ci-test-jwt-secret \
-            --set secrets.minioRootPassword=ci-test-minio-password \
-            --set secrets.minioAccessKey=ci-test-minio-access-key
+            --set secrets.jwtSecret="${HELM_CI_JWT_SECRET}" \
+            --set secrets.dbPassword="${HELM_CI_DB_PASSWORD}" \
+            --set secrets.minioRootPassword="${HELM_CI_MINIO_ROOT_PASSWORD}" \
+            --set secrets.minioAccessKey="${HELM_CI_MINIO_ACCESS_KEY}"
 
       - name: Validate templates
         run: |
           helm template gitforge helm/ \
-            --set secrets.jwtSecret=ci-test-jwt-secret \
-            --set secrets.minioRootPassword=ci-test-minio-password \
-            --set secrets.minioAccessKey=ci-test-minio-access-key \
+            --set secrets.jwtSecret="${HELM_CI_JWT_SECRET}" \
+            --set secrets.dbPassword="${HELM_CI_DB_PASSWORD}" \
+            --set secrets.minioRootPassword="${HELM_CI_MINIO_ROOT_PASSWORD}" \
+            --set secrets.minioAccessKey="${HELM_CI_MINIO_ACCESS_KEY}" \
             > /tmp/rendered.yaml
           cat /tmp/rendered.yaml | docker run --rm -i ghcr.io/yannh/kubeconform:latest -strict -ignore-missing-schemas -
 
@@ -39,7 +46,7 @@ jobs:
         run: |
           helm install gitforge helm/ --dry-run=client --generate-name \
             --set ingress.host=test.example.com \
-            --set secrets.jwtSecret=ci-test-jwt-secret \
-            --set secrets.dbPassword=ci-test-db-password \
-            --set secrets.minioRootPassword=ci-test-minio-password \
-            --set secrets.minioAccessKey=ci-test-minio-access-key
+            --set secrets.jwtSecret="${HELM_CI_JWT_SECRET}" \
+            --set secrets.dbPassword="${HELM_CI_DB_PASSWORD}" \
+            --set secrets.minioRootPassword="${HELM_CI_MINIO_ROOT_PASSWORD}" \
+            --set secrets.minioAccessKey="${HELM_CI_MINIO_ACCESS_KEY}"

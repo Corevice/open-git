@@ -28,13 +28,23 @@ autoscaling:
 #   - Old installs used persistence.repositories.{size,accessMode,retainOnDelete}.
 #   - New flat keys (reposSize, reposPath, retainOnDelete) are preferred for new installs.
 #   - Templates accept either form; reposSize takes precedence, then repositories.size.
-#   - Default size restored to 50Gi (was 20Gi in the intermediate schema).
+#   - Default size is 50Gi.
 #   - Set retainOnDelete: true (default) to annotate PVCs with helm.sh/resource-policy: keep
 #     so data survives helm uninstall. Verify existing PVC reclaim policy in your cluster
 #     before upgrading — shrinking size on an existing PVC is not supported by Kubernetes.
+#
+# Secret migration guide (upgrade from legacy -db / -minio Secrets):
+#   1. Ensure install/upgrade passes all required --set secrets.* values (or use
+#      secrets.existingSecret pointing at a pre-created Secret with keys:
+#      jwt-secret, db-password, minio-access-key, minio-secret-key).
+#   2. Run `helm upgrade` — Helm renders the unified -secrets Secret and updated
+#      backend Deployment in the same release; Kubernetes creates the Secret before
+#      rolling out pods that reference it.
+#   3. Keep secrets.legacySecrets: true (default) until worker deployments are migrated
+#      to the unified -secrets Secret; then set legacySecrets: false to remove duplicates.
 persistence:
   enabled: true
-  reposSize: ""
+  reposSize: "50Gi"
   reposPath: "/data/repos"
   retainOnDelete: true
   repositories:
@@ -79,11 +89,17 @@ ssh:
 
 # Secrets must be supplied at install time (empty defaults will fail template rendering).
 # Example: --set secrets.jwtSecret=... --set secrets.minioAccessKey=... --set secrets.minioRootPassword=...
+# Set existingSecret to skip chart-managed Secret creation and reference an external Secret
+# (must contain keys: jwt-secret, db-password, minio-access-key, minio-secret-key).
 secrets:
+  existingSecret: ""
   jwtSecret: ""
   dbPassword: ""
   minioRootPassword: ""
   minioAccessKey: ""
+  # Deprecated: legacy -db / -minio Secrets for backward compatibility with worker pods.
+  # Set to false once all deployments reference the unified -secrets Secret.
+  legacySecrets: true
 
 serviceAccount:
   create: true

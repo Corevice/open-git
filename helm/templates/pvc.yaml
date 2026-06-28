@@ -1,5 +1,8 @@
 {{- if .Values.persistence.enabled }}
-{{- $size := .Values.persistence.reposSize | default .Values.persistence.repositories.size | default "50Gi" | toString }}
+{{- $size := .Values.persistence.reposSize | default .Values.persistence.repositories.size | default "50Gi" | toString | trimAll " " }}
+{{- if eq $size "" }}
+{{- fail "persistence storage size must not be empty — set persistence.reposSize (e.g. 50Gi)" }}
+{{- end }}
 {{- if not (regexMatch "^[0-9]+(\\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)?$" $size) }}
 {{- fail (printf "Invalid persistence storage size %q — use a Kubernetes quantity (e.g. 50Gi, 100Mi)" $size) }}
 {{- end }}

@@ -7,6 +7,8 @@ metadata:
 data:
   DB_TYPE: {{ .Values.db.type | quote }}
   REDIS_ADDR: {{ .Values.redis.addr | quote }}
-  PORT: {{ .Values.service.backend.port | default 8080 | quote }}
+  PORT: {{ .Values.service.backend.port | default 8080 | toString | quote }}
   GIT_STORAGE_PATH: {{ .Values.persistence.reposPath | default "/data/repos" | quote }}
+  {{- if .Values.minio.enabled }}
   MINIO_ENDPOINT: {{ .Values.minio.endpoint | quote }}
+  {{- end }}

@@ -17,6 +17,7 @@ spec:
         {{- include "open-git.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: backend
     spec:
+      {{- $secretName := .Values.secrets.existingSecret | default (printf "%s-secrets" (include "open-git.fullname" .)) }}
       containers:
         - name: backend
           image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
@@ -44,7 +45,7 @@ spec:
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "open-git.fullname" . }}-secrets
+                  name: {{ $secretName }}
                   key: jwt-secret
             {{- if eq .Values.db.type "postgres" }}
             - name: POSTGRES_HOST
@@ -58,7 +59,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "open-git.fullname" . }}-secrets
+                  name: {{ $secretName }}
                   key: db-password
             {{- else }}
             - name: SQLITE_PATH
@@ -78,13 +79,13 @@ spec:
             - name: MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "open-git.fullname" . }}-secrets
+                  name: {{ $secretName }}
                   key: minio-access-key
             - name: MINIO_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "open-git.fullname" . }}-secrets
-                  key: minio-root-password
+                  name: {{ $secretName }}
+                  key: minio-secret-key
             - name: MINIO_BUCKET
               value: {{ .Values.minio.bucket | quote }}
             {{- end }}
