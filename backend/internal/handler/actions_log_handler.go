@@ -102,7 +102,7 @@ func (h *ActionsLogHandler) GetLogs(c echo.Context) error {
 	}
 
 	totalLines := int64(0)
-	status := entity.WorkflowJobStatusRunning
+	status := entity.WorkflowJobStatusInProgress
 	if meta != nil {
 		totalLines = meta.TotalLines
 		if meta.Status != "" {
