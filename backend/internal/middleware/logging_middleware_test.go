@@ -9,14 +9,12 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	"github.com/rs/zerolog"
 
-	"github.com/open-git/backend/internal/logger"
 	"github.com/open-git/backend/internal/middleware"
 )
 
 func initTestLogger(buf *bytes.Buffer) {
-	logger.InitWithOutput(zerolog.New(buf), "debug")
+	middleware.InitLoggingWithOutput(buf, "debug")
 }
 
 func TestRequestLogger_FieldsPresent(t *testing.T) {

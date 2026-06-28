@@ -37,7 +37,6 @@ import (
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
-	"github.com/open-git/backend/internal/logger"
 	"github.com/open-git/backend/internal/middleware"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
@@ -61,7 +60,7 @@ func main() {
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("invalid config: %v", err)
 	}
-	logger.Init(cfg.LogLevel)
+	middleware.InitLogging(os.Getenv("LOG_LEVEL"))
 
 	db, err := infraDB.Connect(cfg)
 	if err != nil {
@@ -72,7 +71,7 @@ func main() {
 	if err := infraDB.Ping(context.Background(), db); err != nil {
 		log.Fatalf("ping database: %v", err)
 	}
-	logger.Get().Info().Msg(fmt.Sprintf("database connected (%s): %s", cfg.DBType, infraDB.MaskDSN(cfg.DBDSN)))
+	middleware.Log().Info("database connected", "db_type", cfg.DBType, "dsn", infraDB.MaskDSN(cfg.DBDSN))
 
 	if cfg.DBAutoMigrate {
 		if err := infraDB.RunMigrations(db, cfg.DBType, "./migrations"); err != nil {
@@ -123,7 +122,7 @@ func main() {
 	defer cancel()
 	if sshServer != nil {
 		if err := sshServer.Close(); err != nil {
-			logger.Get().Info().Msg(fmt.Sprintf("shutdown ssh server: %v", err))
+			middleware.Log().Info("shutdown ssh server", "error", err)
 		}
 	}
 	if err := e.Shutdown(ctx); err != nil {
@@ -568,9 +567,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 			hostKey,
 		)
 		go func() {
-			logger.Get().Info().Msg(fmt.Sprintf("ssh server listening on %s", sshListenAddr))
+			middleware.Log().Info("ssh server listening", "addr", sshListenAddr)
 			if err := sshServer.Start(sshListenAddr); err != nil && !errors.Is(err, gossh.ErrServerClosed) {
-				logger.Get().Info().Msg(fmt.Sprintf("ssh server stopped: %v", err))
+				middleware.Log().Info("ssh server stopped", "error", err)
 			}
 		}()
 	}
