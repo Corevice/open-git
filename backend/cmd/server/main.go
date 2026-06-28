@@ -579,8 +579,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	tokens := api.Group("/user/tokens", authMiddleware)
 	tokens.GET("", tokenHandler.List)
-	tokens.POST("", tokenHandler.Create)
 	tokens.DELETE("/:id", tokenHandler.Revoke)
+	api.Group("", authMiddleware, middleware.RequireScope("repo")).POST("/user/tokens", tokenHandler.Create)
 
 	keys := api.Group("/user/keys", authMiddleware)
 	keys.GET("", sshKeyHandler.List)
@@ -605,6 +605,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	userHandler.RegisterRoutes(v3, authMiddleware)
 	userPreferencesHandler.RegisterRoutes(v3, authMiddleware)
+	v3.Group("", authMiddleware, middleware.RequireScope("admin:org")).PUT("/orgs/:org/memberships/:username", orgHandler.UpdateMembership)
 	orgHandler.RegisterRoutes(v3, authMiddleware)
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
@@ -618,8 +619,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	v3Tokens := v3.Group("/user/tokens", authMiddleware)
 	v3Tokens.GET("", tokenHandler.List)
-	v3Tokens.POST("", tokenHandler.Create)
 	v3Tokens.DELETE("/:id", tokenHandler.Revoke)
+	v3.Group("", authMiddleware, middleware.RequireScope("repo")).POST("/user/tokens", tokenHandler.Create)
 
 	v3Keys := v3.Group("/user/keys", authMiddleware)
 	v3Keys.GET("", sshKeyHandler.List)
