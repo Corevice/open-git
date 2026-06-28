@@ -283,6 +283,16 @@ func ParseWorkflowFull(data []byte) (*WorkflowIR, []Diagnostic, error) {
 
 			if step.If != "" {
 				ifAST, ifDiags := ExtractExpressions(step.If, stepLine)
+				if len(ifAST) == 0 && !strings.Contains(step.If, "${{") {
+					parsed, parseDiags := ParseExpression(strings.TrimSpace(step.If))
+					for j := range parseDiags {
+						if parseDiags[j].Line > 0 {
+							parseDiags[j].Line += stepLine - 1
+						}
+					}
+					ifDiags = append(ifDiags, parseDiags...)
+					ifAST = parsed
+				}
 				diags = append(diags, ifDiags...)
 				irStep.IfAST = ifAST
 			}
