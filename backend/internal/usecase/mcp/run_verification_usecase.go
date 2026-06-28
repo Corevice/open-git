@@ -22,10 +22,30 @@ type RunVerificationInput struct {
 	Targets            []string
 }
 
+type MCPVerificationEnqueuer interface {
+	EnqueueMCPVerification(ctx context.Context, payload queue.MCPVerificationPayload) error
+}
+
+type asynqMCPVerificationEnqueuer struct {
+	client *asynq.Client
+}
+
+func newAsynqMCPVerificationEnqueuer(client *asynq.Client) MCPVerificationEnqueuer {
+	return &asynqMCPVerificationEnqueuer{client: client}
+}
+
+func (e *asynqMCPVerificationEnqueuer) EnqueueMCPVerification(
+	ctx context.Context,
+	payload queue.MCPVerificationPayload,
+) error {
+	_, err := queue.EnqueueMCPVerification(ctx, e.client, payload)
+	return err
+}
+
 type RunVerificationUsecase struct {
 	repo         domainrepo.IMCPVerificationRepository
 	auditLogRepo domainrepo.IAuditLogRepository
-	asynqClient  *asynq.Client
+	enqueuer     MCPVerificationEnqueuer
 }
 
 func NewRunVerificationUsecase(
@@ -33,10 +53,18 @@ func NewRunVerificationUsecase(
 	auditLogRepo domainrepo.IAuditLogRepository,
 	asynqClient *asynq.Client,
 ) *RunVerificationUsecase {
+	return NewRunVerificationUsecaseWithDeps(repo, auditLogRepo, newAsynqMCPVerificationEnqueuer(asynqClient))
+}
+
+func NewRunVerificationUsecaseWithDeps(
+	repo domainrepo.IMCPVerificationRepository,
+	auditLogRepo domainrepo.IAuditLogRepository,
+	enqueuer MCPVerificationEnqueuer,
+) *RunVerificationUsecase {
 	return &RunVerificationUsecase{
 		repo:         repo,
 		auditLogRepo: auditLogRepo,
-		asynqClient:  asynqClient,
+		enqueuer:     enqueuer,
 	}
 }
 
@@ -95,7 +123,7 @@ func (uc *RunVerificationUsecase) Execute(
 		return nil, err
 	}
 
-	if _, err := queue.EnqueueMCPVerification(ctx, uc.asynqClient, queue.MCPVerificationPayload{
+	if err := uc.enqueuer.EnqueueMCPVerification(ctx, queue.MCPVerificationPayload{
 		RunID:              run.ID.String(),
 		OrganizationID:     orgID.String(),
 		RepositoryFullName: input.RepositoryFullName,
