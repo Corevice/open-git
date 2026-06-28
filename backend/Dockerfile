@@ -19,6 +19,12 @@ WORKDIR /app
 
 COPY --from=builder /app/server .
 COPY --from=builder /app/migrations ./migrations
+COPY --from=builder /app/licenses.json ./licenses.json
+COPY --from=builder /app/LICENSE ./LICENSE
+
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.title="OpenGit"
+LABEL org.opencontainers.image.source="https://github.com/open-git/open-git"
 
 USER opengit
 
