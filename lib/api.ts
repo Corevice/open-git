@@ -153,3 +153,34 @@ export class ApiClient {
     revoke: (id: number) => this.del(`/api/v3/user/tokens/${id}`),
   };
 }
+
+function createAuthenticatedClient(): ApiClient {
+  const baseURL =
+    process.env.NEXT_PUBLIC_API_BASE_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    "http://localhost:8080";
+  const client = new ApiClient(baseURL);
+  if (typeof window !== "undefined") {
+    const storedToken = localStorage.getItem(API_TOKEN_KEY);
+    if (storedToken) {
+      client.setToken(storedToken);
+    }
+  }
+  return client;
+}
+
+export function listTokens(): Promise<AccessTokenListItem[]> {
+  return createAuthenticatedClient().tokens.list();
+}
+
+export function createToken(data: {
+  note: string;
+  scopes: string[];
+  expires_at?: string;
+}): Promise<CreateTokenResult> {
+  return createAuthenticatedClient().tokens.create(data);
+}
+
+export function revokeToken(id: number): Promise<void> {
+  return createAuthenticatedClient().tokens.revoke(id);
+}
