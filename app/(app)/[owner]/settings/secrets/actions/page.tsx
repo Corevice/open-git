@@ -15,6 +15,7 @@ import {
   sealSecret,
   upsertOrgSecret,
   validateSecretName,
+  visibilityLabel,
   type OrgActionSecret,
   type SecretVisibility,
 } from "@/lib/api/secrets";
@@ -24,17 +25,6 @@ function formatDate(value: string | undefined): string {
     return "—";
   }
   return new Date(value).toLocaleString();
-}
-
-function visibilityLabel(visibility: SecretVisibility): string {
-  switch (visibility) {
-    case "all":
-      return "All repositories";
-    case "private":
-      return "Private repositories";
-    case "selected":
-      return "Selected repositories";
-  }
 }
 
 function VisibilityBadge({ visibility }: { visibility: SecretVisibility }) {
@@ -137,13 +127,15 @@ export default function OrganizationSecretsPage({
   const handleUpsert = async (
     name: string,
     value: string,
-    visibility: SecretVisibility = "all",
+    visibility?: SecretVisibility,
   ) => {
     setSubmitting(true);
     setFormError(null);
     setFieldErrors({});
 
     const isUpdate = editingSecret !== null;
+    const effectiveVisibility =
+      visibility ?? editingSecretData?.visibility ?? "all";
     const nameError = isUpdate ? null : validateSecretName(name);
     if (nameError) {
       setFieldErrors({ name: nameError });
@@ -160,6 +152,43 @@ export default function OrganizationSecretsPage({
       return;
     }
 
+    if (isUpdate && !trimmedValue) {
+      const currentVisibility = editingSecretData?.visibility;
+      if (effectiveVisibility === currentVisibility) {
+        setShowCreateForm(false);
+        setEditingSecret(null);
+        resetFormState();
+        setSubmitting(false);
+        return;
+      }
+      if (effectiveVisibility === "selected") {
+        setFieldErrors({
+          visibility:
+            "Selected repositories requires choosing at least one repository",
+        });
+        setFormError(
+          "Cannot change visibility to selected without repository selection.",
+        );
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    if (
+      !isUpdate &&
+      effectiveVisibility === "selected"
+    ) {
+      setFieldErrors({
+        visibility:
+          "Selected repositories requires choosing at least one repository",
+      });
+      setFormError(
+        "Cannot create a secret with selected visibility without repository selection.",
+      );
+      setSubmitting(false);
+      return;
+    }
+
     try {
       if (trimmedValue) {
         const publicKey = await getOrgPublicKey(owner);
@@ -172,7 +201,7 @@ export default function OrganizationSecretsPage({
           name,
           encrypted_value,
           key_id,
-          visibility,
+          effectiveVisibility,
         );
       } else {
         await upsertOrgSecret(
@@ -180,7 +209,7 @@ export default function OrganizationSecretsPage({
           name,
           undefined,
           undefined,
-          visibility,
+          effectiveVisibility,
         );
       }
 

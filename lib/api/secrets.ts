@@ -31,10 +31,31 @@ interface PaginatedSecretsResponse<T> {
 }
 
 const SECRETS_PAGE_SIZE = 100;
+// GitHub paginates at 100/page; cap at 100 pages (10,000 secrets) to avoid unbounded fetches.
 const SECRETS_MAX_PAGES = 100;
 const SECRET_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
+const PATH_SEGMENT_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
 let cachedBaseUrl: string | undefined;
+let sodiumReady: Promise<void> | undefined;
+
+function ensureSodiumReady(): Promise<void> {
+  if (!sodiumReady) {
+    sodiumReady = sodium.ready;
+  }
+  return sodiumReady;
+}
+
+export function visibilityLabel(visibility: SecretVisibility): string {
+  switch (visibility) {
+    case "all":
+      return "All repositories";
+    case "private":
+      return "Private repositories";
+    case "selected":
+      return "Selected repositories";
+  }
+}
 
 function resolveBaseUrl(): string {
   if (cachedBaseUrl === undefined) {
@@ -92,13 +113,39 @@ function validatePathSegment(value: string, label: string): void {
 
   if (
     !decoded ||
+    decoded.includes("\0") ||
     decoded.includes("/") ||
     decoded.includes("\\") ||
     decoded === "." ||
     decoded === ".." ||
-    decoded.includes("..")
+    decoded.includes("..") ||
+    !PATH_SEGMENT_PATTERN.test(decoded)
   ) {
     throw new ApiError(400, `Invalid ${label}`);
+  }
+}
+
+function validatePublicKey(publicKey: PublicKey): void {
+  if (!publicKey?.key_id || typeof publicKey.key_id !== "string") {
+    throw new ApiError(400, "Invalid public key");
+  }
+  if (!publicKey?.key || typeof publicKey.key !== "string") {
+    throw new ApiError(400, "Invalid public key");
+  }
+
+  try {
+    const publicKeyBytes = sodium.from_base64(
+      publicKey.key,
+      sodium.base64_variants.ORIGINAL,
+    );
+    if (publicKeyBytes.length !== sodium.crypto_box_PUBLICKEYBYTES) {
+      throw new ApiError(400, "Invalid public key");
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(400, "Invalid public key");
   }
 }
 
@@ -164,7 +211,7 @@ async function request<T>(
       const fieldErrors = parseFieldErrors(errorBody) ?? {};
       const error = new ApiError(
         response.status,
-        message,
+        "Validation failed",
       ) as SecretValidationError;
       error.fieldErrors = fieldErrors;
       throw error;
@@ -212,12 +259,7 @@ async function fetchAllSecrets<T>(basePath: string): Promise<T[]> {
       break;
     }
 
-    const previousLength = secrets.length;
     secrets.push(...data.secrets);
-
-    if (secrets.length === previousLength) {
-      break;
-    }
 
     if (
       typeof data.total_count === "number" &&
@@ -244,14 +286,17 @@ export function listRepoSecrets(
   return fetchAllSecrets<ActionSecret>(repoSecretsPath(owner, repo));
 }
 
-export function getRepoPublicKey(
+export async function getRepoPublicKey(
   owner: string,
   repo: string,
 ): Promise<PublicKey> {
-  return request<PublicKey>(
+  const publicKey = await request<PublicKey>(
     "GET",
     `${repoSecretsPath(owner, repo)}/public-key`,
   );
+  await ensureSodiumReady();
+  validatePublicKey(publicKey);
+  return publicKey;
 }
 
 export function upsertRepoSecret(
@@ -279,8 +324,14 @@ export function listOrgSecrets(owner: string): Promise<OrgActionSecret[]> {
   return fetchAllSecrets<OrgActionSecret>(orgSecretsPath(owner));
 }
 
-export function getOrgPublicKey(owner: string): Promise<PublicKey> {
-  return request<PublicKey>("GET", `${orgSecretsPath(owner)}/public-key`);
+export async function getOrgPublicKey(owner: string): Promise<PublicKey> {
+  const publicKey = await request<PublicKey>(
+    "GET",
+    `${orgSecretsPath(owner)}/public-key`,
+  );
+  await ensureSodiumReady();
+  validatePublicKey(publicKey);
+  return publicKey;
 }
 
 export function upsertOrgSecret(
@@ -291,6 +342,19 @@ export function upsertOrgSecret(
   visibility: SecretVisibility,
   selected_repository_ids?: number[],
 ): Promise<void> {
+  if (
+    visibility === "selected" &&
+    (selected_repository_ids === undefined ||
+      selected_repository_ids.length === 0)
+  ) {
+    return Promise.reject(
+      new ApiError(
+        400,
+        "Selected repositories requires at least one repository",
+      ),
+    );
+  }
+
   const payload: {
     visibility: SecretVisibility;
     encrypted_value?: string;
@@ -318,7 +382,7 @@ export async function sealSecret(
   value: string,
   publicKey: PublicKey,
 ): Promise<{ encrypted_value: string; key_id: string }> {
-  await sodium.ready;
+  await ensureSodiumReady();
   const base64Variant = sodium.base64_variants.ORIGINAL;
   const publicKeyBytes = sodium.from_base64(publicKey.key, base64Variant);
   const valueBytes = sodium.from_string(value);

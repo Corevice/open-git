@@ -4,12 +4,25 @@ import sodium from "libsodium-wrappers";
 import { ApiError } from "../api";
 import {
   deleteOrgSecret,
+  getOrgPublicKey,
+  getRepoPublicKey,
   isSecretValidationError,
   listOrgSecrets,
   listRepoSecrets,
   sealSecret,
+  upsertOrgSecret,
+  upsertRepoSecret,
   validateSecretName,
+  visibilityLabel,
 } from "./secrets";
+
+describe("visibilityLabel", () => {
+  it("returns human-readable labels", () => {
+    expect(visibilityLabel("all")).toBe("All repositories");
+    expect(visibilityLabel("private")).toBe("Private repositories");
+    expect(visibilityLabel("selected")).toBe("Selected repositories");
+  });
+});
 
 describe("validateSecretName", () => {
   it("accepts valid secret names", () => {
@@ -175,6 +188,22 @@ describe("validatePathSegment", () => {
       },
     );
   });
+
+  it("rejects unicode characters in owner", async () => {
+    await expect(listOrgSecrets("org\u0000name")).rejects.toMatchObject({
+      status: 400,
+      message: "Invalid owner",
+    });
+  });
+
+  it("rejects non-allowlisted characters in secret name", async () => {
+    await expect(deleteOrgSecret("my-org", "bad secret")).rejects.toMatchObject(
+      {
+        status: 400,
+        message: "Invalid secret name",
+      },
+    );
+  });
 });
 
 describe("request error handling", () => {
@@ -197,6 +226,245 @@ describe("request error handling", () => {
     await expect(deleteOrgSecret("my-org", "SECRET")).rejects.toMatchObject({
       status: 500,
       message: "Request failed",
+    });
+  });
+
+  it("uses generic message for 422 errors while preserving field errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        statusText: "Unprocessable Entity",
+        json: async () => ({
+          message: "internal validation detail leaked",
+          errors: [{ field: "name", message: "Name is invalid" }],
+        }),
+      }),
+    );
+
+    let caught: unknown;
+    try {
+      await upsertRepoSecret("owner", "repo", "SECRET", "encrypted", "key-1");
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({
+      status: 422,
+      message: "Validation failed",
+    });
+    expect(isSecretValidationError(caught)).toBe(true);
+    if (isSecretValidationError(caught)) {
+      expect(caught.fieldErrors).toEqual({ name: "Name is invalid" });
+    }
+  });
+});
+
+describe("upsertRepoSecret", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("sends encrypted value and key id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: { get: () => null },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await upsertRepoSecret("owner", "repo", "MY_SECRET", "encrypted", "key-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/repos/owner/repo/actions/secrets/MY_SECRET"),
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          encrypted_value: "encrypted",
+          key_id: "key-1",
+        }),
+      }),
+    );
+  });
+});
+
+describe("upsertOrgSecret", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("sends encrypted value and visibility", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: { get: () => null },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await upsertOrgSecret("my-org", "MY_SECRET", "encrypted", "key-1", "all");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/orgs/my-org/actions/secrets/MY_SECRET"),
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          visibility: "all",
+          encrypted_value: "encrypted",
+          key_id: "key-1",
+        }),
+      }),
+    );
+  });
+
+  it("allows visibility-only updates without encrypted value", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: { get: () => null },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await upsertOrgSecret(
+      "my-org",
+      "MY_SECRET",
+      undefined,
+      undefined,
+      "private",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/orgs/my-org/actions/secrets/MY_SECRET"),
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ visibility: "private" }),
+      }),
+    );
+  });
+
+  it("rejects selected visibility without repository ids", async () => {
+    await expect(
+      upsertOrgSecret("my-org", "MY_SECRET", "encrypted", "key-1", "selected"),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "Selected repositories requires at least one repository",
+    });
+  });
+
+  it("includes selected repository ids when provided", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: { get: () => null },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await upsertOrgSecret(
+      "my-org",
+      "MY_SECRET",
+      "encrypted",
+      "key-1",
+      "selected",
+      [1, 2],
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/orgs/my-org/actions/secrets/MY_SECRET"),
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          visibility: "selected",
+          encrypted_value: "encrypted",
+          key_id: "key-1",
+          selected_repository_ids: [1, 2],
+        }),
+      }),
+    );
+  });
+});
+
+describe("getOrgPublicKey", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("rejects invalid public key responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) =>
+            name === "content-type" ? "application/json" : null,
+        },
+        json: async () => ({ key_id: "bad-key", key: "not-valid-base64!!!" }),
+      }),
+    );
+
+    await expect(getOrgPublicKey("my-org")).rejects.toMatchObject({
+      status: 400,
+      message: "Invalid public key",
+    });
+  });
+
+  it("returns validated public keys", async () => {
+    await sodium.ready;
+    const keyPair = sodium.crypto_box_keypair();
+    const base64Variant = sodium.base64_variants.ORIGINAL;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) =>
+            name === "content-type" ? "application/json" : null,
+        },
+        json: async () => ({
+          key_id: "test-key-id",
+          key: sodium.to_base64(keyPair.publicKey, base64Variant),
+        }),
+      }),
+    );
+
+    await expect(getOrgPublicKey("my-org")).resolves.toMatchObject({
+      key_id: "test-key-id",
+    });
+  });
+});
+
+describe("getRepoPublicKey", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("rejects public keys with incorrect byte length", async () => {
+    await sodium.ready;
+    const base64Variant = sodium.base64_variants.ORIGINAL;
+    const shortKey = sodium.to_base64(new Uint8Array(16), base64Variant);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) =>
+            name === "content-type" ? "application/json" : null,
+        },
+        json: async () => ({ key_id: "short-key", key: shortKey }),
+      }),
+    );
+
+    await expect(getRepoPublicKey("owner", "repo")).rejects.toMatchObject({
+      status: 400,
+      message: "Invalid public key",
     });
   });
 });

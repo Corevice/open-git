@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import {
   validateSecretName,
+  visibilityLabel,
   type SecretVisibility,
 } from "@/lib/api/secrets";
 
@@ -25,17 +26,6 @@ function isSecretVisibility(value: string): value is SecretVisibility {
   return value === "all" || value === "private" || value === "selected";
 }
 
-function visibilityLabel(visibility: SecretVisibility): string {
-  switch (visibility) {
-    case "all":
-      return "All repositories";
-    case "private":
-      return "Private repositories";
-    case "selected":
-      return "Selected repositories";
-  }
-}
-
 export function SecretForm({
   onSubmit,
   existingName,
@@ -54,8 +44,9 @@ export function SecretForm({
   const trimmedValue = value.trim();
   const trimmedName = name.trim();
   const nameValidationError = isEditing ? null : validateSecretName(trimmedName);
+  const visibilityChanged = visibility !== initialVisibility;
   const canSubmit = isEditing
-    ? true
+    ? trimmedValue.length > 0 || visibilityChanged
     : trimmedName.length > 0 && trimmedValue.length > 0 && !nameValidationError;
 
   useEffect(() => {
