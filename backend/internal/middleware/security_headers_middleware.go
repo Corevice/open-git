@@ -5,11 +5,11 @@ import (
 )
 
 const (
-	hstsHeaderValue           = "max-age=31536000; includeSubDomains"
-	contentTypeOptionsValue   = "nosniff"
-	frameOptionsValue         = "DENY"
-	xssProtectionValue        = "1; mode=block"
-	referrerPolicyValue       = "strict-origin-when-cross-origin"
+	hstsHeaderValue         = "max-age=31536000; includeSubDomains"
+	contentTypeOptionsValue = "nosniff"
+	frameOptionsValue       = "DENY"
+	xssProtectionValue      = "1; mode=block"
+	referrerPolicyValue     = "strict-origin-when-cross-origin"
 )
 
 // SecurityHeaders sets standard HTTP security headers on every response.
