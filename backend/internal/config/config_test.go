@@ -106,6 +106,52 @@ func TestLoadBaseURLDefaults(t *testing.T) {
 	}
 }
 
+func TestMetricsConfig(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		t.Setenv("METRICS_ENABLED", "")
+		t.Setenv("METRICS_PATH", "")
+		t.Setenv("METRICS_AUTH_TOKEN", "")
+
+		cfg := config.Load()
+		if !cfg.MetricsEnabled {
+			t.Fatalf("MetricsEnabled = false, want true")
+		}
+		if cfg.MetricsPath != "/metrics" {
+			t.Fatalf("MetricsPath = %q, want /metrics", cfg.MetricsPath)
+		}
+		if cfg.MetricsAuthToken != "" {
+			t.Fatalf("MetricsAuthToken = %q, want empty", cfg.MetricsAuthToken)
+		}
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		t.Setenv("METRICS_ENABLED", "false")
+
+		cfg := config.Load()
+		if cfg.MetricsEnabled {
+			t.Fatalf("MetricsEnabled = true, want false")
+		}
+	})
+
+	t.Run("custom path", func(t *testing.T) {
+		t.Setenv("METRICS_PATH", "/prom")
+
+		cfg := config.Load()
+		if cfg.MetricsPath != "/prom" {
+			t.Fatalf("MetricsPath = %q, want /prom", cfg.MetricsPath)
+		}
+	})
+
+	t.Run("auth token", func(t *testing.T) {
+		t.Setenv("METRICS_AUTH_TOKEN", "tok123")
+
+		cfg := config.Load()
+		if cfg.MetricsAuthToken != "tok123" {
+			t.Fatalf("MetricsAuthToken = %q, want tok123", cfg.MetricsAuthToken)
+		}
+	})
+}
+
 func TestMaskDSN(t *testing.T) {
 	masked := database.MaskDSN("postgres://user:secret@host/db")
 	if strings.Contains(masked, "secret") {

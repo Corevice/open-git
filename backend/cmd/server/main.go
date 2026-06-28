@@ -26,6 +26,7 @@ import (
 
 	"github.com/open-git/backend/internal/compat"
 	"github.com/open-git/backend/internal/config"
+	obs "github.com/open-git/backend/observability"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
@@ -97,6 +98,10 @@ func main() {
 	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(20)))
 	e.Use(middleware.TimeoutWithConfig(middleware.TimeoutConfig{Timeout: 30 * time.Second}))
 	e.Use(requestContextMiddleware())
+	if cfg.MetricsEnabled {
+		e.Use(obs.EchoPrometheusMiddleware)
+		obs.RegisterMetricsRoute(e, cfg.MetricsPath, cfg.MetricsAuthToken)
+	}
 
 	e.GET("/healthz", healthzHandler)
 	e.GET("/readyz", readyzHandler(db))
