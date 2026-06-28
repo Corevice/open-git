@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -28,6 +29,9 @@ type Config struct {
 	WebBaseURL        string
 	DocsBaseURL        string
 	WebhookSecretKey   string
+	MetricsEnabled     bool
+	MetricsPath        string
+	MetricsAuthToken   string
 }
 
 func Load() Config {
@@ -66,10 +70,13 @@ func Load() Config {
 		WebBaseURL:        getenv("WEB_BASE_URL", "http://localhost:8080"),
 		DocsBaseURL:       getenv("DOCS_BASE_URL", "https://docs.github.com/rest"),
 		WebhookSecretKey:  os.Getenv("WEBHOOK_SECRET_KEY"),
+		MetricsEnabled:    getenvBool("METRICS_ENABLED", true),
+		MetricsPath:       getenv("METRICS_PATH", "/metrics"),
+		MetricsAuthToken:  os.Getenv("METRICS_AUTH_TOKEN"),
 	}
 }
 
-func (c Config) Validate() error {
+func (c *Config) Validate() error {
 	if c.DBType != "postgres" && c.DBType != "sqlite" {
 		return fmt.Errorf("DB_TYPE must be \"postgres\" or \"sqlite\", got %q", c.DBType)
 	}
@@ -80,6 +87,10 @@ func (c Config) Validate() error {
 	}
 	if port < 1 || port > 65535 {
 		return fmt.Errorf("port: out of range %d", port)
+	}
+	if c.MetricsEnabled && !strings.HasPrefix(c.MetricsPath, "/") {
+		log.Printf("METRICS_PATH %q invalid, falling back to /metrics", c.MetricsPath)
+		c.MetricsPath = "/metrics"
 	}
 	if c.DBType == "postgres" && c.DBDSN == "" {
 		return fmt.Errorf("DB_DSN is required when DB_TYPE is postgres")
