@@ -11,42 +11,34 @@ on:
 jobs:
   helm-validate:
     runs-on: ubuntu-latest
-    env:
-      HELM_CI_JWT_SECRET: ci-test-jwt-secret
-      HELM_CI_DB_PASSWORD: ci-test-db-password
-      HELM_CI_MINIO_ROOT_PASSWORD: ci-test-minio-password
-      HELM_CI_MINIO_ACCESS_KEY: ci-test-minio-access-key
     steps:
       - uses: actions/checkout@v4
 
       - uses: azure/setup-helm@v4
 
+      - name: Generate ephemeral CI secrets and helm --set flags
+        run: |
+          JWT="$(openssl rand -hex 32)"
+          DB="$(openssl rand -hex 32)"
+          MINIO_ROOT="$(openssl rand -hex 32)"
+          MINIO_ACCESS="$(openssl rand -hex 16)"
+          {
+            echo "HELM_SECRET_SET_FLAGS=--set secrets.jwtSecret=${JWT} --set secrets.dbPassword=${DB} --set secrets.minioRootPassword=${MINIO_ROOT} --set secrets.minioAccessKey=${MINIO_ACCESS}"
+          } >> "$GITHUB_ENV"
+
       - name: Update chart dependencies
         run: helm dependency update helm/
 
       - name: Lint chart
-        run: |
-          helm lint helm/ --strict \
-            --set secrets.jwtSecret="${HELM_CI_JWT_SECRET}" \
-            --set secrets.dbPassword="${HELM_CI_DB_PASSWORD}" \
-            --set secrets.minioRootPassword="${HELM_CI_MINIO_ROOT_PASSWORD}" \
-            --set secrets.minioAccessKey="${HELM_CI_MINIO_ACCESS_KEY}"
+        run: helm lint helm/ --strict ${HELM_SECRET_SET_FLAGS}
 
       - name: Validate templates
         run: |
-          helm template gitforge helm/ \
-            --set secrets.jwtSecret="${HELM_CI_JWT_SECRET}" \
-            --set secrets.dbPassword="${HELM_CI_DB_PASSWORD}" \
-            --set secrets.minioRootPassword="${HELM_CI_MINIO_ROOT_PASSWORD}" \
-            --set secrets.minioAccessKey="${HELM_CI_MINIO_ACCESS_KEY}" \
-            > /tmp/rendered.yaml
+          helm template gitforge helm/ ${HELM_SECRET_SET_FLAGS} > /tmp/rendered.yaml
           cat /tmp/rendered.yaml | docker run --rm -i ghcr.io/yannh/kubeconform:latest -strict -ignore-missing-schemas -
 
       - name: Dry-run install
         run: |
           helm install gitforge helm/ --dry-run=client --generate-name \
             --set ingress.host=test.example.com \
-            --set secrets.jwtSecret="${HELM_CI_JWT_SECRET}" \
-            --set secrets.dbPassword="${HELM_CI_DB_PASSWORD}" \
-            --set secrets.minioRootPassword="${HELM_CI_MINIO_ROOT_PASSWORD}" \
-            --set secrets.minioAccessKey="${HELM_CI_MINIO_ACCESS_KEY}"
+            ${HELM_SECRET_SET_FLAGS}

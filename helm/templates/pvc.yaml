@@ -19,11 +19,12 @@ metadata:
   {{- end }}
 spec:
   accessModes:
-    - {{ .Values.persistence.repositories.accessMode | default "ReadWriteOnce" }}
+    - {{ .Values.persistence.accessMode | default .Values.persistence.repositories.accessMode | default "ReadWriteOnce" }}
   resources:
     requests:
       storage: {{ $size | quote }}
-  {{- with .Values.global.storageClass }}
+  {{- $storageClass := .Values.persistence.storageClass | default .Values.global.storageClass }}
+  {{- with $storageClass }}
   storageClassName: {{ . | quote }}
   {{- end }}
 {{- end }}

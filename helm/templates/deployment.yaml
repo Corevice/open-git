@@ -1,3 +1,4 @@
+{{- $secretName := .Values.secrets.existingSecret | default (printf "%s-secrets" (include "open-git.fullname" .)) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,7 +18,6 @@ spec:
         {{- include "open-git.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: backend
     spec:
-      {{- $secretName := .Values.secrets.existingSecret | default (printf "%s-secrets" (include "open-git.fullname" .)) }}
       containers:
         - name: backend
           image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
@@ -76,6 +76,7 @@ spec:
                 configMapKeyRef:
                   name: {{ include "open-git.fullname" . }}
                   key: MINIO_ENDPOINT
+                  optional: true
             - name: MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
