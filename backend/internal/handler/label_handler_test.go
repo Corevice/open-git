@@ -22,6 +22,8 @@ import (
 	labelusecase "github.com/open-git/backend/internal/usecase/label"
 )
 
+var labelTestUserID = uuid.MustParse("00000000-0000-0000-0000-000000000007")
+
 type labelTestEnv struct {
 	echo   *echo.Echo
 	repo   *entity.Repository
@@ -49,6 +51,7 @@ func createLabelTestUser(t *testing.T, db *sqlx.DB, login string) uuid.UUID {
 
 	userRepo := infrarepo.NewUserRepository(db)
 	user := &entity.User{
+		ID:           labelTestUserID,
 		Login:        login,
 		Email:        login + "@example.com",
 		PasswordHash: "hashed",
