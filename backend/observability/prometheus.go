@@ -6,11 +6,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+const maxPrometheusLabelLen = 64
 
 var (
 	httpRequestsTotal = prometheus.NewCounterVec(
@@ -52,40 +56,79 @@ var (
 			Help:    "DB query duration.",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"query"},
+		[]string{"query_name"},
 	)
 )
 
 func init() {
-	if err := prometheus.Register(httpRequestsTotal); err != nil {
+	registerCollector(httpRequestsTotal)
+	registerCollector(httpRequestDuration)
+	registerCollector(gitOperationsTotal)
+	registerCollector(workflowRunsTotal)
+	registerCollector(dbQueryDuration)
+}
+
+func registerCollector(collector prometheus.Collector) {
+	if err := prometheus.Register(collector); err != nil {
 		if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
 			log.Printf("metrics: already registered, reusing existing collector: %v", err)
+			return
 		}
+		panic(err)
 	}
-	if err := prometheus.Register(httpRequestDuration); err != nil {
-		if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
-			log.Printf("metrics: already registered, reusing existing collector: %v", err)
+}
+
+func sanitizePrometheusLabel(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+
+	var b strings.Builder
+	for _, r := range value {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+		if b.Len() >= maxPrometheusLabelLen {
+			break
 		}
 	}
 
-	prometheus.MustRegister(gitOperationsTotal)
-	prometheus.MustRegister(workflowRunsTotal)
-	prometheus.MustRegister(dbQueryDuration)
+	if b.Len() == 0 {
+		return "unknown"
+	}
+	return b.String()
+}
+
+func sanitizeOrgID(orgID string) string {
+	if _, err := uuid.Parse(strings.TrimSpace(orgID)); err == nil {
+		return strings.TrimSpace(orgID)
+	}
+	return "invalid"
 }
 
 // ObserveGitOperation increments the git operations counter.
 func ObserveGitOperation(opType, protocol, orgID string) {
-	gitOperationsTotal.WithLabelValues(opType, protocol, orgID).Inc()
+	gitOperationsTotal.WithLabelValues(
+		sanitizePrometheusLabel(opType),
+		sanitizePrometheusLabel(protocol),
+		sanitizeOrgID(orgID),
+	).Inc()
 }
 
 // ObserveWorkflowRun increments the workflow runs counter.
 func ObserveWorkflowRun(status, orgID string) {
-	workflowRunsTotal.WithLabelValues(status, orgID).Inc()
+	workflowRunsTotal.WithLabelValues(
+		sanitizePrometheusLabel(status),
+		sanitizeOrgID(orgID),
+	).Inc()
 }
 
 // ObserveDBQuery records a DB query duration observation.
-func ObserveDBQuery(query string, duration float64) {
-	dbQueryDuration.WithLabelValues(query).Observe(duration)
+func ObserveDBQuery(queryName string, duration float64) {
+	dbQueryDuration.WithLabelValues(sanitizePrometheusLabel(queryName)).Observe(duration)
 }
 
 // EchoPrometheusMiddleware records request count and latency for each route.
@@ -157,6 +200,6 @@ func NewMetricsHandler(authToken string) echo.HandlerFunc {
 }
 
 // RegisterMetricsRoute registers the metrics endpoint on the given Echo instance.
-func RegisterMetricsRoute(e *echo.Echo) {
-	e.GET("/metrics", NewMetricsHandler(""))
+func RegisterMetricsRoute(e *echo.Echo, path, authToken string) {
+	e.GET(path, NewMetricsHandler(authToken))
 }
