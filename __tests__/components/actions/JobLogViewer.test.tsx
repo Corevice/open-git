@@ -1,7 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import JobLogViewer, { stripAnsi } from "@/components/actions/JobLogViewer";
+
+async function getActiveSource() {
+  await waitFor(() => {
+    expect(MockEventSource.instances.length).toBeGreaterThan(0);
+  });
+  return MockEventSource.instances.at(-1)!;
+}
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -60,17 +67,19 @@ describe("JobLogViewer", () => {
   it("renders log text after a log event", async () => {
     render(<JobLogViewer {...defaultProps} />);
 
-    const source = MockEventSource.instances[0];
-    source.emit(
-      "log",
-      JSON.stringify({
-        step: 0,
-        line: 1,
-        ts: "2026-06-28T00:00:00Z",
-        stream: "stdout",
-        text: "hello world",
-      }),
-    );
+    const source = await getActiveSource();
+    await act(async () => {
+      source.emit(
+        "log",
+        JSON.stringify({
+          step: 0,
+          line: 1,
+          ts: "2026-06-28T00:00:00Z",
+          stream: "stdout",
+          text: "hello world",
+        }),
+      );
+    });
 
     await waitFor(() => {
       expect(screen.getByText("hello world")).toBeInTheDocument();
@@ -80,8 +89,10 @@ describe("JobLogViewer", () => {
   it("closes the source and shows completed status after done event", async () => {
     render(<JobLogViewer {...defaultProps} />);
 
-    const source = MockEventSource.instances[0];
-    source.emit("done", JSON.stringify({ status: "success" }));
+    const source = await getActiveSource();
+    await act(async () => {
+      source.emit("done", JSON.stringify({ status: "success" }));
+    });
 
     await waitFor(() => {
       expect(source.close).toHaveBeenCalled();
