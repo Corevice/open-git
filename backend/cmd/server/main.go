@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -64,7 +65,20 @@ var (
 	buildTime = "unknown"
 )
 
+func validateRequiredEnv(vars []string) error {
+	for _, v := range vars {
+		if os.Getenv(v) == "" {
+			return fmt.Errorf("missing required environment variable: %s", v)
+		}
+	}
+	return nil
+}
+
 func main() {
+	if err := validateRequiredEnv([]string{"JWT_SECRET", "DB_DSN"}); err != nil {
+		log.Fatalf("%v", err)
+	}
+
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("invalid config: %v", err)
@@ -233,7 +247,7 @@ func (a *legacyUserRepoAdapter) Create(ctx context.Context, user *domain.User) e
 	if err := a.users.Create(ctx, entityUser); err != nil {
 		return err
 	}
-	user.ID = uuidToInt64(entityUser.ID)
+	user.ID = middleware.UUIDToInt64(entityUser.ID)
 	return nil
 }
 
