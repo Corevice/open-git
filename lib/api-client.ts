@@ -20,6 +20,38 @@ export interface CommitsResult<T> {
   links: Record<string, string>;
 }
 
+export interface MCPVerificationCheck {
+  id: string;
+  category: "graphql" | "rest" | "auth";
+  status: "pass" | "fail" | "skip";
+  expected: unknown;
+  actual: unknown;
+  error: string | null;
+  duration_ms: number;
+}
+
+export interface MCPVerificationRun {
+  run_id: string;
+  repository: string;
+  overall_status: "compatible" | "partial" | "incompatible" | null;
+  executed_at: string;
+  status?: "queued" | "running" | "completed" | "errored";
+}
+
+export interface MCPJobStatus {
+  job_id: string;
+  status: "queued" | "running" | "completed" | "errored";
+  progress?: number;
+}
+
+export interface MCPLatestResult {
+  run_id: string;
+  repository: string;
+  overall_status: "compatible" | "partial" | "incompatible";
+  executed_at: string;
+  checks: MCPVerificationCheck[];
+}
+
 export interface RepoApiClient extends ApiClient {
   getRepo<T>(owner: string, repo: string): Promise<T>;
   getContents<T>(
@@ -36,6 +68,21 @@ export interface RepoApiClient extends ApiClient {
     page: number,
     perPage?: number,
   ): Promise<CommitsResult<T>>;
+  runMCPVerification(
+    body: { repository: string; targets?: string[] },
+    opts?: { token?: string },
+  ): Promise<{ job_id: string; status: string }>;
+  getMCPJobStatus(
+    jobId: string,
+    opts?: { token?: string },
+  ): Promise<MCPJobStatus>;
+  getMCPLatest(opts?: { token?: string }): Promise<MCPLatestResult>;
+  getMCPHistory(opts?: {
+    page?: number;
+    per_page?: number;
+    token?: string;
+  }): Promise<MCPVerificationRun[]>;
+  deleteMCPRun(runId: string, opts?: { token?: string }): Promise<void>;
 }
 
 export function isApiError(err: unknown): err is ApiError {
@@ -198,6 +245,54 @@ export function createRepoApiClient(baseUrl: string): RepoApiClient {
         commits,
         links: parseLinkHeader(res.headers.get("Link")),
       };
+    },
+    runMCPVerification(body, opts) {
+      return base.post("/api/v1/mcp/verification/run", body, opts);
+    },
+    getMCPJobStatus(jobId, opts) {
+      return base.get(
+        `/api/v1/mcp/verification/jobs/${encodeURIComponent(jobId)}`,
+        opts,
+      );
+    },
+    getMCPLatest(opts) {
+      return base.get("/api/v1/mcp/verification/latest", opts);
+    },
+    getMCPHistory(opts) {
+      const params = new URLSearchParams();
+      if (opts?.page != null) params.set("page", String(opts.page));
+      if (opts?.per_page != null) params.set("per_page", String(opts.per_page));
+      const query = params.toString();
+      const path = query
+        ? `/api/v1/mcp/verification/history?${query}`
+        : "/api/v1/mcp/verification/history";
+      return base.get(path, { token: opts?.token });
+    },
+    async deleteMCPRun(runId, opts) {
+      const res = await fetch(
+        `${apiBase}/api/v1/mcp/verification/runs/${encodeURIComponent(runId)}`,
+        {
+          method: "DELETE",
+          headers: buildHeaders(opts?.token),
+        },
+      );
+      if (!res.ok) {
+        let body: { code?: string; message?: string } = {};
+        try {
+          body = await res.json();
+        } catch {
+          // ignore non-JSON error bodies
+        }
+        const error: ApiError = {
+          status: res.status,
+          code: body.code ?? String(res.status),
+          message: body.message ?? res.statusText,
+        };
+        if (res.status === 401 && typeof window !== "undefined") {
+          window.location.href = "/sign-in";
+        }
+        throw error;
+      }
     },
   };
 }
