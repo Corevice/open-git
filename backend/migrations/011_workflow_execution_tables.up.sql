@@ -1,4 +1,9 @@
-ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS head_sha TEXT, ADD COLUMN IF NOT EXISTS head_branch TEXT, ADD COLUMN IF NOT EXISTS run_number INTEGER NOT NULL DEFAULT 0, ADD COLUMN IF NOT EXISTS run_attempt INTEGER NOT NULL DEFAULT 1, ADD COLUMN IF NOT EXISTS event TEXT NOT NULL DEFAULT 'push', ADD COLUMN IF NOT EXISTS triggered_by_user_id TEXT REFERENCES users(id);
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS head_sha TEXT;
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS head_branch TEXT;
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS run_number INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS run_attempt INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS event TEXT NOT NULL DEFAULT 'push';
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS triggered_by_user_id TEXT REFERENCES users(id);
 
 CREATE TABLE workflow_jobs (
     id TEXT PRIMARY KEY,
@@ -61,8 +66,8 @@ CREATE TABLE action_secrets (
     name TEXT NOT NULL,
     encrypted_value TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(organization_id, COALESCE(repository_id, ''), name)
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_action_secrets_organization_id ON action_secrets(organization_id);
+CREATE UNIQUE INDEX idx_action_secrets_scope_name ON action_secrets(organization_id, COALESCE(repository_id, ''), name);
