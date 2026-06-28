@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/hibiken/asynq"
 
 	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/open-git/backend/internal/infrastructure/queue"
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	mcpusecase "github.com/open-git/backend/internal/usecase/mcp"
 )
@@ -133,11 +133,24 @@ func (m *mockAuditRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID, st
 	return nil
 }
 
-func newTestAsynqClient(t *testing.T) *asynq.Client {
-	t.Helper()
-	client := asynq.NewClient(asynq.RedisClientOpt{Addr: "127.0.0.1:6379"})
-	t.Cleanup(func() { _ = client.Close() })
-	return client
+type mockMCPEnqueuer struct {
+	called  bool
+	payload queue.MCPVerificationPayload
+	err     error
+}
+
+func (m *mockMCPEnqueuer) EnqueueMCPVerification(_ context.Context, payload queue.MCPVerificationPayload) error {
+	m.called = true
+	m.payload = payload
+	return m.err
+}
+
+func newTestRunVerificationUsecase(
+	repo *mockMCPRepo,
+	audit *mockAuditRepo,
+	enqueuer mcpusecase.MCPVerificationEnqueuer,
+) *mcpusecase.RunVerificationUsecase {
+	return mcpusecase.NewRunVerificationUsecaseWithDeps(repo, audit, enqueuer)
 }
 
 func TestRunVerification_ConflictError(t *testing.T) {
@@ -153,7 +166,7 @@ func TestRunVerification_ConflictError(t *testing.T) {
 		}},
 	}
 	audit := &mockAuditRepo{}
-	uc := mcpusecase.NewRunVerificationUsecase(repo, audit, newTestAsynqClient(t))
+	uc := newTestRunVerificationUsecase(repo, audit, &mockMCPEnqueuer{})
 
 	_, err := uc.Execute(context.Background(), orgID, actorID, mcpusecase.RunVerificationInput{
 		RepositoryFullName: "acme/widgets",
@@ -172,7 +185,7 @@ func TestRunVerification_PlanLimit(t *testing.T) {
 		countRunsThisMonth:    10,
 	}
 	audit := &mockAuditRepo{}
-	uc := mcpusecase.NewRunVerificationUsecase(repo, audit, newTestAsynqClient(t))
+	uc := newTestRunVerificationUsecase(repo, audit, &mockMCPEnqueuer{})
 
 	_, err := uc.Execute(context.Background(), orgID, actorID, mcpusecase.RunVerificationInput{
 		RepositoryFullName: "acme/widgets",
@@ -188,7 +201,8 @@ func TestRunVerification_Success(t *testing.T) {
 	actorID := uuid.New()
 	repo := &mockMCPRepo{}
 	audit := &mockAuditRepo{}
-	uc := mcpusecase.NewRunVerificationUsecase(repo, audit, newTestAsynqClient(t))
+	enqueuer := &mockMCPEnqueuer{}
+	uc := newTestRunVerificationUsecase(repo, audit, enqueuer)
 
 	run, err := uc.Execute(context.Background(), orgID, actorID, mcpusecase.RunVerificationInput{
 		RepositoryFullName: "acme/widgets",
@@ -199,6 +213,12 @@ func TestRunVerification_Success(t *testing.T) {
 	}
 	if run.Status != entity.RunStatusQueued {
 		t.Fatalf("expected status queued, got %s", run.Status)
+	}
+	if !enqueuer.called {
+		t.Fatal("expected MCP verification task to be enqueued")
+	}
+	if enqueuer.payload.RunID != run.ID.String() {
+		t.Fatalf("expected enqueued run id %s, got %s", run.ID, enqueuer.payload.RunID)
 	}
 	if len(audit.entries) != 1 {
 		t.Fatalf("expected 1 audit log entry, got %d", len(audit.entries))
