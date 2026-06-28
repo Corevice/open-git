@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,11 +17,26 @@ func setupAuditLogSearchColumns(t *testing.T, db *sqlx.DB) {
 	t.Helper()
 
 	if _, err := db.Exec(`ALTER TABLE audit_logs ADD COLUMN ip_address TEXT NOT NULL DEFAULT ''`); err != nil {
-		t.Fatalf("add ip_address column: %v", err)
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			t.Fatalf("add ip_address column: %v", err)
+		}
 	}
 	if _, err := db.Exec(`ALTER TABLE audit_logs ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''`); err != nil {
-		t.Fatalf("add user_agent column: %v", err)
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			t.Fatalf("add user_agent column: %v", err)
+		}
 	}
+}
+
+func newAuditLogSearchRepo(t *testing.T, db *sqlx.DB) domainrepo.IAuditLogSearchRepository {
+	t.Helper()
+
+	repo := repository.NewAuditLogRepository(db)
+	searchRepo, ok := repo.(domainrepo.IAuditLogSearchRepository)
+	if !ok {
+		t.Fatal("audit log repository does not implement IAuditLogSearchRepository")
+	}
+	return searchRepo
 }
 
 func seedAuditLogSearchFixtures(t *testing.T, db *sqlx.DB) (orgID, actorID uuid.UUID) {
@@ -77,7 +93,7 @@ func TestSearch_PhraseFilter(t *testing.T) {
 	db := openTestDB(t)
 	setupAuditLogSearchColumns(t, db)
 	orgID, actorID := seedAuditLogSearchFixtures(t, db)
-	repo := repository.NewAuditLogRepository(db)
+	repo := newAuditLogSearchRepo(t, db)
 	ctx := context.Background()
 
 	base := time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
@@ -105,7 +121,7 @@ func TestSearch_DateRangeFilter(t *testing.T) {
 	db := openTestDB(t)
 	setupAuditLogSearchColumns(t, db)
 	orgID, actorID := seedAuditLogSearchFixtures(t, db)
-	repo := repository.NewAuditLogRepository(db)
+	repo := newAuditLogSearchRepo(t, db)
 	ctx := context.Background()
 
 	early := time.Date(2025, 5, 1, 10, 0, 0, 0, time.UTC)
@@ -141,7 +157,7 @@ func TestSearch_CombinedFilters(t *testing.T) {
 	db := openTestDB(t)
 	setupAuditLogSearchColumns(t, db)
 	orgID, actorID := seedAuditLogSearchFixtures(t, db)
-	repo := repository.NewAuditLogRepository(db)
+	repo := newAuditLogSearchRepo(t, db)
 	ctx := context.Background()
 
 	inRange := time.Date(2025, 6, 10, 12, 0, 0, 0, time.UTC)

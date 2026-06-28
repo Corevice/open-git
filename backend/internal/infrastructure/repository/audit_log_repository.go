@@ -16,6 +16,7 @@ type sqlxAuditLogRepository struct {
 }
 
 var _ domainrepo.IAuditLogRepository = (*sqlxAuditLogRepository)(nil)
+var _ domainrepo.IAuditLogSearchRepository = (*sqlxAuditLogRepository)(nil)
 
 func NewAuditLogRepository(db *sqlx.DB) domainrepo.IAuditLogRepository {
 	return &sqlxAuditLogRepository{db: db}
@@ -92,6 +93,17 @@ func (r *sqlxAuditLogRepository) Create(ctx context.Context, log *entity.AuditLo
 		VALUES (:id, :organization_id, :actor_id, :actor_login, :action, :target_type, :target_id, :metadata, :ip_address, :user_agent, :created_at)
 	`
 
+	ipAddress := ""
+	userAgent := ""
+	if log.Metadata != nil {
+		if v, ok := log.Metadata["ip_address"].(string); ok {
+			ipAddress = v
+		}
+		if v, ok := log.Metadata["user_agent"].(string); ok {
+			userAgent = v
+		}
+	}
+
 	_, err := r.db.NamedExecContext(ctx, query, map[string]any{
 		"id":              log.ID,
 		"organization_id": log.OrganizationID,
@@ -101,8 +113,8 @@ func (r *sqlxAuditLogRepository) Create(ctx context.Context, log *entity.AuditLo
 		"target_type":     log.TargetType,
 		"target_id":       log.TargetID,
 		"metadata":        string(metaJSON),
-		"ip_address":      "",
-		"user_agent":      "",
+		"ip_address":      ipAddress,
+		"user_agent":      userAgent,
 		"created_at":      log.CreatedAt,
 	})
 	return err
