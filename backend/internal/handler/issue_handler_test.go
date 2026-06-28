@@ -81,6 +81,41 @@ func (m *issueHandlerMockRepo) Update(ctx context.Context, issue *entity.Issue) 
 	return nil
 }
 
+type issueHandlerMockLabelRepo struct{}
+
+func (issueHandlerMockLabelRepo) Create(context.Context, *entity.Label) error { return nil }
+func (issueHandlerMockLabelRepo) GetByName(context.Context, uuid.UUID, string) (*entity.Label, error) {
+	return nil, nil
+}
+func (issueHandlerMockLabelRepo) ListByRepo(context.Context, uuid.UUID, int, int) ([]*entity.Label, int, error) {
+	return nil, 0, nil
+}
+func (issueHandlerMockLabelRepo) Update(context.Context, *entity.Label) error { return nil }
+func (issueHandlerMockLabelRepo) Delete(context.Context, uuid.UUID) error     { return nil }
+func (issueHandlerMockLabelRepo) AddToIssue(context.Context, uuid.UUID, uuid.UUID) error {
+	return nil
+}
+func (issueHandlerMockLabelRepo) RemoveFromIssue(context.Context, uuid.UUID, uuid.UUID) error {
+	return nil
+}
+
+type issueHandlerMockMilestoneRepo struct{}
+
+func (issueHandlerMockMilestoneRepo) Create(context.Context, *entity.Milestone) error { return nil }
+func (issueHandlerMockMilestoneRepo) GetByNumber(context.Context, uuid.UUID, int) (*entity.Milestone, error) {
+	return nil, nil
+}
+func (issueHandlerMockMilestoneRepo) ListByRepo(context.Context, uuid.UUID, string, int, int) ([]*entity.Milestone, int, error) {
+	return nil, 0, nil
+}
+func (issueHandlerMockMilestoneRepo) Update(context.Context, *entity.Milestone) error { return nil }
+func (issueHandlerMockMilestoneRepo) Delete(context.Context, uuid.UUID) error         { return nil }
+func (issueHandlerMockMilestoneRepo) NextNumber(context.Context, uuid.UUID) (int, error) {
+	return 0, nil
+}
+func (issueHandlerMockMilestoneRepo) IncrOpenCount(context.Context, uuid.UUID) error  { return nil }
+func (issueHandlerMockMilestoneRepo) DecrOpenCount(context.Context, uuid.UUID) error  { return nil }
+
 type issueHandlerMockAuditLog struct{}
 
 func (issueHandlerMockAuditLog) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID, string, string, uuid.UUID, json.RawMessage) error {
@@ -115,7 +150,12 @@ func newIssueHandlerEcho(
 	createUC := issueusecase.NewCreateIssueUsecase(issueRepo, issueHandlerMockAuditLog{}, issueHandlerMockTxManager{})
 	listUC := issueusecase.NewListIssuesUsecase(issueRepo)
 	getUC := issueusecase.NewGetIssueUsecase(issueRepo)
-	updateUC := issueusecase.NewUpdateIssueUsecase(issueRepo, issueHandlerMockAuditLog{}, issueHandlerMockTxManager{})
+	updateUC := issueusecase.NewUpdateIssueUsecase(
+		issueRepo,
+		issueHandlerMockLabelRepo{},
+		issueHandlerMockMilestoneRepo{},
+		issueHandlerMockAuditLog{},
+	)
 
 	resolveRepo := func(_ echo.Context, owner, name string) (*entity.Repository, error) {
 		if owner == issueTestOwner && name == issueTestRepo {
@@ -148,7 +188,7 @@ func sampleIssue(number int, state string) *entity.Issue {
 		Body:           "Something broke",
 		State:          state,
 		AuthorLogin:    issueTestOwner,
-		Labels: []entity.IssueLabel{
+		Labels: []entity.Label{
 			{Name: "bug", Color: "ff0000", Description: "Bug label"},
 		},
 		CommentsCount: 2,

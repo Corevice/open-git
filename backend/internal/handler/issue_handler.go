@@ -151,7 +151,7 @@ func (h *IssueHandler) GetIssue(c echo.Context) error {
 	issue, err := h.getIssueUC.Execute(c.Request().Context(), issueusecase.GetIssueInput{
 		OrganizationID: actor.OrganizationID,
 		RepositoryID:   repo.ID,
-		Number:         number,
+		IssueNumber:    number,
 	})
 	if err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {
@@ -188,12 +188,12 @@ func (h *IssueHandler) UpdateIssue(c echo.Context) error {
 		OrganizationID:  actor.OrganizationID,
 		RepositoryID:    repo.ID,
 		ActorID:         actor.UserID,
-		Number:          number,
+		IssueNumber:     number,
 		Title:           req.Title,
 		Body:            req.Body,
 		State:           req.State,
 		StateReason:     req.StateReason,
-		Labels:          req.Labels,
+		LabelNames:      req.Labels,
 		MilestoneNumber: req.MilestoneNumber,
 	})
 	if err != nil {
@@ -374,18 +374,6 @@ func toIssueResponse(issue *entity.Issue, owner, repo, host string) issueRespons
 				Color:       label.Color,
 				Description: label.Description,
 			}
-		}
-	}
-
-	if issue.Milestone != nil {
-		resp.Milestone = &struct {
-			Number int    `json:"number"`
-			Title  string `json:"title"`
-			State  string `json:"state"`
-		}{
-			Number: issue.Milestone.Number,
-			Title:  issue.Milestone.Title,
-			State:  issue.Milestone.State,
 		}
 	}
 

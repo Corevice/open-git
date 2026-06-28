@@ -387,7 +387,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	}
 
 	listIssuesUC := issueusecase.NewListIssuesUsecase(issueRepo)
-	issueHandler := handler.NewIssueHandler(nil, listIssuesUC, nil, resolveRepo)
+	getIssueUC := issueusecase.NewGetIssueUsecase(issueRepo)
+	issueHandler := handler.NewIssueHandler(nil, listIssuesUC, getIssueUC, nil, nil, resolveRepo)
 	pullRequestHandler := handler.NewPullRequestHandler(nil, nil, nil, resolveRepo)
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 
