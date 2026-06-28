@@ -1,7 +1,9 @@
+{{- if (.Values.persistence.repositories.enabled | default true) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "open-git.fullname" . }}-repositories
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "open-git.labels" . | nindent 4 }}
   {{- if .Values.persistence.repositories.retainOnDelete }}
@@ -10,8 +12,11 @@ metadata:
   {{- end }}
 spec:
   accessModes:
-    - {{ .Values.persistence.repositories.accessMode | default "ReadWriteOnce" }}
+    - {{ .Values.persistence.repositories.accessMode | default "ReadWriteOnce" | quote }}
   resources:
     requests:
-      storage: {{ .Values.persistence.repositories.size }}
-  storageClassName: {{ .Values.global.storageClass | default "" }}
+      storage: {{ .Values.persistence.repositories.size | quote }}
+  {{- if .Values.global.storageClass }}
+  storageClassName: {{ .Values.global.storageClass | quote }}
+  {{- end }}
+{{- end }}

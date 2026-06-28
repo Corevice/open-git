@@ -2,9 +2,11 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "open-git.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "open-git.labels" . | nindent 4 }}
 data:
-  APP_ENV: production
-  GIT_REPOS_PATH: /data/repositories
-  LOG_LEVEL: info
+  # Non-secret environment configuration only. Do not store credentials or API keys here; use Secrets instead.
+  APP_ENV: {{ .Values.config.appEnv | default "production" | quote }}
+  GIT_REPOS_PATH: {{ .Values.persistence.repositories.mountPath | default "/data/repositories" | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | default "info" | quote }}
