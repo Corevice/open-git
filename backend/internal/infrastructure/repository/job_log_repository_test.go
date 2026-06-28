@@ -14,7 +14,6 @@ import (
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
-	"github.com/open-git/backend/internal/infrastructure/database"
 	"github.com/open-git/backend/internal/infrastructure/repository"
 )
 
@@ -25,10 +24,7 @@ func newJobLogTestDB(t *testing.T) (*sql.DB, *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := database.RunMigrations(db, "sqlite", "../../../migrations"); err != nil {
-		_ = db.Close()
-		t.Fatalf("run migrations: %v", err)
-	}
+	applyRepositoryTestMigrations(t, db)
 	t.Cleanup(func() { _ = db.Close() })
 	return db, sqlx.NewDb(db, "sqlite3")
 }

@@ -3,6 +3,8 @@ package repository_test
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,9 +13,35 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/open-git/backend/internal/domain/entity"
-	"github.com/open-git/backend/internal/infrastructure/database"
 	"github.com/open-git/backend/internal/infrastructure/repository"
 )
+
+var repositoryTestMigrationFiles = []string{
+	"001_initial_schema.up.sql",
+	"002_webhook_delivery_status.up.sql",
+	"003_user_profile_fields.up.sql",
+	"004_org_description.up.sql",
+	"005_repository_fields.up.sql",
+	"006_issue_management.up.sql",
+	"011_workflow_jobs.up.sql",
+	"012_job_log_lines.up.sql",
+}
+
+func applyRepositoryTestMigrations(t *testing.T, db *sql.DB) {
+	t.Helper()
+
+	migrationsDir := filepath.Join("..", "..", "..", "migrations")
+	for _, name := range repositoryTestMigrationFiles {
+		path := filepath.Join(migrationsDir, name)
+		sqlBytes, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read migration %s: %v", name, err)
+		}
+		if _, err := db.Exec(string(sqlBytes)); err != nil {
+			t.Fatalf("apply migration %s: %v", name, err)
+		}
+	}
+}
 
 func newWorkflowJobTestDB(t *testing.T) (*sql.DB, *sqlx.DB) {
 	t.Helper()
@@ -22,10 +50,7 @@ func newWorkflowJobTestDB(t *testing.T) (*sql.DB, *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := database.RunMigrations(db, "sqlite", "../../../migrations"); err != nil {
-		_ = db.Close()
-		t.Fatalf("run migrations: %v", err)
-	}
+	applyRepositoryTestMigrations(t, db)
 	t.Cleanup(func() { _ = db.Close() })
 	return db, sqlx.NewDb(db, "sqlite3")
 }
