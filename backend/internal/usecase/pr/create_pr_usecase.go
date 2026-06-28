@@ -29,6 +29,14 @@ type PRMergeableEnqueuer interface {
 	Enqueue(ctx context.Context, payload PRMergeableEnqueuePayload) error
 }
 
+// NoopPRMergeableEnqueuer succeeds silently when Redis is not configured so PR
+// creation can complete without async mergeable checks.
+type NoopPRMergeableEnqueuer struct{}
+
+func (NoopPRMergeableEnqueuer) Enqueue(context.Context, PRMergeableEnqueuePayload) error {
+	return nil
+}
+
 type CreatePRInput struct {
 	OrganizationID uuid.UUID
 	RepositoryID   uuid.UUID
@@ -140,15 +148,13 @@ func (uc *CreatePRUsecase) Execute(ctx context.Context, input CreatePRInput) (*e
 		return nil, errors.New("failed to allocate pull request number")
 	}
 
-	if uc.enqueuer != nil {
-		if err := uc.enqueuer.Enqueue(ctx, PRMergeableEnqueuePayload{
-			GitPath: input.GitPath,
-			HeadRef: input.HeadRef,
-			BaseRef: input.BaseRef,
-			PRID:    created.ID,
-		}); err != nil {
-			slog.Error("failed to enqueue pr mergeable check", "error", err, "pr_id", created.ID)
-		}
+	if err := uc.enqueuer.Enqueue(ctx, PRMergeableEnqueuePayload{
+		GitPath: input.GitPath,
+		HeadRef: input.HeadRef,
+		BaseRef: input.BaseRef,
+		PRID:    created.ID,
+	}); err != nil {
+		slog.Error("failed to enqueue pr mergeable check", "error", err, "pr_id", created.ID)
 	}
 
 	return created, nil

@@ -568,7 +568,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		)
 	}
 
-	var prMergeableEnqueuer prusecase.PRMergeableEnqueuer = noopPRMergeableEnqueuer{}
+	var prMergeableEnqueuer prusecase.PRMergeableEnqueuer = prusecase.NoopPRMergeableEnqueuer{}
 	if asynqClient != nil {
 		prMergeableEnqueuer = asynqPRMergeableEnqueuer{client: asynqClient}
 	}
@@ -745,12 +745,6 @@ type noopMCPEnqueuer struct{}
 
 func (noopMCPEnqueuer) EnqueueMCPVerification(context.Context, queue.MCPVerificationPayload) error {
 	return errors.New("redis not configured")
-}
-
-type noopPRMergeableEnqueuer struct{}
-
-func (noopPRMergeableEnqueuer) Enqueue(context.Context, prusecase.PRMergeableEnqueuePayload) error {
-	return nil
 }
 
 type asynqPRMergeableEnqueuer struct {
