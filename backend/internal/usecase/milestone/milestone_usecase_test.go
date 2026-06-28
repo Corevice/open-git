@@ -44,7 +44,15 @@ func (m *mockMilestoneRepo) Update(_ context.Context, milestone *entity.Mileston
 	return nil
 }
 
-func (m *mockMilestoneRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+func (m *mockMilestoneRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *mockMilestoneRepo) IncrOpenCount(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *mockMilestoneRepo) DecrOpenCount(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
 
