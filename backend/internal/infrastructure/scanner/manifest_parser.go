@@ -72,7 +72,9 @@ func parsePackageJSON(content []byte) ([]Dependency, error) {
 		seen[name] = version
 	}
 	for name, version := range pkg.DevDependencies {
-		seen[name] = version
+		if _, exists := seen[name]; !exists {
+			seen[name] = version
+		}
 	}
 
 	deps := make([]Dependency, 0, len(seen))
@@ -94,6 +96,13 @@ func parseRequirementsTxt(content []byte) ([]Dependency, error) {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
+		}
+
+		if idx := strings.Index(line, "#"); idx >= 0 {
+			line = strings.TrimSpace(line[:idx])
+			if line == "" {
+				continue
+			}
 		}
 
 		parts := strings.SplitN(line, "==", 2)

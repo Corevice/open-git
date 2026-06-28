@@ -29,6 +29,21 @@ func sortDeps(deps []Dependency) []Dependency {
 	return sorted
 }
 
+func assertDepsEqual(t *testing.T, got, want []Dependency) {
+	t.Helper()
+
+	got = sortDeps(got)
+	want = sortDeps(want)
+	if len(got) != len(want) {
+		t.Fatalf("dependency count: got %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("dependency[%d]: got %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestParseGoMod(t *testing.T) {
 	deps, err := ParseManifest(ManifestGoMod, readTestdata(t, "sample.mod"))
 	if err != nil {
@@ -37,19 +52,11 @@ func TestParseGoMod(t *testing.T) {
 
 	want := []Dependency{
 		{Name: "github.com/gin-gonic/gin", Version: "v1.9.1", Ecosystem: "Go"},
+		{Name: "github.com/klauspost/cpuid/v2", Version: "v2.2.4", Ecosystem: "Go"},
 		{Name: "golang.org/x/mod", Version: "v0.14.0", Ecosystem: "Go"},
 	}
 
-	got := sortDeps(deps)
-	expected := sortDeps(want)
-	if len(got) != len(expected) {
-		t.Fatalf("dependency count: got %d, want %d", len(got), len(expected))
-	}
-	for i := range expected {
-		if got[i] != expected[i] {
-			t.Errorf("dependency[%d]: got %+v, want %+v", i, got[i], expected[i])
-		}
-	}
+	assertDepsEqual(t, deps, want)
 }
 
 func TestParsePackageJSON(t *testing.T) {
@@ -65,16 +72,22 @@ func TestParsePackageJSON(t *testing.T) {
 		{Name: "typescript", Version: "5.3.3", Ecosystem: "npm"},
 	}
 
-	got := sortDeps(deps)
-	expected := sortDeps(want)
-	if len(got) != len(expected) {
-		t.Fatalf("dependency count: got %d, want %d", len(got), len(expected))
+	assertDepsEqual(t, deps, want)
+}
+
+func TestParsePackageJSONDependenciesPrecedence(t *testing.T) {
+	content := []byte(`{
+		"dependencies": {"lodash": "4.17.21"},
+		"devDependencies": {"lodash": "4.17.20"}
+	}`)
+	deps, err := ParseManifest(ManifestPackageJSON, content)
+	if err != nil {
+		t.Fatalf("ParseManifest(package.json) returned error: %v", err)
 	}
-	for i := range expected {
-		if got[i] != expected[i] {
-			t.Errorf("dependency[%d]: got %+v, want %+v", i, got[i], expected[i])
-		}
-	}
+
+	assertDepsEqual(t, deps, []Dependency{
+		{Name: "lodash", Version: "4.17.21", Ecosystem: "npm"},
+	})
 }
 
 func TestParseRequirementsTxt(t *testing.T) {
@@ -89,16 +102,45 @@ func TestParseRequirementsTxt(t *testing.T) {
 		{Name: "requests", Version: "2.31.0", Ecosystem: "PyPI"},
 	}
 
-	got := sortDeps(deps)
-	expected := sortDeps(want)
-	if len(got) != len(expected) {
-		t.Fatalf("dependency count: got %d, want %d", len(got), len(expected))
+	assertDepsEqual(t, deps, want)
+}
+
+func TestParseRequirementsTxtInlineComment(t *testing.T) {
+	content := []byte("requests==2.31.0  # HTTP library\n")
+	deps, err := ParseManifest(ManifestRequirementsTxt, content)
+	if err != nil {
+		t.Fatalf("ParseManifest(requirements.txt) returned error: %v", err)
 	}
-	for i := range expected {
-		if got[i] != expected[i] {
-			t.Errorf("dependency[%d]: got %+v, want %+v", i, got[i], expected[i])
+
+	assertDepsEqual(t, deps, []Dependency{
+		{Name: "requests", Version: "2.31.0", Ecosystem: "PyPI"},
+	})
+}
+
+func TestParseEmptyManifests(t *testing.T) {
+	t.Run("go.mod", func(t *testing.T) {
+		deps, err := ParseManifest(ManifestGoMod, []byte("module example.com/empty\n\ngo 1.21\n"))
+		if err != nil {
+			t.Fatalf("ParseManifest(go.mod) returned error: %v", err)
 		}
-	}
+		assertDepsEqual(t, deps, nil)
+	})
+
+	t.Run("package.json", func(t *testing.T) {
+		deps, err := ParseManifest(ManifestPackageJSON, []byte(`{"name":"empty"}`))
+		if err != nil {
+			t.Fatalf("ParseManifest(package.json) returned error: %v", err)
+		}
+		assertDepsEqual(t, deps, nil)
+	})
+
+	t.Run("requirements.txt", func(t *testing.T) {
+		deps, err := ParseManifest(ManifestRequirementsTxt, []byte(""))
+		if err != nil {
+			t.Fatalf("ParseManifest(requirements.txt) returned error: %v", err)
+		}
+		assertDepsEqual(t, deps, nil)
+	})
 }
 
 func TestParseUnknownManifest(t *testing.T) {
