@@ -18,7 +18,7 @@ type sqlxAuditLogRepository struct {
 var _ domainrepo.IAuditLogRepository = (*sqlxAuditLogRepository)(nil)
 var _ domainrepo.IAuditLogSearchRepository = (*sqlxAuditLogRepository)(nil)
 
-func NewAuditLogRepository(db *sqlx.DB) domainrepo.IAuditLogRepository {
+func NewAuditLogRepository(db *sqlx.DB) domainrepo.IAuditLogFullRepository {
 	return &sqlxAuditLogRepository{db: db}
 }
 
