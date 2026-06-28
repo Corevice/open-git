@@ -1,0 +1,12 @@
+title = "open-git gitleaks config"
+
+[allowlist]
+description = "Allow test fixtures and placeholder env values"
+paths = [
+  '''backend/testdata''',
+  '''.env.example''',
+]
+regexes = [
+  '''your_.*_here''',
+  '''changeme''',
+]
