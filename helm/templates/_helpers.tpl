@@ -65,7 +65,26 @@ ServiceAccount name
 {{- define "open-git.serviceAccountName" -}}
 {{- if .Values.serviceAccount.name }}
 {{- .Values.serviceAccount.name }}
-{{- else }}
+{{- else if .Values.serviceAccount.create }}
 {{- include "open-git.fullname" . }}
+{{- else }}
+{{- "default" }}
 {{- end }}
+{{- end }}
+
+{{/*
+Pod-level security context
+*/}}
+{{- define "open-git.podSecurityContext" -}}
+runAsNonRoot: {{ .Values.securityContext.runAsNonRoot | default true }}
+runAsUser: {{ .Values.securityContext.runAsUser | default 1000 }}
+fsGroup: {{ .Values.securityContext.fsGroup | default (.Values.securityContext.runAsUser | default 1000) }}
+{{- end }}
+
+{{/*
+Container-level security context
+*/}}
+{{- define "open-git.containerSecurityContext" -}}
+allowPrivilegeEscalation: false
+readOnlyRootFilesystem: true
 {{- end }}
