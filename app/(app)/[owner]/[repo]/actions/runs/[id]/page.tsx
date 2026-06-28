@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import LogViewer from "@/components/actions/LogViewer";
+import JobLogViewer from "@/components/actions/JobLogViewer";
 import { API_TOKEN_KEY } from "@/lib/api";
 import { env } from "@/lib/env";
 import type { WorkflowJobResponse } from "@/types/runner";
@@ -285,7 +285,12 @@ export default function ActionRunDetailPage() {
             <div className="mb-3 text-sm font-semibold text-[#656d76]">
               {selectedJob ? `Logs — ${selectedJob.name}` : "Logs"}
             </div>
-            <LogViewer runId={runId} repoOwner={owner} repoName={repo} />
+            <JobLogViewer
+              runId={runId}
+              jobId={selectedJobId != null ? String(selectedJobId) : ""}
+              repoOwner={owner}
+              repoName={repo}
+            />
           </main>
         </div>
       </div>
