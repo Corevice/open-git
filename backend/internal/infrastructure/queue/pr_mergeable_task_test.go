@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
 	"github.com/open-git/backend/internal/domain/entity"
@@ -220,6 +221,7 @@ func storeBlobCommit(repo *gogit.Repository, message string, files map[string]st
 			Hash: blobHash,
 		})
 	}
+	sortTreeEntries(entries)
 
 	tree := &object.Tree{Entries: entries}
 	treeObj := repo.Storer.NewEncodedObject()
@@ -251,4 +253,10 @@ func storeBlobCommit(repo *gogit.Repository, message string, files map[string]st
 		return plumbing.ZeroHash, err
 	}
 	return repo.Storer.SetEncodedObject(commitObj)
+}
+
+func sortTreeEntries(entries []object.TreeEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name < entries[j].Name
+	})
 }
