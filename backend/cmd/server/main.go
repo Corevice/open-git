@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -244,7 +245,7 @@ func (a *legacyUserRepoAdapter) Create(ctx context.Context, user *domain.User) e
 	if err := a.users.Create(ctx, entityUser); err != nil {
 		return err
 	}
-	user.ID = uuidToInt64(entityUser.ID)
+	user.ID = middleware.UUIDToInt64(entityUser.ID)
 	return nil
 }
 
