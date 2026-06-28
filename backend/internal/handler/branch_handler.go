@@ -46,6 +46,9 @@ func (h *BranchHandler) ListBranches(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if branches == nil {
+		branches = []map[string]any{}
+	}
 	return c.JSON(http.StatusOK, branches)
 }
 
@@ -168,6 +171,9 @@ func (h *BranchHandler) ensureWriteAccess(c echo.Context, resolved *ResolvedGitR
 	}
 	if resolved.OwnerID != 0 && resolved.OwnerID == userID {
 		return nil
+	}
+	if h.memberships == nil {
+		return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "write access required"})
 	}
 	ok, err := h.memberships.HasWriteAccess(c.Request().Context(), userID, resolved.OrganizationID)
 	if err != nil {

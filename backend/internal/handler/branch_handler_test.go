@@ -8,9 +8,11 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
@@ -74,6 +76,62 @@ func (m *mockBranchRepoRepo) UpdateDefaultBranch(context.Context, uuid.UUID, str
 
 func (m *mockBranchRepoRepo) Delete(context.Context, uuid.UUID) error { return nil }
 
+func branchTestAuthMiddleware(userID int64) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set("user_id", userID)
+			c.Set("scopes", []string{"repo"})
+			return next(c)
+		}
+	}
+}
+
+func branchTestSeedMainBranch(t *testing.T, repoPath string) error {
+	t.Helper()
+	repo, err := gogit.PlainOpen(repoPath)
+	if err != nil {
+		return err
+	}
+	commit := branchTestCreateCommit(t, repo, "initial", plumbing.ZeroHash)
+	ref := plumbing.NewHashReference(plumbing.ReferenceName("refs/heads/main"), commit)
+	if err := repo.Storer.SetReference(ref); err != nil {
+		return err
+	}
+	head := plumbing.NewSymbolicReference(plumbing.Head, plumbing.ReferenceName("refs/heads/main"))
+	return repo.Storer.SetReference(head)
+}
+
+func branchTestCreateCommit(t *testing.T, repo *gogit.Repository, message string, parent plumbing.Hash) plumbing.Hash {
+	t.Helper()
+	now := time.Now().UTC()
+	commit := &object.Commit{
+		Message: message,
+		Author: object.Signature{
+			Name:  "test",
+			Email: "test@example.com",
+			When:  now,
+		},
+		Committer: object.Signature{
+			Name:  "test",
+			Email: "test@example.com",
+			When:  now,
+		},
+	}
+	if parent != plumbing.ZeroHash {
+		commit.ParentHashes = []plumbing.Hash{parent}
+	}
+
+	encoded := repo.Storer.NewEncodedObject()
+	if err := commit.Encode(encoded); err != nil {
+		t.Fatalf("encode commit: %v", err)
+	}
+	hash, err := repo.Storer.SetEncodedObject(encoded)
+	if err != nil {
+		t.Fatalf("store commit: %v", err)
+	}
+	return hash
+}
+
 func newBranchHandlerEcho(t *testing.T, repoPath string, memberships *mockBranchMemberships, defaultBranch string) *echo.Echo {
 	t.Helper()
 
@@ -91,7 +149,7 @@ func newBranchHandlerEcho(t *testing.T, repoPath string, memberships *mockBranch
 
 	e := echo.New()
 	g := e.Group("")
-	h.RegisterRoutes(g, authMiddleware(42))
+	h.RegisterRoutes(g, branchTestAuthMiddleware(42))
 	return e
 }
 
@@ -127,7 +185,7 @@ func TestBranchHandler_ListBranches_populated(t *testing.T) {
 	if err := infragit.InitBare(repoPath); err != nil {
 		t.Fatalf("init bare repo: %v", err)
 	}
-	if err := seedMainBranch(t, repoPath); err != nil {
+	if err := branchTestSeedMainBranch(t, repoPath); err != nil {
 		t.Fatalf("seed main branch: %v", err)
 	}
 
@@ -163,7 +221,7 @@ func TestBranchHandler_CreateRef_success(t *testing.T) {
 	if err := infragit.InitBare(repoPath); err != nil {
 		t.Fatalf("init bare repo: %v", err)
 	}
-	if err := seedMainBranch(t, repoPath); err != nil {
+	if err := branchTestSeedMainBranch(t, repoPath); err != nil {
 		t.Fatalf("seed main branch: %v", err)
 	}
 
@@ -229,7 +287,7 @@ func TestBranchHandler_DeleteRef_success(t *testing.T) {
 	if err := infragit.InitBare(repoPath); err != nil {
 		t.Fatalf("init bare repo: %v", err)
 	}
-	if err := seedMainBranch(t, repoPath); err != nil {
+	if err := branchTestSeedMainBranch(t, repoPath); err != nil {
 		t.Fatalf("seed main branch: %v", err)
 	}
 
@@ -263,7 +321,7 @@ func TestBranchHandler_DeleteRef_isDefault_422(t *testing.T) {
 	if err := infragit.InitBare(repoPath); err != nil {
 		t.Fatalf("init bare repo: %v", err)
 	}
-	if err := seedMainBranch(t, repoPath); err != nil {
+	if err := branchTestSeedMainBranch(t, repoPath); err != nil {
 		t.Fatalf("seed main branch: %v", err)
 	}
 
