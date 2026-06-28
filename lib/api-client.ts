@@ -61,6 +61,25 @@ export interface RepoApiClient extends ApiClient {
     ref?: string,
   ): Promise<T>;
   getBranches<T>(owner: string, repo: string): Promise<T>;
+  createRef(
+    owner: string,
+    repo: string,
+    ref: string,
+    sha: string,
+    opts?: { token?: string },
+  ): Promise<void>;
+  deleteBranch(
+    owner: string,
+    repo: string,
+    branch: string,
+    opts?: { token?: string },
+  ): Promise<void>;
+  updateDefaultBranch(
+    owner: string,
+    repo: string,
+    branch: string,
+    opts?: { token?: string },
+  ): Promise<void>;
   getCommits<T>(
     owner: string,
     repo: string,
@@ -218,6 +237,66 @@ export function createRepoApiClient(baseUrl: string): RepoApiClient {
     },
     getBranches(owner, repo) {
       return base.get(`/repos/${owner}/${repo}/branches?per_page=100`);
+    },
+    async createRef(owner, repo, ref, sha, opts) {
+      await base.post(
+        `/api/v1/repos/${owner}/${repo}/git/refs`,
+        { ref, sha },
+        opts,
+      );
+    },
+    async deleteBranch(owner, repo, branch, opts) {
+      const res = await fetch(
+        `${apiBase}/api/v1/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`,
+        {
+          method: "DELETE",
+          headers: buildHeaders(opts?.token),
+        },
+      );
+      if (!res.ok) {
+        let body: { code?: string; message?: string } = {};
+        try {
+          body = await res.json();
+        } catch {
+          // ignore non-JSON error bodies
+        }
+        const error: ApiError = {
+          status: res.status,
+          code: body.code ?? String(res.status),
+          message: body.message ?? res.statusText,
+        };
+        if (res.status === 401 && typeof window !== "undefined") {
+          window.location.href = "/sign-in";
+        }
+        throw error;
+      }
+    },
+    async updateDefaultBranch(owner, repo, branch, opts) {
+      const res = await fetch(`${apiBase}/api/v1/repos/${owner}/${repo}`, {
+        method: "PATCH",
+        headers: {
+          ...buildHeaders(opts?.token),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ default_branch: branch }),
+      });
+      if (!res.ok) {
+        let body: { code?: string; message?: string } = {};
+        try {
+          body = await res.json();
+        } catch {
+          // ignore non-JSON error bodies
+        }
+        const error: ApiError = {
+          status: res.status,
+          code: body.code ?? String(res.status),
+          message: body.message ?? res.statusText,
+        };
+        if (res.status === 401 && typeof window !== "undefined") {
+          window.location.href = "/sign-in";
+        }
+        throw error;
+      }
     },
     async getCommits(owner, repo, sha, page, perPage = 30) {
       const url = `${apiBase}/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(sha)}&per_page=${perPage}&page=${page}`;
