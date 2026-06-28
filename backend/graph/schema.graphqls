@@ -1,0 +1,374 @@
+"""An ISO-8601 encoded UTC date/time string."""
+scalar DateTime
+
+interface Node {
+  id: ID!
+}
+
+interface Actor {
+  login: String!
+  avatarUrl: String!
+  url: String!
+}
+
+interface Labelable {
+  id: ID!
+  labels(first: Int, after: String, last: Int, before: String): LabelConnection!
+}
+
+union RepositoryOwner = User | Organization
+
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+
+type Query {
+  viewer: User!
+  node(id: ID!): Node
+  repository(owner: String!, name: String!): Repository
+  organization(login: String!): Organization
+  user(login: String!): User
+}
+
+type Mutation {
+  createIssue(input: CreateIssueInput!): CreateIssuePayload
+  updateIssue(input: UpdateIssueInput!): UpdateIssuePayload
+  closeIssue(input: CloseIssueInput!): CloseIssuePayload
+  reopenIssue(input: ReopenIssueInput!): ReopenIssuePayload
+  addComment(input: AddCommentInput!): AddCommentPayload
+  createPullRequest(input: CreatePullRequestInput!): CreatePullRequestPayload
+  mergePullRequest(input: MergePullRequestInput!): MergePullRequestPayload
+  closePullRequest(input: ClosePullRequestInput!): ClosePullRequestPayload
+  addLabelsToLabelable(input: AddLabelsToLabelableInput!): AddLabelsToLabelablePayload
+  removeLabelsFromLabelable(input: RemoveLabelsFromLabelableInput!): RemoveLabelsFromLabelablePayload
+}
+
+type User implements Node & Actor {
+  id: ID!
+  login: String!
+  avatarUrl: String!
+  url: String!
+  name: String
+  email: String
+  bio: String
+  company: String
+  location: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type Organization implements Node {
+  id: ID!
+  login: String!
+  name: String
+  url: String!
+  avatarUrl: String!
+  description: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type Repository implements Node {
+  id: ID!
+  name: String!
+  nameWithOwner: String!
+  url: String!
+  description: String
+  isPrivate: Boolean!
+  owner: RepositoryOwner!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  issue(number: Int!): Issue
+  issues(
+    first: Int
+    after: String
+    last: Int
+    before: String
+    states: [IssueState!]
+    labels: [String!]
+  ): IssueConnection!
+  pullRequest(number: Int!): PullRequest
+  pullRequests(
+    first: Int
+    after: String
+    last: Int
+    before: String
+    states: [PullRequestState!]
+  ): PullRequestConnection!
+  labels(first: Int, after: String, last: Int, before: String): LabelConnection!
+  milestones(first: Int, after: String, last: Int, before: String): MilestoneConnection!
+}
+
+type Issue implements Node & Labelable {
+  id: ID!
+  number: Int!
+  title: String!
+  body: String
+  state: IssueState!
+  author: Actor
+  repository: Repository!
+  labels(first: Int, after: String, last: Int, before: String): LabelConnection!
+  comments(first: Int, after: String, last: Int, before: String): IssueCommentConnection!
+  milestone: Milestone
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  closedAt: DateTime
+}
+
+type PullRequest implements Node & Labelable {
+  id: ID!
+  number: Int!
+  title: String!
+  body: String
+  state: PullRequestState!
+  author: Actor
+  repository: Repository!
+  headRefName: String!
+  baseRefName: String!
+  mergeable: MergeableState!
+  mergeableState: MergeableState!
+  labels(first: Int, after: String, last: Int, before: String): LabelConnection!
+  comments(first: Int, after: String, last: Int, before: String): IssueCommentConnection!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  closedAt: DateTime
+  mergedAt: DateTime
+}
+
+type Label implements Node {
+  id: ID!
+  name: String!
+  color: String!
+  description: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type Milestone implements Node {
+  id: ID!
+  number: Int!
+  title: String!
+  description: String
+  state: MilestoneState!
+  dueOn: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  closedAt: DateTime
+}
+
+type IssueComment implements Node {
+  id: ID!
+  body: String!
+  author: Actor
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type IssueConnection {
+  edges: [IssueEdge!]
+  nodes: [Issue!]
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type IssueEdge {
+  cursor: String!
+  node: Issue!
+}
+
+type PullRequestConnection {
+  edges: [PullRequestEdge!]
+  nodes: [PullRequest!]
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type PullRequestEdge {
+  cursor: String!
+  node: PullRequest!
+}
+
+type LabelConnection {
+  edges: [LabelEdge!]
+  nodes: [Label!]
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type LabelEdge {
+  cursor: String!
+  node: Label!
+}
+
+type IssueCommentConnection {
+  edges: [IssueCommentEdge!]
+  nodes: [IssueComment!]
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type IssueCommentEdge {
+  cursor: String!
+  node: IssueComment!
+}
+
+type MilestoneConnection {
+  edges: [MilestoneEdge!]
+  nodes: [Milestone!]
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type MilestoneEdge {
+  cursor: String!
+  node: Milestone!
+}
+
+enum IssueState {
+  OPEN
+  CLOSED
+}
+
+enum PullRequestState {
+  OPEN
+  CLOSED
+  MERGED
+}
+
+enum MergeableState {
+  MERGEABLE
+  CONFLICTING
+  UNKNOWN
+}
+
+enum PullRequestMergeMethod {
+  MERGE
+  SQUASH
+  REBASE
+}
+
+enum MilestoneState {
+  OPEN
+  CLOSED
+}
+
+input CreateIssueInput {
+  repositoryId: ID!
+  title: String!
+  body: String
+  labelIds: [ID!]
+  clientMutationId: String
+}
+
+type CreateIssuePayload {
+  issue: Issue
+  clientMutationId: String
+}
+
+input UpdateIssueInput {
+  id: ID!
+  title: String
+  body: String
+  state: IssueState
+  labelIds: [ID!]
+  clientMutationId: String
+}
+
+type UpdateIssuePayload {
+  issue: Issue
+  clientMutationId: String
+}
+
+input CloseIssueInput {
+  issueId: ID!
+  clientMutationId: String
+}
+
+type CloseIssuePayload {
+  issue: Issue
+  clientMutationId: String
+}
+
+input ReopenIssueInput {
+  issueId: ID!
+  clientMutationId: String
+}
+
+type ReopenIssuePayload {
+  issue: Issue
+  clientMutationId: String
+}
+
+input AddCommentInput {
+  subjectId: ID!
+  body: String!
+  clientMutationId: String
+}
+
+type AddCommentPayload {
+  commentEdge: IssueCommentEdge
+  comment: IssueComment
+  subject: Node
+  clientMutationId: String
+}
+
+input CreatePullRequestInput {
+  repositoryId: ID!
+  title: String!
+  body: String
+  headRefName: String!
+  baseRefName: String!
+  clientMutationId: String
+}
+
+type CreatePullRequestPayload {
+  pullRequest: PullRequest
+  clientMutationId: String
+}
+
+input MergePullRequestInput {
+  pullRequestId: ID!
+  commitHeadline: String
+  mergeMethod: PullRequestMergeMethod
+  clientMutationId: String
+}
+
+type MergePullRequestPayload {
+  pullRequest: PullRequest
+  clientMutationId: String
+}
+
+input ClosePullRequestInput {
+  pullRequestId: ID!
+  clientMutationId: String
+}
+
+type ClosePullRequestPayload {
+  pullRequest: PullRequest
+  clientMutationId: String
+}
+
+input AddLabelsToLabelableInput {
+  labelableId: ID!
+  labelIds: [ID!]!
+  clientMutationId: String
+}
+
+type AddLabelsToLabelablePayload {
+  labelable: Labelable
+  clientMutationId: String
+}
+
+input RemoveLabelsFromLabelableInput {
+  labelableId: ID!
+  labelIds: [ID!]!
+  clientMutationId: String
+}
+
+type RemoveLabelsFromLabelablePayload {
+  labelable: Labelable
+  clientMutationId: String
+}
