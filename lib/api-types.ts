@@ -184,3 +184,24 @@ export interface ScanJob {
   finished_at: string | null;
   error: string | null;
 }
+
+export interface AppMeta {
+  app_name: string;
+  version: string;
+  git_commit: string;
+  build_date: string;
+  license: string;
+  source_url: string;
+}
+
+export interface LicenseEntry {
+  name: string;
+  version: string;
+  license: string;
+  url: string;
+}
+
+export interface AppLicenses {
+  app_license: string;
+  third_party: LicenseEntry[];
+}
