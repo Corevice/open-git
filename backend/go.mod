@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	github.com/gliderlabs/ssh v0.3.7
+	github.com/go-git/go-billy/v5 v5.6.2
 	github.com/go-git/go-git/v5 v5.13.2
 	github.com/golang-migrate/migrate/v4 v4.18.1
 	github.com/google/uuid v1.6.0

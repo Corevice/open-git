@@ -210,6 +210,12 @@ export default async function RepoPage({
                 </span>
               )}
             </Link>
+            <a
+              href={`/${owner}/${repo}/labels`}
+              className="px-4 py-2 text-sm text-[#24292f] rounded-t-md hover:bg-gray-100 inline-flex items-center gap-1.5"
+            >
+              Labels
+            </a>
             <Link
               href={`/${owner}/${repo}/pulls`}
               className="px-4 py-2 text-sm text-[#24292f] rounded-t-md hover:bg-gray-100 inline-flex items-center gap-1.5"

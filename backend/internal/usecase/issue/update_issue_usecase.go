@@ -66,7 +66,7 @@ func (uc *UpdateIssueUsecase) Execute(ctx context.Context, input UpdateIssueInpu
 	}
 
 	if input.LabelNames != nil {
-		labelIDs := make([]uuid.UUID, 0, len(input.LabelNames))
+		labels := make([]entity.Label, 0, len(input.LabelNames))
 		for _, name := range input.LabelNames {
 			label, err := uc.labelRepo.GetByName(ctx, input.RepositoryID, name)
 			if err != nil {
@@ -75,9 +75,9 @@ func (uc *UpdateIssueUsecase) Execute(ctx context.Context, input UpdateIssueInpu
 			if label == nil {
 				return nil, apperror.ErrValidation
 			}
-			labelIDs = append(labelIDs, label.ID)
+			labels = append(labels, *label)
 		}
-		issue.LabelIDs = labelIDs
+		issue.Labels = labels
 	}
 
 	if input.MilestoneNumber != nil {
@@ -103,7 +103,7 @@ func (uc *UpdateIssueUsecase) Execute(ctx context.Context, input UpdateIssueInpu
 	}
 
 	if input.StateReason != nil {
-		issue.StateReason = *input.StateReason
+		issue.StateReason = input.StateReason
 	}
 
 	if input.State != nil && *input.State == "closed" && prevState == "open" {

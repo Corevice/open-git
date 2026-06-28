@@ -13,6 +13,6 @@ type ILabelRepository interface {
 	ListByRepo(ctx context.Context, repoID uuid.UUID, page, perPage int) ([]*entity.Label, int, error)
 	Update(ctx context.Context, label *entity.Label) error
 	Delete(ctx context.Context, id uuid.UUID) error
-	AddToIssue(ctx context.Context, issueID, labelID uuid.UUID) error
-	RemoveFromIssue(ctx context.Context, issueID, labelID uuid.UUID) error
+	AddToIssue(ctx context.Context, repoID uuid.UUID, issueNumber int, labelID uuid.UUID) error
+	RemoveFromIssue(ctx context.Context, repoID uuid.UUID, issueNumber int, labelID uuid.UUID) error
 }
