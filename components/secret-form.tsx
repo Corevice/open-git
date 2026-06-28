@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 export interface SecretFormProps {
   onSubmit: (name: string, value: string) => Promise<void>;
@@ -19,18 +19,19 @@ export function SecretForm({
   fieldErrors,
   onCancel,
 }: SecretFormProps) {
+  const isEditing = existingName !== undefined;
   const [name, setName] = useState(existingName ?? "");
   const [value, setValue] = useState("");
+
+  useEffect(() => {
+    setName(existingName ?? "");
+  }, [existingName]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     const secretName = existingName ?? name.trim();
-    try {
-      await onSubmit(secretName, value);
-      setValue("");
-    } catch {
-      // Parent handles errors via formError / fieldErrors props.
-    }
+    await onSubmit(secretName, value);
+    setValue("");
   };
 
   return (
@@ -48,10 +49,9 @@ export function SecretForm({
         <input
           id="secret-name"
           type="text"
-          value={existingName ?? name}
+          value={name}
           onChange={(e) => setName(e.target.value)}
-          disabled={existingName !== undefined}
-          readOnly={existingName !== undefined}
+          disabled={isEditing}
           placeholder="MY_SECRET"
           className="w-full rounded-md border border-[#d0d7de] px-3 py-2 text-sm font-mono disabled:cursor-not-allowed disabled:bg-[#f6f8fa] disabled:text-[#656d76]"
           required
@@ -66,16 +66,16 @@ export function SecretForm({
           htmlFor="secret-value"
           className="mb-1.5 block text-sm font-semibold"
         >
-          Value <span className="text-[#cf222e]">*</span>
+          Value {!isEditing && <span className="text-[#cf222e]">*</span>}
         </label>
         <textarea
           id="secret-value"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="Secret value"
+          placeholder={isEditing ? "Leave blank to keep current value" : "Secret value"}
           rows={4}
           className="w-full rounded-md border border-[#d0d7de] px-3 py-2 text-sm font-mono"
-          required
+          required={!isEditing}
           autoComplete="new-password"
         />
         {fieldErrors["value"] && (
