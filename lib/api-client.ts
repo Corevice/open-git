@@ -83,6 +83,11 @@ export interface RepoApiClient extends ApiClient {
     token?: string;
   }): Promise<MCPVerificationRun[]>;
   deleteMCPRun(runId: string, opts?: { token?: string }): Promise<void>;
+  createRepo<T>(
+    name: string,
+    visibility: "public" | "private",
+    options?: { autoInit?: boolean; description?: string },
+  ): Promise<T>;
 }
 
 export function isApiError(err: unknown): err is ApiError {
@@ -293,6 +298,14 @@ export function createRepoApiClient(baseUrl: string): RepoApiClient {
         }
         throw error;
       }
+    },
+    createRepo(name, visibility, options) {
+      return base.post("/api/v1/user/repos", {
+        name,
+        private: visibility === "private",
+        ...(options?.description ? { description: options.description } : {}),
+        auto_init: options?.autoInit ?? false,
+      });
     },
   };
 }
