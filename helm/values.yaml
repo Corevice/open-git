@@ -22,9 +22,25 @@ autoscaling:
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
 
+# Persistence for Git repositories.
+#
+# Migration guide (breaking change from flat reposSize-only schema):
+#   - Old installs used persistence.repositories.{size,accessMode,retainOnDelete}.
+#   - New flat keys (reposSize, reposPath, retainOnDelete) are preferred for new installs.
+#   - Templates accept either form; reposSize takes precedence, then repositories.size.
+#   - Default size restored to 50Gi (was 20Gi in the intermediate schema).
+#   - Set retainOnDelete: true (default) to annotate PVCs with helm.sh/resource-policy: keep
+#     so data survives helm uninstall. Verify existing PVC reclaim policy in your cluster
+#     before upgrading — shrinking size on an existing PVC is not supported by Kubernetes.
 persistence:
   enabled: true
-  reposSize: "20Gi"
+  reposSize: ""
+  reposPath: "/data/repos"
+  retainOnDelete: true
+  repositories:
+    size: 50Gi
+    accessMode: ReadWriteOnce
+    retainOnDelete: true
 
 db:
   type: sqlite  # sqlite or postgres
@@ -61,10 +77,13 @@ ssh:
   enabled: true
   serviceType: LoadBalancer
 
+# Secrets must be supplied at install time (empty defaults will fail template rendering).
+# Example: --set secrets.jwtSecret=... --set secrets.minioAccessKey=... --set secrets.minioRootPassword=...
 secrets:
   jwtSecret: ""
   dbPassword: ""
   minioRootPassword: ""
+  minioAccessKey: ""
 
 serviceAccount:
   create: true

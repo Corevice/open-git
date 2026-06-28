@@ -20,12 +20,26 @@ jobs:
         run: helm dependency update helm/
 
       - name: Lint chart
-        run: helm lint helm/ --strict
+        run: |
+          helm lint helm/ --strict \
+            --set secrets.jwtSecret=ci-test-jwt-secret \
+            --set secrets.minioRootPassword=ci-test-minio-password \
+            --set secrets.minioAccessKey=ci-test-minio-access-key
 
       - name: Validate templates
         run: |
-          helm template gitforge helm/ > /tmp/rendered.yaml
+          helm template gitforge helm/ \
+            --set secrets.jwtSecret=ci-test-jwt-secret \
+            --set secrets.minioRootPassword=ci-test-minio-password \
+            --set secrets.minioAccessKey=ci-test-minio-access-key \
+            > /tmp/rendered.yaml
           cat /tmp/rendered.yaml | docker run --rm -i ghcr.io/yannh/kubeconform:latest -strict -ignore-missing-schemas -
 
       - name: Dry-run install
-        run: helm install gitforge helm/ --dry-run=client --set ingress.host=test.example.com
+        run: |
+          helm install gitforge helm/ --dry-run=client --generate-name \
+            --set ingress.host=test.example.com \
+            --set secrets.jwtSecret=ci-test-jwt-secret \
+            --set secrets.dbPassword=ci-test-db-password \
+            --set secrets.minioRootPassword=ci-test-minio-password \
+            --set secrets.minioAccessKey=ci-test-minio-access-key

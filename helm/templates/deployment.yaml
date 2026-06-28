@@ -44,7 +44,7 @@ spec:
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "open-git.fullname" . }}
+                  name: {{ include "open-git.fullname" . }}-secrets
                   key: jwt-secret
             {{- if eq .Values.db.type "postgres" }}
             - name: POSTGRES_HOST
@@ -58,7 +58,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "open-git.fullname" . }}
+                  name: {{ include "open-git.fullname" . }}-secrets
                   key: db-password
             {{- else }}
             - name: SQLITE_PATH
@@ -76,11 +76,14 @@ spec:
                   name: {{ include "open-git.fullname" . }}
                   key: MINIO_ENDPOINT
             - name: MINIO_ACCESS_KEY
-              value: {{ .Values.minio.accessKey | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-git.fullname" . }}-secrets
+                  key: minio-access-key
             - name: MINIO_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "open-git.fullname" . }}
+                  name: {{ include "open-git.fullname" . }}-secrets
                   key: minio-root-password
             - name: MINIO_BUCKET
               value: {{ .Values.minio.bucket | quote }}
