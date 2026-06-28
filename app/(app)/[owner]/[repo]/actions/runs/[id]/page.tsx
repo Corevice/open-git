@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import ArtifactList from "@/components/actions/artifact-list";
 import LogViewer from "@/components/actions/LogViewer";
 
 type WorkflowStep = {
@@ -192,6 +193,8 @@ export default function ActionRunDetailPage() {
             <LogViewer runId={runId} repoOwner={owner} repoName={repo} />
           </main>
         </div>
+
+        <ArtifactList owner={owner} repo={repo} runId={runId} />
       </div>
     </div>
   );
