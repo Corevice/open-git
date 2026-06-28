@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/open-git/backend/internal/domain/entity"
+	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/infrastructure/repository"
 )
 
@@ -190,14 +190,28 @@ func newTestImporterDB(t *testing.T) *sqlx.DB {
 	return sqlx.NewDb(db, "sqlite3")
 }
 
+func newTestImportRepos(db *sqlx.DB) (
+	domainrepo.IImportJobRepository,
+	domainrepo.IImportUserMappingRepository,
+	domainrepo.IImportPhaseCheckpointRepository,
+) {
+	repo := repository.NewImportJobRepository(db)
+	var (
+		_ domainrepo.IImportJobRepository              = repo
+		_ domainrepo.IImportUserMappingRepository    = repo
+		_ domainrepo.IImportPhaseCheckpointRepository = repo
+	)
+	return repo, repo, repo
+}
+
 func newTestImporterWorker(t *testing.T, db *sqlx.DB) *ImporterWorker {
 	t.Helper()
 
-	importRepo := repository.NewImportJobRepository(db)
+	jobs, mappings, checkpoints := newTestImportRepos(db)
 	return NewImporterWorker(
-		importRepo,
-		importRepo,
-		importRepo,
+		jobs,
+		mappings,
+		checkpoints,
 		repository.NewIssueRepository(db),
 		repository.NewLabelRepository(db),
 		repository.NewMilestoneRepository(db),
@@ -286,11 +300,17 @@ func newMockGitHubServer(t *testing.T, failIssues bool) *httptest.Server {
 					"number": 2,
 					"title":  "First PR",
 					"body":   "pr body",
-					"state":  "open",
+					"state":  "closed",
 					"draft":  false,
-					"merged": false,
+					"merged": true,
+					"merged_at": "2024-01-03T00:00:00Z",
+					"merge_commit_sha": "deadbeef",
 					"user": map[string]any{
 						"login": "alice",
+					},
+					"merged_by": map[string]any{
+						"login": "bob",
+						"name":  "Bob",
 					},
 					"head": map[string]any{
 						"ref": "feature",
@@ -353,19 +373,19 @@ func TestHandleGitHubImport_CompletesJob(t *testing.T) {
 	}
 }
 
-func TestCheckRateLimitHeaders_ReturnsErrRateLimitExceeded(t *testing.T) {
+func TestHandleRateLimit_RetriesWhenRemainingZero(t *testing.T) {
 	worker := NewImporterWorker(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	resp := &http.Response{Header: make(http.Header)}
 	resp.Header.Set(rateLimitRemainingHeader, "0")
 	resp.Header.Set(rateLimitResetHeader, "9999999999")
 
-	err := worker.checkRateLimitHeaders(context.Background(), resp)
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	retry, err := worker.handleRateLimit(context.Background(), resp, uuid.New())
+	if err != nil {
+		t.Fatalf("handleRateLimit returned error: %v", err)
 	}
-	if !errors.Is(err, ErrRateLimitExceeded) {
-		t.Fatalf("expected ErrRateLimitExceeded, got %v", err)
+	if !retry {
+		t.Fatal("expected retry when remaining is zero")
 	}
 }
 
@@ -433,6 +453,9 @@ func TestHandleGitHubImport_FailedPhaseSetsFailedStatus(t *testing.T) {
 	if got.Error == nil || *got.Error == "" {
 		t.Fatal("expected error message on failed job")
 	}
+	if strings.Contains(*got.Error, "boom") {
+		t.Fatalf("expected sanitized error message, got %q", *got.Error)
+	}
 }
 
 func TestRepoGitPath(t *testing.T) {
@@ -472,23 +495,56 @@ func TestMapUser_ReusesExistingMapping(t *testing.T) {
 	}
 }
 
-func TestMockGitHubServerRoutes(t *testing.T) {
-	server := newMockGitHubServer(t, false)
-	t.Cleanup(server.Close)
+func TestResumePageFromCheckpoint(t *testing.T) {
+	if got := resumePageFromCheckpoint(nil); got != 1 {
+		t.Fatalf("nil checkpoint: got %d, want 1", got)
+	}
+	if got := resumePageFromCheckpoint(&entity.ImportPhaseCheckpoint{LastCursor: "2"}); got != 3 {
+		t.Fatalf("completed page 2: got %d, want 3", got)
+	}
+}
 
-	for _, path := range []string{
-		"/repos/owner/repo",
-		"/repos/owner/repo/issues",
-		"/repos/owner/repo/issues/1/comments",
-		"/repos/owner/repo/pulls",
-	} {
-		resp, err := http.Get(server.URL + path)
-		if err != nil {
-			t.Fatalf("GET %s: %v", path, err)
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("GET %s: status %d", path, resp.StatusCode)
-		}
+func TestImportPullRequest_MapsMergedBy(t *testing.T) {
+	db := newTestImporterDB(t)
+	orgID, userID, jobID := seedImportFixtures(t, db)
+	mustExecImporter(t, db, `INSERT INTO users (id, login, email, password_hash) VALUES (?, ?, ?, ?)`, uuid.New(), "bob", "bob@example.com", "hash")
+
+	repoID := uuid.New()
+	mustExecImporter(t, db, `INSERT INTO repositories (id, organization_id, owner_id, name, git_path, owner_login) VALUES (?, ?, ?, ?, ?, ?)`,
+		repoID, orgID, userID, "repo", "/tmp/repo.git", "alice")
+
+	worker := newTestImporterWorker(t, db)
+	item := map[string]any{
+		"number": 1,
+		"title":  "Merged PR",
+		"state":  "closed",
+		"merged": true,
+		"merged_at": "2024-01-03T00:00:00Z",
+		"merge_commit_sha": "abc123",
+		"user": map[string]any{"login": "alice"},
+		"merged_by": map[string]any{"login": "bob", "name": "Bob"},
+		"head": map[string]any{"ref": "feature", "sha": "abc"},
+		"base": map[string]any{"ref": "main", "sha": "def"},
+		"created_at": "2024-01-02T00:00:00Z",
+		"updated_at": "2024-01-02T00:00:00Z",
+	}
+
+	if err := worker.importPullRequest(context.Background(), jobID, orgID, repoID, "", userID, item); err != nil {
+		t.Fatalf("importPullRequest: %v", err)
+	}
+
+	mapping, err := repository.NewImportJobRepository(db).GetMappingByLogin(context.Background(), jobID, "bob")
+	if err != nil {
+		t.Fatalf("GetMappingByLogin: %v", err)
+	}
+	if mapping == nil {
+		t.Fatal("expected merged_by user mapping")
+	}
+}
+
+func TestSanitizeLog_StripsControlCharacters(t *testing.T) {
+	got := sanitizeLog("ok\ninjected\x1b[31mred\x1b[0m")
+	if strings.Contains(got, "\n") || strings.Contains(got, "\x1b") {
+		t.Fatalf("sanitizeLog did not strip control characters: %q", got)
 	}
 }
