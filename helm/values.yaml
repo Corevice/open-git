@@ -37,6 +37,11 @@ ingress:
   tls: false
   className: ""
   annotations: {}
+  traefikCRD: false        # set true to use IngressRoute CRD instead of Ingress
+  certResolver: "le"       # Traefik cert resolver name
+  ssh:
+    enabled: false         # create IngressRouteTCP for SSH Git access
+    entrypoint: "ssh"      # Traefik entrypoint name for SSH
 
 worker:
   replicaCount: 1
