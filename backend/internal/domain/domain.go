@@ -50,6 +50,46 @@ type Organization struct {
 }
 
 type OAuthApp struct {
-	ClientID     string
-	RedirectURIs []string
+	ID               string
+	ClientID         string
+	ClientSecretHash string
+	RedirectURIs     []string
+	Name             string
+	HomepageURL      string
+	OwnerType        string
+	OwnerUserID      int64
+	OrganizationID   int64
+	UpdatedAt        time.Time
+}
+
+type OAuthAuthorizationCode struct {
+	ID          string
+	CodeHash    string
+	OAuthAppID  string
+	UserID      int64
+	RedirectURI string
+	Scopes      []string
+	ExpiresAt   time.Time
+	ConsumedAt  *time.Time
+	CreatedAt   time.Time
+}
+
+type OAuthAccessToken struct {
+	ID         string
+	TokenHash  string
+	OAuthAppID string
+	UserID     int64
+	Scopes     []string
+	RevokedAt  *time.Time
+	LastUsedAt *time.Time
+	CreatedAt  time.Time
+}
+
+type OAuthAuthorization struct {
+	ID            string
+	OAuthAppID    string
+	UserID        int64
+	GrantedScopes []string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
