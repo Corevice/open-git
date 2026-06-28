@@ -4,9 +4,9 @@ import Link from "next/link";
 
 const navLinks = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/dashboard", label: "Repositories" },
-  { href: "/dashboard", label: "Issues" },
-  { href: "/dashboard", label: "Pull Requests" },
+  { href: "/05-repo-list", label: "Repositories" },
+  { href: "/12-issue-list", label: "Issues" },
+  { href: "/13-pr-list", label: "Pull Requests" },
 ];
 
 type SidebarProps = {
@@ -43,7 +43,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             onClick={onClose}
           />
           <aside
-            aria-label="Navigation"
+            aria-label="Mobile navigation"
             data-testid="sidebar-drawer"
             className="fixed left-0 top-0 z-50 h-full w-64 border-r border-[#30363d] bg-[#161b22] md:hidden"
           >
@@ -53,7 +53,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       )}
 
       <aside
-        aria-label="Navigation"
+        aria-label="Main navigation"
         className="hidden w-64 shrink-0 border-r border-[#d0d7de] bg-white md:block"
       >
         <NavLinks />

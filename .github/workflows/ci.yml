@@ -26,7 +26,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.24'
 
       - name: Download dependencies
         run: go mod download
@@ -60,7 +60,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.24'
 
       - name: Run compatibility tests
         run: cd backend && go test ./internal/compat/... -v -count=1 -timeout 120s 2>&1 | tee compat-results.txt

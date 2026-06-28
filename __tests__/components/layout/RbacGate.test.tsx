@@ -16,6 +16,18 @@ describe("RbacGate", () => {
     ).not.toBeInTheDocument();
   });
 
+  it('requiredRole="write", userRole="write" — children rendered', () => {
+    render(
+      <RbacGate requiredRole="write" userRole="write">
+        <button type="button">Push changes</button>
+      </RbacGate>,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Push changes" }),
+    ).toBeInTheDocument();
+  });
+
   it('requiredRole="write", userRole="admin" — children rendered', () => {
     render(
       <RbacGate requiredRole="write" userRole="admin">

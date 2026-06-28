@@ -22,7 +22,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           >
             <Menu className="size-6" />
           </button>
-          <div className="min-w-0 flex-1 [&_header]:static">
+          <div className="min-w-0 flex-1">
             <Header />
           </div>
         </div>

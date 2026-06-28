@@ -79,7 +79,8 @@ function createRepoSettingsClient(
     return (await res.json()) as T;
   }
 
-  return Object.assign(baseApiClient, {
+  return {
+    ...baseApiClient,
     repos: {
       updateRepo(owner: string, repo: string, data: { name: string }) {
         return repoRequest("PATCH", owner, repo, data);
@@ -88,18 +89,24 @@ function createRepoSettingsClient(
         return repoRequest("DELETE", owner, repo);
       },
     },
-  }) as RepoSettingsApiClient;
+  } as RepoSettingsApiClient;
 }
 
-function mapMembershipRoleToRbac(role: string): RbacRole {
-  const normalized = role.toLowerCase();
-  if (normalized === "owner" || normalized === "admin") {
-    return "admin";
+function mapMembershipRoleToRbac(role: string): RbacRole | null {
+  switch (role.toLowerCase()) {
+    case "owner":
+    case "admin":
+      return "admin";
+    case "member":
+    case "maintainer":
+    case "write":
+      return "write";
+    case "read":
+    case "triage":
+      return "read";
+    default:
+      return null;
   }
-  if (normalized === "write" || normalized === "maintainer") {
-    return "write";
-  }
-  return "read";
 }
 
 export default function RepoSettingsPage({
@@ -180,32 +187,31 @@ export default function RepoSettingsPage({
 
         if (currentUser.login === repoOwnerLogin) {
           setUserRole("admin");
-          return;
-        }
+        } else {
+          try {
+            await membershipClient.orgs.get(repoOwnerLogin);
+            const members =
+              await membershipClient.orgs.listMembers(repoOwnerLogin);
+            if (cancelled) {
+              return;
+            }
 
-        try {
-          await membershipClient.orgs.get(repoOwnerLogin);
-          const members =
-            await membershipClient.orgs.listMembers(repoOwnerLogin);
-          if (cancelled) {
-            return;
-          }
-
-          const membership = members.find(
-            (member) => member.login === currentUser.login,
-          );
-          setUserRole(
-            membership ? mapMembershipRoleToRbac(membership.role) : null,
-          );
-        } catch {
-          if (!cancelled) {
-            setUserRole(null);
+            const membership = members.find(
+              (member) => member.login === currentUser.login,
+            );
+            setUserRole(
+              membership ? mapMembershipRoleToRbac(membership.role) : null,
+            );
+          } catch {
+            if (!cancelled) {
+              setUserRole(null);
+            }
           }
         }
       } catch {
         if (!cancelled) {
           setUserRole(null);
-          setRoleError("Failed to load permissions.");
+          setRoleError("Unable to load settings. Please try again.");
         }
       } finally {
         if (!cancelled) {
@@ -223,7 +229,9 @@ export default function RepoSettingsPage({
 
   const handleRename = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (nameUnchanged || renameSubmitting) return;
+    if (roleLoading || userRole !== "admin" || nameUnchanged || renameSubmitting) {
+      return;
+    }
 
     setRenameError(null);
     setRenameSubmitting(true);
@@ -246,7 +254,14 @@ export default function RepoSettingsPage({
 
   const handleDelete = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!deleteConfirmed || deleteSubmitting) return;
+    if (
+      roleLoading ||
+      userRole !== "admin" ||
+      !deleteConfirmed ||
+      deleteSubmitting
+    ) {
+      return;
+    }
 
     setDeleteError(null);
     setDeleteSubmitting(true);
@@ -290,7 +305,12 @@ export default function RepoSettingsPage({
             )}
             <button
               type="submit"
-              disabled={nameUnchanged || renameSubmitting}
+              disabled={
+                roleLoading ||
+                userRole !== "admin" ||
+                nameUnchanged ||
+                renameSubmitting
+              }
               className="rounded-md bg-[#1f883d] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1a7f37] disabled:opacity-50"
             >
               {renameSubmitting ? "Renaming…" : "Rename repository"}
@@ -310,7 +330,8 @@ export default function RepoSettingsPage({
             <button
               type="button"
               onClick={() => setShowDeleteForm(true)}
-              className="mt-4 rounded-md border border-[#cf222e] bg-white px-4 py-2 text-sm font-semibold text-[#cf222e] hover:bg-[#ffebe9]"
+              disabled={roleLoading || userRole !== "admin"}
+              className="mt-4 rounded-md border border-[#cf222e] bg-white px-4 py-2 text-sm font-semibold text-[#cf222e] hover:bg-[#ffebe9] disabled:opacity-50"
             >
               Delete this repository
             </button>
@@ -336,7 +357,12 @@ export default function RepoSettingsPage({
               )}
               <button
                 type="submit"
-                disabled={!deleteConfirmed || deleteSubmitting}
+                disabled={
+                  roleLoading ||
+                  userRole !== "admin" ||
+                  !deleteConfirmed ||
+                  deleteSubmitting
+                }
                 className="rounded-md border border-[#cf222e] bg-[#cf222e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#a40e26] disabled:opacity-50"
               >
                 {deleteSubmitting ? "Deleting…" : "Delete this repository"}
@@ -355,9 +381,11 @@ export default function RepoSettingsPage({
         {owner}/{repo}
       </p>
 
-      {roleLoading ? (
+      {roleLoading && (
         <p className="text-sm text-[#656d76]">Checking permissions…</p>
-      ) : roleError ? (
+      )}
+
+      {roleError && !roleLoading ? (
         <div className="rounded-md border border-[#d0d7de] bg-white p-5">
           <p className="text-sm text-[#cf222e]">{roleError}</p>
           <button
