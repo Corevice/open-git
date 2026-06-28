@@ -78,14 +78,15 @@ func main() {
 
 	e := echo.New()
 	e.HideBanner = true
-	observability.RegisterMetricsRoute(e)
+	if cfg.MetricsEnabled {
+		observability.RegisterMetricsRoute(e, cfg.MetricsPath, cfg.MetricsAuthToken)
+	}
 	e.HTTPErrorHandler = newHTTPErrorHandler()
 
 	e.Use(middleware.RequestID())
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
 		Format: `{"time":"${time_rfc3339_nano}","method":"${method}","path":"${path}","status":${status},"latency_ms":"${latency}","request_id":"${id}"}` + "\n",
 	}))
-	e.Use(observability.EchoPrometheusMiddleware)
 	e.Use(middleware.RecoverWithConfig(middleware.RecoverConfig{
 		LogErrorFunc: func(c echo.Context, err error, stack []byte) error {
 			c.Logger().Errorf("panic recovered: %v\n%s", err, stack)
@@ -99,6 +100,9 @@ func main() {
 	}))
 	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(20)))
 	e.Use(middleware.TimeoutWithConfig(middleware.TimeoutConfig{Timeout: 30 * time.Second}))
+	if cfg.MetricsEnabled {
+		e.Use(observability.EchoPrometheusMiddleware)
+	}
 	e.Use(requestContextMiddleware())
 
 	e.GET("/healthz", healthzHandler)

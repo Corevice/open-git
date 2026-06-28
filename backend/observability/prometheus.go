@@ -5,18 +5,41 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"testing"
 	"time"
 	"unicode"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// maxPrometheusLabelLen caps label values to stay within Prometheus' recommended
+// 64-character limit and avoid unbounded cardinality from long user input.
 const maxPrometheusLabelLen = 64
 
+var allowedDBQueryNames = map[string]struct{}{
+	"select_users": {},
+}
+
 var (
+	metricsRegistry *prometheus.Registry
+	metricsGatherer prometheus.Gatherer
+
+	httpRequestsTotal *prometheus.CounterVec
+	httpRequestDuration *prometheus.HistogramVec
+	gitOperationsTotal *prometheus.CounterVec
+	workflowRunsTotal *prometheus.CounterVec
+	dbQueryDuration *prometheus.HistogramVec
+)
+
+func init() {
+	metricsRegistry = prometheus.NewRegistry()
+	metricsGatherer = metricsRegistry
+	initCollectors(metricsRegistry)
+}
+
+func initCollectors(reg prometheus.Registerer) {
 	httpRequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "githost_http_requests_total",
@@ -39,7 +62,7 @@ var (
 			Name: "git_operations_total",
 			Help: "Total git operations.",
 		},
-		[]string{"type", "protocol", "organization_id"},
+		[]string{"type", "protocol"},
 	)
 
 	workflowRunsTotal = prometheus.NewCounterVec(
@@ -47,7 +70,7 @@ var (
 			Name: "workflow_runs_total",
 			Help: "Total workflow runs.",
 		},
-		[]string{"status", "organization_id"},
+		[]string{"status"},
 	)
 
 	dbQueryDuration = prometheus.NewHistogramVec(
@@ -58,24 +81,38 @@ var (
 		},
 		[]string{"query_name"},
 	)
-)
 
-func init() {
-	registerCollector(httpRequestsTotal)
-	registerCollector(httpRequestDuration)
-	registerCollector(gitOperationsTotal)
-	registerCollector(workflowRunsTotal)
-	registerCollector(dbQueryDuration)
+	reg.MustRegister(
+		httpRequestsTotal,
+		httpRequestDuration,
+		gitOperationsTotal,
+		workflowRunsTotal,
+		dbQueryDuration,
+	)
 }
 
-func registerCollector(collector prometheus.Collector) {
-	if err := prometheus.Register(collector); err != nil {
-		if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
-			log.Printf("metrics: already registered, reusing existing collector: %v", err)
-			return
-		}
-		panic(err)
-	}
+// InitTestMetrics reinitializes collectors on a fresh registry for isolated tests.
+func InitTestMetrics(t *testing.T) prometheus.Gatherer {
+	t.Helper()
+
+	reg := prometheus.NewRegistry()
+	initCollectors(reg)
+	metricsRegistry = reg
+	metricsGatherer = reg
+
+	t.Cleanup(func() {
+		reg := prometheus.NewRegistry()
+		initCollectors(reg)
+		metricsRegistry = reg
+		metricsGatherer = reg
+	})
+
+	return reg
+}
+
+// MetricsGatherer returns the active Prometheus gatherer for this package.
+func MetricsGatherer() prometheus.Gatherer {
+	return metricsGatherer
 }
 
 func sanitizePrometheusLabel(value string) string {
@@ -85,13 +122,15 @@ func sanitizePrometheusLabel(value string) string {
 	}
 
 	var b strings.Builder
+	runeCount := 0
 	for _, r := range value {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' {
 			b.WriteRune(r)
 		} else {
 			b.WriteRune('_')
 		}
-		if b.Len() >= maxPrometheusLabelLen {
+		runeCount++
+		if runeCount >= maxPrometheusLabelLen {
 			break
 		}
 	}
@@ -102,33 +141,32 @@ func sanitizePrometheusLabel(value string) string {
 	return b.String()
 }
 
-func sanitizeOrgID(orgID string) string {
-	if _, err := uuid.Parse(strings.TrimSpace(orgID)); err == nil {
-		return strings.TrimSpace(orgID)
+func sanitizeDBQueryName(name string) string {
+	sanitized := sanitizePrometheusLabel(name)
+	if _, ok := allowedDBQueryNames[sanitized]; ok {
+		return sanitized
 	}
-	return "invalid"
+	return "other"
 }
 
 // ObserveGitOperation increments the git operations counter.
-func ObserveGitOperation(opType, protocol, orgID string) {
+func ObserveGitOperation(opType, protocol string) {
 	gitOperationsTotal.WithLabelValues(
 		sanitizePrometheusLabel(opType),
 		sanitizePrometheusLabel(protocol),
-		sanitizeOrgID(orgID),
 	).Inc()
 }
 
 // ObserveWorkflowRun increments the workflow runs counter.
-func ObserveWorkflowRun(status, orgID string) {
+func ObserveWorkflowRun(status string) {
 	workflowRunsTotal.WithLabelValues(
 		sanitizePrometheusLabel(status),
-		sanitizeOrgID(orgID),
 	).Inc()
 }
 
 // ObserveDBQuery records a DB query duration observation.
 func ObserveDBQuery(queryName string, duration float64) {
-	dbQueryDuration.WithLabelValues(sanitizePrometheusLabel(queryName)).Observe(duration)
+	dbQueryDuration.WithLabelValues(sanitizeDBQueryName(queryName)).Observe(duration)
 }
 
 // EchoPrometheusMiddleware records request count and latency for each route.
@@ -184,18 +222,20 @@ func NewMetricsHandler(authToken string) echo.HandlerFunc {
 			}
 		}()
 
-		if authToken != "" {
-			auth := c.Request().Header.Get("Authorization")
-			if !strings.HasPrefix(auth, "Bearer ") {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-			}
-			token := strings.TrimPrefix(auth, "Bearer ")
-			if token != authToken {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-			}
+		if authToken == "" {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		}
 
-		return echo.WrapHandler(promhttp.Handler())(c)
+		auth := c.Request().Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		}
+		token := strings.TrimPrefix(auth, "Bearer ")
+		if token != authToken {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		}
+
+		return echo.WrapHandler(promhttp.HandlerFor(metricsGatherer, promhttp.HandlerOpts{}))(c)
 	}
 }
 

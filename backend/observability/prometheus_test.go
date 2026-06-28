@@ -8,11 +8,12 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/open-git/backend/observability"
-	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
 
 func TestMiddlewareSkipsMetricsPath(t *testing.T) {
+	gatherer := observability.InitTestMetrics(t)
+
 	e := echo.New()
 	e.Use(observability.EchoPrometheusMiddleware)
 	e.GET("/metrics", func(c echo.Context) error {
@@ -27,7 +28,7 @@ func TestMiddlewareSkipsMetricsPath(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
-	metricFamilies, err := prometheus.DefaultGatherer.Gather()
+	metricFamilies, err := gatherer.Gather()
 	if err != nil {
 		t.Fatalf("gather metrics: %v", err)
 	}
@@ -47,6 +48,8 @@ func TestMiddlewareSkipsMetricsPath(t *testing.T) {
 }
 
 func TestEchoPrometheusMiddleware(t *testing.T) {
+	t.Parallel()
+
 	e := echo.New()
 	mw := observability.EchoPrometheusMiddleware(func(c echo.Context) error { return nil })
 
@@ -59,7 +62,7 @@ func TestEchoPrometheusMiddleware(t *testing.T) {
 	}
 }
 
-func TestNewMetricsHandlerNoAuth(t *testing.T) {
+func TestNewMetricsHandlerRequiresAuthToken(t *testing.T) {
 	e := echo.New()
 	e.GET("/metrics", observability.NewMetricsHandler(""))
 
@@ -67,11 +70,8 @@ func TestNewMetricsHandlerNoAuth(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-	if !strings.Contains(rec.Header().Get("Content-Type"), "text/plain") {
-		t.Fatalf("Content-Type = %q, want containing text/plain", rec.Header().Get("Content-Type"))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -90,6 +90,8 @@ func TestNewMetricsHandlerWrongToken(t *testing.T) {
 }
 
 func TestNewMetricsHandlerCorrectToken(t *testing.T) {
+	observability.InitTestMetrics(t)
+
 	e := echo.New()
 	e.GET("/metrics", observability.NewMetricsHandler("secret"))
 
@@ -104,10 +106,13 @@ func TestNewMetricsHandlerCorrectToken(t *testing.T) {
 }
 
 func TestRegisterMetricsRoute(t *testing.T) {
+	observability.InitTestMetrics(t)
+
 	e := echo.New()
-	observability.RegisterMetricsRoute(e, "/metrics", "")
+	observability.RegisterMetricsRoute(e, "/metrics", "secret")
 
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -120,78 +125,76 @@ func TestRegisterMetricsRoute(t *testing.T) {
 }
 
 func TestObserveGitOperation(t *testing.T) {
-	const orgID = "550e8400-e29b-41d4-a716-446655440000"
-	observability.ObserveGitOperation("clone", "https", orgID)
-	observability.ObserveGitOperation("clone", "https", "not-a-uuid")
+	gatherer := observability.InitTestMetrics(t)
 
-	metric := findCounterSample(t, "git_operations_total", map[string]string{
-		"type":            "clone",
-		"protocol":        "https",
-		"organization_id": orgID,
+	observability.ObserveGitOperation("clone", "https")
+
+	metric := findMetricSample(t, gatherer, "git_operations_total", map[string]string{
+		"type":     "clone",
+		"protocol": "https",
 	})
-	if metric == nil || metric.GetCounter().GetValue() < 1 {
-		t.Fatal("expected git_operations_total sample for valid org ID")
+	if metric == nil {
+		t.Fatal("expected git_operations_total sample")
 	}
-
-	invalidMetric := findCounterSample(t, "git_operations_total", map[string]string{
-		"type":            "clone",
-		"protocol":        "https",
-		"organization_id": "invalid",
-	})
-	if invalidMetric == nil || invalidMetric.GetCounter().GetValue() < 1 {
-		t.Fatal("expected git_operations_total sample with organization_id=invalid")
+	if got := metric.GetCounter().GetValue(); got != 1 {
+		t.Fatalf("counter value = %v, want 1", got)
 	}
 }
 
 func TestObserveWorkflowRun(t *testing.T) {
-	const orgID = "550e8400-e29b-41d4-a716-446655440000"
-	observability.ObserveWorkflowRun("success", orgID)
+	gatherer := observability.InitTestMetrics(t)
 
-	metric := findCounterSample(t, "workflow_runs_total", map[string]string{
-		"status":          "success",
-		"organization_id": orgID,
+	observability.ObserveWorkflowRun("success")
+
+	metric := findMetricSample(t, gatherer, "workflow_runs_total", map[string]string{
+		"status": "success",
 	})
-	if metric == nil || metric.GetCounter().GetValue() < 1 {
+	if metric == nil {
 		t.Fatal("expected workflow_runs_total sample")
+	}
+	if got := metric.GetCounter().GetValue(); got != 1 {
+		t.Fatalf("counter value = %v, want 1", got)
 	}
 }
 
 func TestObserveDBQuery(t *testing.T) {
+	gatherer := observability.InitTestMetrics(t)
+
 	observability.ObserveDBQuery("select_users", 0.25)
 
-	metric := findHistogramSample(t, "db_query_duration_seconds", map[string]string{
+	metric := findMetricSample(t, gatherer, "db_query_duration_seconds", map[string]string{
 		"query_name": "select_users",
 	})
-	if metric == nil || metric.GetHistogram().GetSampleCount() < 1 {
+	if metric == nil {
 		t.Fatal("expected db_query_duration_seconds sample")
 	}
+	if got := metric.GetHistogram().GetSampleCount(); got != 1 {
+		t.Fatalf("histogram sample count = %v, want 1", got)
+	}
 }
 
-func findCounterSample(t *testing.T, name string, labels map[string]string) *dto.Metric {
-	t.Helper()
+func TestObserveDBQueryUnknownName(t *testing.T) {
+	gatherer := observability.InitTestMetrics(t)
 
-	metricFamilies, err := prometheus.DefaultGatherer.Gather()
-	if err != nil {
-		t.Fatalf("gather metrics: %v", err)
-	}
+	observability.ObserveDBQuery("drop_table", 0.1)
 
-	for _, mf := range metricFamilies {
-		if mf.GetName() != name {
-			continue
-		}
-		for _, metric := range mf.GetMetric() {
-			if labelsMatch(metric.GetLabel(), labels) {
-				return metric
-			}
-		}
+	metric := findMetricSample(t, gatherer, "db_query_duration_seconds", map[string]string{
+		"query_name": "other",
+	})
+	if metric == nil {
+		t.Fatal("expected db_query_duration_seconds sample with query_name=other")
 	}
-	return nil
+	if got := metric.GetHistogram().GetSampleCount(); got != 1 {
+		t.Fatalf("histogram sample count = %v, want 1", got)
+	}
 }
 
-func findHistogramSample(t *testing.T, name string, labels map[string]string) *dto.Metric {
+func findMetricSample(t *testing.T, gatherer interface {
+	Gather() ([]*dto.MetricFamily, error)
+}, name string, labels map[string]string) *dto.Metric {
 	t.Helper()
 
-	metricFamilies, err := prometheus.DefaultGatherer.Gather()
+	metricFamilies, err := gatherer.Gather()
 	if err != nil {
 		t.Fatalf("gather metrics: %v", err)
 	}
