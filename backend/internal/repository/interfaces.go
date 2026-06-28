@@ -32,6 +32,7 @@ type IRepositoryRepository interface {
 	CountByOwner(ctx context.Context, ownerID uuid.UUID) (int, error)
 	UpdateVisibility(ctx context.Context, id uuid.UUID, visibility string) error
 	UpdateName(ctx context.Context, id uuid.UUID, newName string) error
+	UpdateDefaultBranch(ctx context.Context, id uuid.UUID, branch string) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
