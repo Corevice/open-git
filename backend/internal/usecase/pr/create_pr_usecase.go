@@ -2,16 +2,17 @@ package pr
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/domain/service"
-	"github.com/google/uuid"
 )
 
 const maxNumberRetries = 5
@@ -19,6 +20,7 @@ const maxNumberRetries = 5
 type CreatePRInput struct {
 	OrganizationID uuid.UUID
 	RepositoryID   uuid.UUID
+	GitPath        string
 	ActorID        uuid.UUID
 	Title          string
 	Body           string
@@ -27,23 +29,26 @@ type CreatePRInput struct {
 }
 
 type CreatePRUsecase struct {
-	prRepo       repository.IPullRequestRepository
-	auditLogRepo repository.IAuditLogRepository
-	gitService   service.GitService
-	txManager    repository.TransactionManager
+	prRepo         repository.IPullRequestRepository
+	auditLogRepo   repository.IAuditLogRepository
+	gitService     service.GitService
+	txManager      repository.ITransactionManager
+	membershipRepo repository.IMembershipRepository
 }
 
 func NewCreatePRUsecase(
 	prRepo repository.IPullRequestRepository,
 	auditLogRepo repository.IAuditLogRepository,
 	gitService service.GitService,
-	txManager repository.TransactionManager,
+	txManager repository.ITransactionManager,
+	membershipRepo repository.IMembershipRepository,
 ) *CreatePRUsecase {
 	return &CreatePRUsecase{
-		prRepo:       prRepo,
-		auditLogRepo: auditLogRepo,
-		gitService:   gitService,
-		txManager:    txManager,
+		prRepo:         prRepo,
+		auditLogRepo:   auditLogRepo,
+		gitService:     gitService,
+		txManager:      txManager,
+		membershipRepo: membershipRepo,
 	}
 }
 
@@ -51,15 +56,21 @@ func (uc *CreatePRUsecase) Execute(ctx context.Context, input CreatePRInput) (*e
 	if err := validatePRTitle(input.Title); err != nil {
 		return nil, err
 	}
+	if err := validateGitPath(input.GitPath); err != nil {
+		return nil, err
+	}
 	if input.HeadRef == input.BaseRef {
 		return nil, apperror.ErrValidation
 	}
+	if err := uc.checkActorAccess(ctx, input.OrganizationID, input.ActorID); err != nil {
+		return nil, err
+	}
 
-	headExists, err := uc.gitService.BranchExists(ctx, input.RepositoryID, input.HeadRef)
+	headExists, err := uc.gitService.BranchExists(ctx, input.GitPath, input.HeadRef)
 	if err != nil {
 		return nil, err
 	}
-	baseExists, err := uc.gitService.BranchExists(ctx, input.RepositoryID, input.BaseRef)
+	baseExists, err := uc.gitService.BranchExists(ctx, input.GitPath, input.BaseRef)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +92,7 @@ func (uc *CreatePRUsecase) Execute(ctx context.Context, input CreatePRInput) (*e
 			AuthorID:       input.ActorID,
 		}
 
-		err := uc.txManager.RunInTransaction(ctx, func(txCtx context.Context) error {
+		err := uc.txManager.RunInTx(ctx, func(txCtx context.Context) error {
 			number, err := uc.prRepo.NextNumber(txCtx, input.RepositoryID)
 			if err != nil {
 				return err
@@ -92,15 +103,14 @@ func (uc *CreatePRUsecase) Execute(ctx context.Context, input CreatePRInput) (*e
 				return err
 			}
 
-			return uc.auditLogRepo.InsertAuditLog(
-				txCtx,
-				input.OrganizationID,
-				input.ActorID,
-				"pr.open",
-				"pull_request",
-				pr.ID,
-				json.RawMessage(`{}`),
-			)
+			return uc.auditLogRepo.Create(txCtx, &entity.AuditLog{
+				ID:             uuid.New(),
+				OrganizationID: input.OrganizationID,
+				ActorID:        input.ActorID,
+				Action:         "pr.open",
+				TargetType:     "pull_request",
+				TargetID:       pr.ID.String(),
+			})
 		})
 		if err == nil {
 			created = pr
@@ -122,6 +132,31 @@ func validatePRTitle(title string) error {
 	length := utf8.RuneCountInString(title)
 	if length < 1 || length > 256 {
 		return apperror.ErrValidation
+	}
+	return nil
+}
+
+func validateGitPath(gitPath string) error {
+	if gitPath == "" {
+		return apperror.ErrValidation
+	}
+	if strings.Contains(gitPath, "..") || strings.Contains(gitPath, "\x00") {
+		return apperror.ErrValidation
+	}
+	cleaned := filepath.Clean(gitPath)
+	if strings.Contains(cleaned, "..") {
+		return apperror.ErrValidation
+	}
+	return nil
+}
+
+func (uc *CreatePRUsecase) checkActorAccess(ctx context.Context, organizationID, actorID uuid.UUID) error {
+	_, err := uc.membershipRepo.GetRole(ctx, organizationID, actorID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.ErrForbidden
+	}
+	if err != nil {
+		return err
 	}
 	return nil
 }

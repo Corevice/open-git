@@ -2,16 +2,16 @@ package pr_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/domain/repository"
+	"github.com/open-git/backend/internal/domain/service"
 	prusecase "github.com/open-git/backend/internal/usecase/pr"
-	"github.com/google/uuid"
 )
 
 type mockPullRequestRepo struct {
@@ -31,8 +31,21 @@ func (m *mockPullRequestRepo) GetByNumber(_ context.Context, _ uuid.UUID, number
 	return nil, errors.New("pull request not found")
 }
 
-func (m *mockPullRequestRepo) ListByRepo(_ context.Context, _ repository.ListPullRequestsFilter) ([]*entity.PullRequest, int, error) {
+func (m *mockPullRequestRepo) GetByID(_ context.Context, id uuid.UUID) (*entity.PullRequest, error) {
+	for _, pr := range m.prs {
+		if pr.ID == id {
+			return pr, nil
+		}
+	}
+	return nil, errors.New("pull request not found")
+}
+
+func (m *mockPullRequestRepo) ListByRepo(_ context.Context, _ uuid.UUID, _ repository.ListPullRequestsFilter) ([]*entity.PullRequest, int, error) {
 	return m.prs, len(m.prs), nil
+}
+
+func (m *mockPullRequestRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) {
+	return 1, nil
 }
 
 func (m *mockPullRequestRepo) Update(_ context.Context, pr *entity.PullRequest) error {
@@ -45,27 +58,56 @@ func (m *mockPullRequestRepo) Update(_ context.Context, pr *entity.PullRequest) 
 	return errors.New("pull request not found")
 }
 
-func (m *mockPullRequestRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) {
-	return 1, nil
+func (m *mockPullRequestRepo) SetMerged(_ context.Context, id uuid.UUID, mergedAt time.Time, mergedBy uuid.UUID, sha string) error {
+	for i, pr := range m.prs {
+		if pr.ID == id {
+			m.prs[i].State = "merged"
+			m.prs[i].MergedAt = &mergedAt
+			m.prs[i].MergedBy = &mergedBy
+			m.prs[i].MergeCommitSHA = sha
+			return nil
+		}
+	}
+	return errors.New("pull request not found")
 }
 
 type mockBranchProtectionRepo struct {
 	protection *entity.BranchProtection
 }
 
-func (m *mockBranchProtectionRepo) GetForRef(_ context.Context, _ uuid.UUID, _ string) (*entity.BranchProtection, error) {
+func (m *mockBranchProtectionRepo) GetByBranch(_ context.Context, _ uuid.UUID, _ string) (*entity.BranchProtection, error) {
 	if m.protection == nil {
 		return nil, apperror.ErrNotFound
 	}
 	return m.protection, nil
 }
 
+func (m *mockBranchProtectionRepo) Upsert(_ context.Context, _ *entity.BranchProtection) error {
+	return nil
+}
+
 type mockReviewRepo struct {
 	satisfiedReviews int
 }
 
+func (m *mockReviewRepo) Create(_ context.Context, _ *entity.Review) error {
+	return nil
+}
+
+func (m *mockReviewRepo) GetByID(_ context.Context, _ uuid.UUID) (*entity.Review, error) {
+	return nil, errors.New("review not found")
+}
+
+func (m *mockReviewRepo) ListByPR(_ context.Context, _ uuid.UUID) ([]*entity.Review, error) {
+	return nil, nil
+}
+
 func (m *mockReviewRepo) CountSatisfiedReviews(_ context.Context, _ uuid.UUID) (int, error) {
 	return m.satisfiedReviews, nil
+}
+
+func (m *mockReviewRepo) HasBlockingReviews(_ context.Context, _ uuid.UUID) (bool, error) {
+	return false, nil
 }
 
 type mockWorkflowRunRepo struct {
@@ -85,16 +127,10 @@ type auditLogCall struct {
 	targetType string
 }
 
-func (m *mockAuditLogRepo) InsertAuditLog(
-	_ context.Context,
-	_, _ uuid.UUID,
-	action, targetType string,
-	_ uuid.UUID,
-	_ json.RawMessage,
-) error {
+func (m *mockAuditLogRepo) Create(_ context.Context, log *entity.AuditLog) error {
 	m.calls = append(m.calls, auditLogCall{
-		action:     action,
-		targetType: targetType,
+		action:     log.Action,
+		targetType: log.TargetType,
 	})
 	return nil
 }
@@ -103,21 +139,59 @@ type mockGitService struct {
 	mergeErr error
 }
 
-func (m *mockGitService) BranchExists(_ context.Context, _ uuid.UUID, _ string) (bool, error) {
+func (m *mockGitService) BranchExists(_ context.Context, _ string, _ string) (bool, error) {
 	return true, nil
 }
 
-func (m *mockGitService) ResolveRef(_ context.Context, _ uuid.UUID, _ string) (string, error) {
+func (m *mockGitService) ResolveRef(_ context.Context, _ string, _ string) (string, error) {
 	return "abc123", nil
 }
 
-func (m *mockGitService) Merge(_ context.Context, _ uuid.UUID, _, _, _ string) error {
-	return m.mergeErr
+func (m *mockGitService) Merge(_ context.Context, _ string, _, _, _ string) (string, error) {
+	if m.mergeErr != nil {
+		return "", m.mergeErr
+	}
+	return "abc123def456", nil
+}
+
+func (m *mockGitService) GetDiff(_ context.Context, _ string, _, _ string, _ int) ([]service.FileDiff, bool, error) {
+	return nil, false, nil
+}
+
+func (m *mockGitService) GetMergeBase(_ context.Context, _ string, _, _ string) (string, error) {
+	return "base123", nil
+}
+
+type mockMembershipRepo struct {
+	role string
+}
+
+func (m *mockMembershipRepo) Add(_ context.Context, _ *entity.Membership) error {
+	return nil
+}
+
+func (m *mockMembershipRepo) GetRole(_ context.Context, _ uuid.UUID, _ uuid.UUID) (string, error) {
+	if m.role == "" {
+		return entity.RoleOwner, nil
+	}
+	return m.role, nil
+}
+
+func (m *mockMembershipRepo) ListByOrg(_ context.Context, _ uuid.UUID, _ int, _ int) ([]*entity.Membership, error) {
+	return nil, nil
+}
+
+func (m *mockMembershipRepo) UpdateRole(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ string) error {
+	return nil
+}
+
+func (m *mockMembershipRepo) Remove(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return nil
 }
 
 type mockTxManager struct{}
 
-func (mockTxManager) RunInTransaction(ctx context.Context, fn func(context.Context) error) error {
+func (mockTxManager) RunInTx(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)
 }
 
@@ -147,11 +221,13 @@ func TestAlreadyMerged(t *testing.T) {
 		&mockAuditLogRepo{},
 		&mockGitService{},
 		mockTxManager{},
+		&mockMembershipRepo{},
 	)
 
 	_, err := uc.Execute(context.Background(), prusecase.MergePRInput{
 		OrganizationID: pr.OrganizationID,
 		RepositoryID:   pr.RepositoryID,
+		GitPath:        "/tmp/repo.git",
 		ActorID:        uuid.New(),
 		Number:         pr.Number,
 	})
@@ -167,8 +243,8 @@ func TestProtectionNotSatisfied(t *testing.T) {
 		&mockPullRequestRepo{prs: []*entity.PullRequest{pr}},
 		&mockBranchProtectionRepo{
 			protection: &entity.BranchProtection{
-				RequiredReviews: 2,
-				RequiredChecks:  []string{"ci/build"},
+				RequiredApprovingReviews: 2,
+				RequiredStatusChecks:     []string{"ci/build"},
 			},
 		},
 		&mockReviewRepo{satisfiedReviews: 1},
@@ -180,11 +256,13 @@ func TestProtectionNotSatisfied(t *testing.T) {
 		&mockAuditLogRepo{},
 		&mockGitService{},
 		mockTxManager{},
+		&mockMembershipRepo{},
 	)
 
 	_, err := uc.Execute(context.Background(), prusecase.MergePRInput{
 		OrganizationID: pr.OrganizationID,
 		RepositoryID:   pr.RepositoryID,
+		GitPath:        "/tmp/repo.git",
 		ActorID:        uuid.New(),
 		Number:         pr.Number,
 	})
@@ -204,11 +282,13 @@ func TestConflict(t *testing.T) {
 		&mockAuditLogRepo{},
 		&mockGitService{mergeErr: apperror.ErrConflict},
 		mockTxManager{},
+		&mockMembershipRepo{},
 	)
 
 	_, err := uc.Execute(context.Background(), prusecase.MergePRInput{
 		OrganizationID: pr.OrganizationID,
 		RepositoryID:   pr.RepositoryID,
+		GitPath:        "/tmp/repo.git",
 		ActorID:        uuid.New(),
 		Number:         pr.Number,
 	})
@@ -230,11 +310,13 @@ func TestSuccessfulMerge(t *testing.T) {
 		auditRepo,
 		&mockGitService{},
 		mockTxManager{},
+		&mockMembershipRepo{},
 	)
 
 	merged, err := uc.Execute(context.Background(), prusecase.MergePRInput{
 		OrganizationID: pr.OrganizationID,
 		RepositoryID:   pr.RepositoryID,
+		GitPath:        "/tmp/repo.git",
 		ActorID:        uuid.New(),
 		Number:         pr.Number,
 	})
