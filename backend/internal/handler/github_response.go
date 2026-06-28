@@ -19,7 +19,10 @@ type GitHubError struct {
 }
 
 func RespondGitHubError(c echo.Context, status int, message string, fieldErrors []GitHubFieldError) error {
-	body := GitHubError{Message: message}
+	body := GitHubError{
+		Message:          message,
+		DocumentationURL: "https://docs.github.com/rest",
+	}
 	if len(fieldErrors) > 0 {
 		body.Errors = fieldErrors
 	}
