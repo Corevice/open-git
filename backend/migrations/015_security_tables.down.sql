@@ -5,6 +5,10 @@ DROP TABLE IF EXISTS security_advisories;
 
 PRAGMA foreign_keys=OFF;
 
+DROP INDEX IF EXISTS idx_audit_logs_organization_id;
+DROP INDEX IF EXISTS idx_audit_logs_org_created;
+DROP INDEX IF EXISTS idx_audit_logs_org_action;
+
 ALTER TABLE audit_logs RENAME TO audit_logs_old;
 
 CREATE TABLE audit_logs (
