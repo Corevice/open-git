@@ -6,6 +6,17 @@ import type {
   SSHKey,
   User,
 } from "./api-types";
+import type {
+  CreatePullRequestInput,
+  CreateReviewInput,
+  MergeInput,
+  MergeResponse,
+  PullRequest,
+  PullRequestFile,
+  Review,
+  ReviewComment,
+  UpdatePullRequestInput,
+} from "@/types/pull-request";
 
 export type AccessTokenListItem = AccessTokenMeta & {
   revoked_at: string | null;
@@ -117,7 +128,7 @@ export class ApiClient {
     return this.request<T>("PATCH", path, body);
   }
 
-  private put<T>(path: string, body?: unknown): Promise<T> {
+  put<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>("PUT", path, body);
   }
 
@@ -152,6 +163,66 @@ export class ApiClient {
       this.post<CreateTokenResult>("/api/v3/user/tokens", data),
     revoke: (id: number) => this.del(`/api/v3/user/tokens/${id}`),
   };
+
+  pullRequests = {
+    list: (
+      owner: string,
+      repo: string,
+      state?: string,
+      page?: number,
+      perPage?: number,
+    ) => {
+      const params = new URLSearchParams();
+      if (state) params.set("state", state);
+      if (page !== undefined) params.set("page", String(page));
+      if (perPage !== undefined) params.set("per_page", String(perPage));
+      const query = params.toString();
+      return this.get<PullRequest[]>(
+        `/api/v3/repos/${owner}/${repo}/pulls${query ? `?${query}` : ""}`,
+      );
+    },
+    get: (owner: string, repo: string, number: number) =>
+      this.get<PullRequest>(`/api/v3/repos/${owner}/${repo}/pulls/${number}`),
+    create: (owner: string, repo: string, input: CreatePullRequestInput) =>
+      this.post<PullRequest>(`/api/v3/repos/${owner}/${repo}/pulls`, input),
+    update: (
+      owner: string,
+      repo: string,
+      number: number,
+      patch: UpdatePullRequestInput,
+    ) =>
+      this.patch<PullRequest>(
+        `/api/v3/repos/${owner}/${repo}/pulls/${number}`,
+        patch,
+      ),
+    merge: (owner: string, repo: string, number: number, input: MergeInput) =>
+      this.put<MergeResponse>(
+        `/api/v3/repos/${owner}/${repo}/pulls/${number}/merge`,
+        input,
+      ),
+    getFiles: (owner: string, repo: string, number: number) =>
+      this.get<PullRequestFile[]>(
+        `/api/v3/repos/${owner}/${repo}/pulls/${number}/files`,
+      ),
+    listReviews: (owner: string, repo: string, number: number) =>
+      this.get<Review[]>(
+        `/api/v3/repos/${owner}/${repo}/pulls/${number}/reviews`,
+      ),
+    createReview: (
+      owner: string,
+      repo: string,
+      number: number,
+      input: CreateReviewInput,
+    ) =>
+      this.post<Review>(
+        `/api/v3/repos/${owner}/${repo}/pulls/${number}/reviews`,
+        input,
+      ),
+    listReviewComments: (owner: string, repo: string, number: number) =>
+      this.get<ReviewComment[]>(
+        `/api/v3/repos/${owner}/${repo}/pulls/${number}/comments`,
+      ),
+  };
 }
 
 function createAuthenticatedClient(): ApiClient {
@@ -183,4 +254,110 @@ export function createToken(data: {
 
 export function revokeToken(id: number): Promise<void> {
   return createAuthenticatedClient().tokens.revoke(id);
+}
+
+export function listPullRequests(
+  owner: string,
+  repo: string,
+  state?: string,
+  page?: number,
+  perPage?: number,
+): Promise<PullRequest[]> {
+  return createAuthenticatedClient().pullRequests.list(
+    owner,
+    repo,
+    state,
+    page,
+    perPage,
+  );
+}
+
+export function getPullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<PullRequest> {
+  return createAuthenticatedClient().pullRequests.get(owner, repo, number);
+}
+
+export function createPullRequest(
+  owner: string,
+  repo: string,
+  input: CreatePullRequestInput,
+): Promise<PullRequest> {
+  return createAuthenticatedClient().pullRequests.create(owner, repo, input);
+}
+
+export function updatePullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+  patch: UpdatePullRequestInput,
+): Promise<PullRequest> {
+  return createAuthenticatedClient().pullRequests.update(
+    owner,
+    repo,
+    number,
+    patch,
+  );
+}
+
+export function mergePullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+  input: MergeInput,
+): Promise<MergeResponse> {
+  return createAuthenticatedClient().pullRequests.merge(
+    owner,
+    repo,
+    number,
+    input,
+  );
+}
+
+export function getPullRequestFiles(
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<PullRequestFile[]> {
+  return createAuthenticatedClient().pullRequests.getFiles(owner, repo, number);
+}
+
+export function listReviews(
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<Review[]> {
+  return createAuthenticatedClient().pullRequests.listReviews(
+    owner,
+    repo,
+    number,
+  );
+}
+
+export function createReview(
+  owner: string,
+  repo: string,
+  number: number,
+  input: CreateReviewInput,
+): Promise<Review> {
+  return createAuthenticatedClient().pullRequests.createReview(
+    owner,
+    repo,
+    number,
+    input,
+  );
+}
+
+export function listReviewComments(
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<ReviewComment[]> {
+  return createAuthenticatedClient().pullRequests.listReviewComments(
+    owner,
+    repo,
+    number,
+  );
 }
