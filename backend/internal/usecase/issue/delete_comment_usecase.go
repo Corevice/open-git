@@ -38,12 +38,15 @@ func (uc *DeleteCommentUsecase) Execute(ctx context.Context, input DeleteComment
 	if comment == nil {
 		return apperror.ErrNotFound
 	}
+	if comment.OrganizationID != input.OrganizationID {
+		return apperror.ErrNotFound
+	}
 
 	if err := uc.commentRepo.Delete(ctx, input.CommentID); err != nil {
 		return err
 	}
 
-	return uc.auditLogRepo.InsertAuditLog(
+	_ = uc.auditLogRepo.InsertAuditLog(
 		ctx,
 		input.OrganizationID,
 		input.ActorID,
@@ -52,4 +55,5 @@ func (uc *DeleteCommentUsecase) Execute(ctx context.Context, input DeleteComment
 		input.CommentID,
 		json.RawMessage(`{}`),
 	)
+	return nil
 }

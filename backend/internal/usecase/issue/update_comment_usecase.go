@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/domain/repository"
 )
@@ -42,7 +43,16 @@ func (uc *UpdateCommentUsecase) Execute(ctx context.Context, input UpdateComment
 	if comment == nil {
 		return nil, apperror.ErrNotFound
 	}
+	if comment.OrganizationID != input.OrganizationID {
+		return nil, apperror.ErrNotFound
+	}
+	if comment.AuthorID != input.ActorID {
+		return nil, domain.ErrForbidden
+	}
 
+	if input.Body == "" {
+		return nil, apperror.ErrValidation
+	}
 	if len(input.Body) > maxCommentBodyLength {
 		return nil, apperror.ErrValidation
 	}

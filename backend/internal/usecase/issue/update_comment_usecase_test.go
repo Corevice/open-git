@@ -13,41 +13,43 @@ import (
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
 )
 
-type updateCommentRepo struct {
+type mockCommentRepo struct {
 	comment    *entity.Comment
 	updateCall bool
+	deleteCall bool
 }
 
-func (m *updateCommentRepo) Create(_ context.Context, _ *entity.Comment) error {
+func (m *mockCommentRepo) Create(_ context.Context, _ *entity.Comment) error {
 	return nil
 }
 
-func (m *updateCommentRepo) ListByIssue(_ uuid.UUID, _, _ int) ([]*entity.Comment, int, error) {
+func (m *mockCommentRepo) ListByIssue(_ uuid.UUID, _, _ int) ([]*entity.Comment, int, error) {
 	return nil, 0, nil
 }
 
-func (m *updateCommentRepo) GetByID(_ context.Context, id uuid.UUID) (*entity.Comment, error) {
+func (m *mockCommentRepo) GetByID(_ context.Context, id uuid.UUID) (*entity.Comment, error) {
 	if m.comment != nil && m.comment.ID == id {
 		return m.comment, nil
 	}
 	return nil, nil
 }
 
-func (m *updateCommentRepo) Update(_ context.Context, comment *entity.Comment) error {
+func (m *mockCommentRepo) Update(_ context.Context, comment *entity.Comment) error {
 	m.updateCall = true
 	m.comment = comment
 	return nil
 }
 
-func (m *updateCommentRepo) Delete(_ context.Context, _ uuid.UUID) error {
+func (m *mockCommentRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	m.deleteCall = true
 	return nil
 }
 
-type updateCommentAuditLogRepo struct {
+type mockCommentAuditLogRepo struct {
 	calls []auditLogCall
 }
 
-func (m *updateCommentAuditLogRepo) InsertAuditLog(
+func (m *mockCommentAuditLogRepo) InsertAuditLog(
 	_ context.Context,
 	orgID, actorID uuid.UUID,
 	action, targetType string,
@@ -64,19 +66,43 @@ func (m *updateCommentAuditLogRepo) InsertAuditLog(
 	return nil
 }
 
+func TestUpdateCommentNotFoundWhenNil(t *testing.T) {
+	uc := issueusecase.NewUpdateCommentUsecase(
+		&mockCommentRepo{comment: nil},
+		&mockCommentAuditLogRepo{},
+	)
+
+	_, err := uc.Execute(context.Background(), issueusecase.UpdateCommentInput{
+		CommentID:      uuid.New(),
+		OrganizationID: uuid.New(),
+		ActorID:        uuid.New(),
+		Body:           "updated",
+	})
+	if !errors.Is(err, apperror.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
 func TestUpdateCommentBodyTooLong(t *testing.T) {
 	commentID := uuid.New()
-	commentRepo := &updateCommentRepo{
-		comment: &entity.Comment{ID: commentID, Body: "original"},
+	orgID := uuid.New()
+	actorID := uuid.New()
+	commentRepo := &mockCommentRepo{
+		comment: &entity.Comment{
+			ID:             commentID,
+			OrganizationID: orgID,
+			AuthorID:       actorID,
+			Body:           "original",
+		},
 	}
 	longBody := strings.Repeat("a", 65537)
 
-	uc := issueusecase.NewUpdateCommentUsecase(commentRepo, &updateCommentAuditLogRepo{})
+	uc := issueusecase.NewUpdateCommentUsecase(commentRepo, &mockCommentAuditLogRepo{})
 
 	_, err := uc.Execute(context.Background(), issueusecase.UpdateCommentInput{
 		CommentID:      commentID,
-		OrganizationID: uuid.New(),
-		ActorID:        uuid.New(),
+		OrganizationID: orgID,
+		ActorID:        actorID,
 		Body:           longBody,
 	})
 	if !errors.Is(err, apperror.ErrValidation) {
@@ -91,10 +117,15 @@ func TestUpdateCommentSuccess(t *testing.T) {
 	commentID := uuid.New()
 	orgID := uuid.New()
 	actorID := uuid.New()
-	commentRepo := &updateCommentRepo{
-		comment: &entity.Comment{ID: commentID, Body: "original"},
+	commentRepo := &mockCommentRepo{
+		comment: &entity.Comment{
+			ID:             commentID,
+			OrganizationID: orgID,
+			AuthorID:       actorID,
+			Body:           "original",
+		},
 	}
-	auditRepo := &updateCommentAuditLogRepo{}
+	auditRepo := &mockCommentAuditLogRepo{}
 	newBody := "updated body"
 
 	uc := issueusecase.NewUpdateCommentUsecase(commentRepo, auditRepo)

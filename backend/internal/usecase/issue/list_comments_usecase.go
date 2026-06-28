@@ -47,6 +47,9 @@ func (uc *ListCommentsUsecase) Execute(ctx context.Context, input ListCommentsIn
 	if issue == nil || issue.State == "deleted" {
 		return nil, apperror.ErrNotFound
 	}
+	if issue.OrganizationID != input.OrganizationID {
+		return nil, apperror.ErrNotFound
+	}
 
 	page := input.Page
 	if page < 1 {
