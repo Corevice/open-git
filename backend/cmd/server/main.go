@@ -33,6 +33,7 @@ import (
 	"github.com/open-git/backend/internal/domain/entity"
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/handler"
+	"github.com/open-git/backend/internal/logger"
 	"github.com/open-git/backend/internal/infrastructure/crypto"
 	infraDB "github.com/open-git/backend/internal/infrastructure/database"
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
@@ -683,10 +684,18 @@ func newHTTPErrorHandler() echo.HTTPErrorHandler {
 			requestID = c.Request().Header.Get(echo.HeaderXRequestID)
 		}
 
+		logAttrs := []any{
+			"request_id", requestID,
+			"http_method", c.Request().Method,
+			"path", c.Request().URL.Path,
+			"request_headers", logger.MaskHeaders(c.Request().Header),
+		}
+
 		var he *echo.HTTPError
 		if errors.As(err, &he) {
 			message := httpErrorMessage(he)
 			code := httpStatusToCode(he.Code)
+			middleware.Log().Error("request error", append(logAttrs, "status", he.Code, "error", message)...)
 			if writeErr := handler.RespondError(c, he.Code, code, message, requestID); writeErr != nil {
 				c.Logger().Error(writeErr)
 			}
@@ -694,6 +703,7 @@ func newHTTPErrorHandler() echo.HTTPErrorHandler {
 		}
 
 		status, code := handler.DomainErrorToHTTP(err)
+		middleware.Log().Error("request error", append(logAttrs, "status", status, "error", err.Error())...)
 		if writeErr := handler.RespondError(c, status, code, err.Error(), requestID); writeErr != nil {
 			c.Logger().Error(writeErr)
 		}
