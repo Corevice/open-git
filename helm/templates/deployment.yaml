@@ -25,6 +25,9 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "open-git.fullname" . }}-config
           env:
             - name: PORT
               value: "8080"
@@ -77,8 +80,15 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3
+          volumeMounts:
+            - name: repositories
+              mountPath: /data/repositories
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: repositories
+          persistentVolumeClaim:
+            claimName: {{ include "open-git.fullname" . }}-repositories
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

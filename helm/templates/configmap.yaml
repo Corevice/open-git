@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "open-git.fullname" . }}-config
+  labels:
+    {{- include "open-git.labels" . | nindent 4 }}
+data:
+  APP_ENV: production
+  GIT_REPOS_PATH: /data/repositories
+  LOG_LEVEL: info
