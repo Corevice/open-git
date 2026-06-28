@@ -391,6 +391,16 @@ export default function EditWebhookPage({
             </Button>
           </div>
         </form>
+
+        <div className="mt-6">
+          <Button variant="outline" asChild>
+            <Link
+              href={`/${owner}/${repo}/settings/hooks/${hookId}/deliveries`}
+            >
+              Recent deliveries
+            </Link>
+          </Button>
+        </div>
       </div>
     </div>
   );
