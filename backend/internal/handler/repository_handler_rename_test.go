@@ -75,6 +75,12 @@ func (m *renameMockRepositoryRepo) UpdateDefaultBranch(_ context.Context, id uui
 	return nil
 }
 
+func (m *listMockRepositoryRepo) UpdateName(context.Context, uuid.UUID, string) error { return nil }
+
+func (m *listMockRepositoryRepo) UpdateDefaultBranch(context.Context, uuid.UUID, string) error { return nil }
+
+func (f *fakeRepoLookup) UpdateDefaultBranch(context.Context, uuid.UUID, string) error { return nil }
+
 func (m *renameMockRepositoryRepo) UpdateName(_ context.Context, id uuid.UUID, newName string) error {
 	for key, repo := range m.byLoginName {
 		if repo.ID != id {
