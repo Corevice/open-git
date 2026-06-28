@@ -107,6 +107,10 @@ func main() {
 	e.HideBanner = true
 	e.HTTPErrorHandler = newHTTPErrorHandler()
 
+	if err := middleware.SetupProxyTrust(e, cfg.TrustedProxyCIDRs); err != nil {
+		log.Printf("warning: setup proxy trust: %v", err)
+	}
+
 	e.Use(echoMiddleware.RequestID())
 	e.Use(middleware.SecurityHeadersMiddleware())
 	e.Use(middleware.RequestLogger())
