@@ -93,6 +93,7 @@ func main() {
 
 	e.Use(echoMiddleware.RequestID())
 	e.Use(middleware.RequestLogger())
+	e.Use(middleware.SecurityHeaders())
 	e.Use(middleware.StructuredRecover())
 	e.Use(echoMiddleware.CORSWithConfig(echoMiddleware.CORSConfig{
 		AllowOrigins: corsAllowedOrigins(),
