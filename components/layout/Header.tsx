@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { getCurrentUser, getOrgs } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { BRANDING } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 
 const navLinks = [
@@ -40,6 +41,7 @@ export function Header() {
     null,
   );
   const [orgs, setOrgs] = useState<OrgSummary[]>([]);
+  const [logoFailed, setLogoFailed] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -130,8 +132,19 @@ export function Header() {
         href="/"
         className="flex shrink-0 items-center gap-2 font-semibold text-white hover:text-white"
       >
-        <span aria-hidden>🐙</span>
-        <span>OpenHub</span>
+        {logoFailed ? (
+          <span>{BRANDING.appName}</span>
+        ) : (
+          <>
+            <img
+              src={BRANDING.logoSrc}
+              alt={BRANDING.appName}
+              className="h-8 w-8"
+              onError={() => setLogoFailed(true)}
+            />
+            <span>{BRANDING.appName}</span>
+          </>
+        )}
       </Link>
 
       <form
