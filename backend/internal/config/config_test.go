@@ -72,6 +72,40 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestLoadBaseURLs(t *testing.T) {
+	t.Setenv("API_BASE_URL", "https://api.example.com/api/v3")
+	t.Setenv("WEB_BASE_URL", "https://git.example.com")
+	t.Setenv("DOCS_BASE_URL", "https://docs.example.com/rest")
+
+	cfg := config.Load()
+	if cfg.APIBaseURL != "https://api.example.com/api/v3" {
+		t.Fatalf("APIBaseURL = %q, want https://api.example.com/api/v3", cfg.APIBaseURL)
+	}
+	if cfg.WebBaseURL != "https://git.example.com" {
+		t.Fatalf("WebBaseURL = %q, want https://git.example.com", cfg.WebBaseURL)
+	}
+	if cfg.DocsBaseURL != "https://docs.example.com/rest" {
+		t.Fatalf("DocsBaseURL = %q, want https://docs.example.com/rest", cfg.DocsBaseURL)
+	}
+}
+
+func TestLoadBaseURLDefaults(t *testing.T) {
+	t.Setenv("API_BASE_URL", "")
+	t.Setenv("WEB_BASE_URL", "")
+	t.Setenv("DOCS_BASE_URL", "")
+
+	cfg := config.Load()
+	if cfg.APIBaseURL != "http://localhost:8080/api/v3" {
+		t.Fatalf("APIBaseURL = %q, want http://localhost:8080/api/v3", cfg.APIBaseURL)
+	}
+	if cfg.WebBaseURL != "http://localhost:8080" {
+		t.Fatalf("WebBaseURL = %q, want http://localhost:8080", cfg.WebBaseURL)
+	}
+	if cfg.DocsBaseURL != "https://docs.github.com/rest" {
+		t.Fatalf("DocsBaseURL = %q, want https://docs.github.com/rest", cfg.DocsBaseURL)
+	}
+}
+
 func TestMaskDSN(t *testing.T) {
 	masked := database.MaskDSN("postgres://user:secret@host/db")
 	if strings.Contains(masked, "secret") {
