@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	domainservice "github.com/open-git/backend/internal/domain/service"
 )
 
 func initBareRepoWithDivergentBranches(t *testing.T) string {
@@ -48,6 +50,53 @@ func initBareRepoWithDivergentBranches(t *testing.T) string {
 	}
 
 	featureHash, err := storeBlobCommit(repo, "feature change", map[string]string{"README": "base", "feature.txt": "feature"}, []plumbing.Hash{initHash})
+	if err != nil {
+		t.Fatalf("store feature commit: %v", err)
+	}
+	if err := repo.Storer.SetReference(plumbing.NewHashReference(plumbing.NewBranchReferenceName("feature"), featureHash)); err != nil {
+		t.Fatalf("update feature ref: %v", err)
+	}
+
+	return repoPath
+}
+
+func initBareRepoWithConflictingBranches(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	repoPath := filepath.Join(dir, "test.git")
+	if err := InitBare(repoPath); err != nil {
+		t.Fatalf("InitBare: %v", err)
+	}
+
+	repo, err := gogit.PlainOpen(repoPath)
+	if err != nil {
+		t.Fatalf("PlainOpen: %v", err)
+	}
+
+	initHash, err := storeBlobCommit(repo, "init", map[string]string{"README": "base"}, nil)
+	if err != nil {
+		t.Fatalf("store init commit: %v", err)
+	}
+
+	mainRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName("main"), initHash)
+	if err := repo.Storer.SetReference(mainRef); err != nil {
+		t.Fatalf("set main ref: %v", err)
+	}
+	featureRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName("feature"), initHash)
+	if err := repo.Storer.SetReference(featureRef); err != nil {
+		t.Fatalf("set feature ref: %v", err)
+	}
+
+	mainHash, err := storeBlobCommit(repo, "main change", map[string]string{"README": "main version"}, []plumbing.Hash{initHash})
+	if err != nil {
+		t.Fatalf("store main commit: %v", err)
+	}
+	if err := repo.Storer.SetReference(plumbing.NewHashReference(plumbing.NewBranchReferenceName("main"), mainHash)); err != nil {
+		t.Fatalf("update main ref: %v", err)
+	}
+
+	featureHash, err := storeBlobCommit(repo, "feature change", map[string]string{"README": "feature version"}, []plumbing.Hash{initHash})
 	if err != nil {
 		t.Fatalf("store feature commit: %v", err)
 	}
@@ -196,5 +245,14 @@ func TestGetMergeBase(t *testing.T) {
 	}
 	if mergeBase == "" {
 		t.Fatal("expected merge base SHA")
+	}
+}
+
+func TestMergeDetectsConflict(t *testing.T) {
+	repoPath := initBareRepoWithConflictingBranches(t)
+
+	_, err := Merge(repoPath, "main", "feature", "merge")
+	if !errors.Is(err, domainservice.ErrMergeConflict) {
+		t.Fatalf("expected merge conflict, got %v", err)
 	}
 }

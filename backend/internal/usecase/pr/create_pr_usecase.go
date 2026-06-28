@@ -3,11 +3,13 @@ package pr
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/domain/service"
@@ -27,10 +29,11 @@ type CreatePRInput struct {
 }
 
 type CreatePRUsecase struct {
-	prRepo       repository.IPullRequestRepository
-	auditLogRepo repository.IAuditLogRepository
-	gitService   service.GitService
-	txManager    repository.ITransactionManager
+	prRepo         repository.IPullRequestRepository
+	auditLogRepo   repository.IAuditLogRepository
+	gitService     service.GitService
+	txManager      repository.ITransactionManager
+	membershipRepo repository.IMembershipRepository
 }
 
 func NewCreatePRUsecase(
@@ -38,12 +41,14 @@ func NewCreatePRUsecase(
 	auditLogRepo repository.IAuditLogRepository,
 	gitService service.GitService,
 	txManager repository.ITransactionManager,
+	membershipRepo repository.IMembershipRepository,
 ) *CreatePRUsecase {
 	return &CreatePRUsecase{
-		prRepo:       prRepo,
-		auditLogRepo: auditLogRepo,
-		gitService:   gitService,
-		txManager:    txManager,
+		prRepo:         prRepo,
+		auditLogRepo:   auditLogRepo,
+		gitService:     gitService,
+		txManager:      txManager,
+		membershipRepo: membershipRepo,
 	}
 }
 
@@ -51,15 +56,21 @@ func (uc *CreatePRUsecase) Execute(ctx context.Context, input CreatePRInput) (*e
 	if err := validatePRTitle(input.Title); err != nil {
 		return nil, err
 	}
+	if err := validateGitPath(input.GitPath); err != nil {
+		return nil, err
+	}
 	if input.HeadRef == input.BaseRef {
 		return nil, apperror.ErrValidation
 	}
+	if err := uc.checkActorAccess(ctx, input.OrganizationID, input.ActorID); err != nil {
+		return nil, err
+	}
 
-	headExists, err := uc.gitService.BranchExists(input.GitPath, input.HeadRef)
+	headExists, err := uc.gitService.BranchExists(ctx, input.GitPath, input.HeadRef)
 	if err != nil {
 		return nil, err
 	}
-	baseExists, err := uc.gitService.BranchExists(input.GitPath, input.BaseRef)
+	baseExists, err := uc.gitService.BranchExists(ctx, input.GitPath, input.BaseRef)
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +132,31 @@ func validatePRTitle(title string) error {
 	length := utf8.RuneCountInString(title)
 	if length < 1 || length > 256 {
 		return apperror.ErrValidation
+	}
+	return nil
+}
+
+func validateGitPath(gitPath string) error {
+	if gitPath == "" {
+		return apperror.ErrValidation
+	}
+	if strings.Contains(gitPath, "..") || strings.Contains(gitPath, "\x00") {
+		return apperror.ErrValidation
+	}
+	cleaned := filepath.Clean(gitPath)
+	if strings.Contains(cleaned, "..") {
+		return apperror.ErrValidation
+	}
+	return nil
+}
+
+func (uc *CreatePRUsecase) checkActorAccess(ctx context.Context, organizationID, actorID uuid.UUID) error {
+	_, err := uc.membershipRepo.GetRole(ctx, organizationID, actorID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.ErrForbidden
+	}
+	if err != nil {
+		return err
 	}
 	return nil
 }

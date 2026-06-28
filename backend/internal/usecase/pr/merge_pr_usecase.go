@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/domain/service"
@@ -29,6 +30,7 @@ type MergePRUsecase struct {
 	auditLogRepo         repository.IAuditLogRepository
 	gitService           service.GitService
 	txManager            repository.ITransactionManager
+	membershipRepo       repository.IMembershipRepository
 }
 
 func NewMergePRUsecase(
@@ -39,6 +41,7 @@ func NewMergePRUsecase(
 	auditLogRepo repository.IAuditLogRepository,
 	gitService service.GitService,
 	txManager repository.ITransactionManager,
+	membershipRepo repository.IMembershipRepository,
 ) *MergePRUsecase {
 	return &MergePRUsecase{
 		prRepo:               prRepo,
@@ -48,10 +51,18 @@ func NewMergePRUsecase(
 		auditLogRepo:         auditLogRepo,
 		gitService:           gitService,
 		txManager:            txManager,
+		membershipRepo:       membershipRepo,
 	}
 }
 
 func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*entity.PullRequest, error) {
+	if err := validateGitPath(input.GitPath); err != nil {
+		return nil, err
+	}
+	if err := uc.checkActorWriteAccess(ctx, input.OrganizationID, input.ActorID); err != nil {
+		return nil, err
+	}
+
 	pr, err := uc.prRepo.GetByNumber(ctx, input.RepositoryID, input.Number)
 	if err != nil {
 		return nil, err
@@ -69,8 +80,19 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 		return nil, err
 	}
 
-	mergeSHA, err := uc.gitService.Merge(input.GitPath, pr.BaseRef, pr.HeadRef, mergeMethod)
+	mergeSHA, err := uc.gitService.Merge(ctx, input.GitPath, pr.BaseRef, pr.HeadRef, mergeMethod)
 	if err != nil {
+		_ = uc.auditLogRepo.Create(ctx, &entity.AuditLog{
+			ID:             uuid.New(),
+			OrganizationID: input.OrganizationID,
+			ActorID:        input.ActorID,
+			Action:         "pr.merge.failed",
+			TargetType:     "pull_request",
+			TargetID:       pr.ID.String(),
+		})
+		if errors.Is(err, service.ErrMergeConflict) {
+			return nil, apperror.ErrConflict
+		}
 		if errors.Is(err, apperror.ErrConflict) {
 			return nil, apperror.ErrConflict
 		}
@@ -127,7 +149,7 @@ func (uc *MergePRUsecase) checkBranchProtection(ctx context.Context, repositoryI
 		return nil
 	}
 
-	headSHA, err := uc.gitService.ResolveRef(gitPath, pr.HeadRef)
+	headSHA, err := uc.gitService.ResolveRef(ctx, gitPath, pr.HeadRef)
 	if err != nil {
 		return err
 	}
@@ -156,4 +178,18 @@ func allRequiredChecksPassed(required []string, runs []*entity.WorkflowRun) bool
 		}
 	}
 	return true
+}
+
+func (uc *MergePRUsecase) checkActorWriteAccess(ctx context.Context, organizationID, actorID uuid.UUID) error {
+	role, err := uc.membershipRepo.GetRole(ctx, organizationID, actorID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.ErrForbidden
+	}
+	if err != nil {
+		return err
+	}
+	if role != entity.RoleOwner && role != entity.RoleAdmin {
+		return domain.ErrForbidden
+	}
+	return nil
 }

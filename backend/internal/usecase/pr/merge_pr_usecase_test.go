@@ -139,27 +139,54 @@ type mockGitService struct {
 	mergeErr error
 }
 
-func (m *mockGitService) BranchExists(_ string, _ string) (bool, error) {
+func (m *mockGitService) BranchExists(_ context.Context, _ string, _ string) (bool, error) {
 	return true, nil
 }
 
-func (m *mockGitService) ResolveRef(_ string, _ string) (string, error) {
+func (m *mockGitService) ResolveRef(_ context.Context, _ string, _ string) (string, error) {
 	return "abc123", nil
 }
 
-func (m *mockGitService) Merge(_ string, _, _, _ string) (string, error) {
+func (m *mockGitService) Merge(_ context.Context, _ string, _, _, _ string) (string, error) {
 	if m.mergeErr != nil {
 		return "", m.mergeErr
 	}
 	return "abc123def456", nil
 }
 
-func (m *mockGitService) GetDiff(_ string, _, _ string, _ int) ([]service.FileDiff, bool, error) {
+func (m *mockGitService) GetDiff(_ context.Context, _ string, _, _ string, _ int) ([]service.FileDiff, bool, error) {
 	return nil, false, nil
 }
 
-func (m *mockGitService) GetMergeBase(_ string, _, _ string) (string, error) {
+func (m *mockGitService) GetMergeBase(_ context.Context, _ string, _, _ string) (string, error) {
 	return "base123", nil
+}
+
+type mockMembershipRepo struct {
+	role string
+}
+
+func (m *mockMembershipRepo) Add(_ context.Context, _ *entity.Membership) error {
+	return nil
+}
+
+func (m *mockMembershipRepo) GetRole(_ context.Context, _ uuid.UUID, _ uuid.UUID) (string, error) {
+	if m.role == "" {
+		return entity.RoleOwner, nil
+	}
+	return m.role, nil
+}
+
+func (m *mockMembershipRepo) ListByOrg(_ context.Context, _ uuid.UUID, _ int, _ int) ([]*entity.Membership, error) {
+	return nil, nil
+}
+
+func (m *mockMembershipRepo) UpdateRole(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ string) error {
+	return nil
+}
+
+func (m *mockMembershipRepo) Remove(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return nil
 }
 
 type mockTxManager struct{}
@@ -194,6 +221,7 @@ func TestAlreadyMerged(t *testing.T) {
 		&mockAuditLogRepo{},
 		&mockGitService{},
 		mockTxManager{},
+		&mockMembershipRepo{},
 	)
 
 	_, err := uc.Execute(context.Background(), prusecase.MergePRInput{
@@ -228,6 +256,7 @@ func TestProtectionNotSatisfied(t *testing.T) {
 		&mockAuditLogRepo{},
 		&mockGitService{},
 		mockTxManager{},
+		&mockMembershipRepo{},
 	)
 
 	_, err := uc.Execute(context.Background(), prusecase.MergePRInput{
@@ -253,6 +282,7 @@ func TestConflict(t *testing.T) {
 		&mockAuditLogRepo{},
 		&mockGitService{mergeErr: apperror.ErrConflict},
 		mockTxManager{},
+		&mockMembershipRepo{},
 	)
 
 	_, err := uc.Execute(context.Background(), prusecase.MergePRInput{
@@ -280,6 +310,7 @@ func TestSuccessfulMerge(t *testing.T) {
 		auditRepo,
 		&mockGitService{},
 		mockTxManager{},
+		&mockMembershipRepo{},
 	)
 
 	merged, err := uc.Execute(context.Background(), prusecase.MergePRInput{

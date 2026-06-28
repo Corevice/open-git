@@ -1,5 +1,12 @@
 package service
 
+import (
+	"context"
+	"errors"
+)
+
+var ErrMergeConflict = errors.New("merge conflict")
+
 type FileDiff struct {
 	Filename         string
 	PreviousFilename string
@@ -11,9 +18,9 @@ type FileDiff struct {
 }
 
 type GitService interface {
-	BranchExists(repoPath, branch string) (bool, error)
-	ResolveRef(repoPath, ref string) (string, error)
-	Merge(repoPath, base, head, method string) (string, error)
-	GetDiff(repoPath, base, head string, maxFiles int) ([]FileDiff, bool, error)
-	GetMergeBase(repoPath, base, head string) (string, error)
+	BranchExists(ctx context.Context, repoPath, branch string) (bool, error)
+	ResolveRef(ctx context.Context, repoPath, ref string) (string, error)
+	Merge(ctx context.Context, repoPath, base, head, method string) (string, error)
+	GetDiff(ctx context.Context, repoPath, base, head string, maxFiles int) ([]FileDiff, bool, error)
+	GetMergeBase(ctx context.Context, repoPath, base, head string) (string, error)
 }
