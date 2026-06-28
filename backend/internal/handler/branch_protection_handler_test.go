@@ -35,6 +35,10 @@ func (m *bpHandlerMockAuditLogRepo) Create(_ context.Context, log *entity.AuditL
 	return nil
 }
 
+func (m *bpHandlerMockAuditLogRepo) List(_ context.Context, _ uuid.UUID, _ string, _, _ int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 type branchProtectionStore struct {
 	byPattern map[string]*handler.BranchProtectionDetail
 	list      []*handler.BranchProtectionDetail
