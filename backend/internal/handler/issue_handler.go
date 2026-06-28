@@ -18,6 +18,7 @@ type IssueHandler struct {
 	createIssueUC   *issueusecase.CreateIssueUsecase
 	listIssuesUC    *issueusecase.ListIssuesUsecase
 	createCommentUC *issueusecase.CreateCommentUsecase
+	updateIssueUC   *issueusecase.UpdateIssueUsecase
 	resolveRepo     func(c echo.Context, owner, repo string) (*entity.Repository, error)
 }
 
@@ -25,12 +26,14 @@ func NewIssueHandler(
 	createIssueUC *issueusecase.CreateIssueUsecase,
 	listIssuesUC *issueusecase.ListIssuesUsecase,
 	createCommentUC *issueusecase.CreateCommentUsecase,
+	updateIssueUC *issueusecase.UpdateIssueUsecase,
 	resolveRepo func(c echo.Context, owner, repo string) (*entity.Repository, error),
 ) *IssueHandler {
 	return &IssueHandler{
 		createIssueUC:   createIssueUC,
 		listIssuesUC:    listIssuesUC,
 		createCommentUC: createCommentUC,
+		updateIssueUC:   updateIssueUC,
 		resolveRepo:     resolveRepo,
 	}
 }
@@ -39,6 +42,7 @@ func (h *IssueHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	repoScope := middleware.RequireScope("repo")
 	g.GET("/repos/:owner/:repo/issues", h.ListIssues, auth, repoScope)
 	g.POST("/repos/:owner/:repo/issues", h.CreateIssue, auth, repoScope)
+	g.PATCH("/repos/:owner/:repo/issues/:number", h.UpdateIssue, auth, repoScope)
 	g.POST("/repos/:owner/:repo/issues/:number/comments", h.CreateComment, auth, repoScope)
 }
 
@@ -49,6 +53,12 @@ type createIssueRequest struct {
 
 type createCommentRequest struct {
 	Body string `json:"body"`
+}
+
+type updateIssueRequest struct {
+	State string  `json:"state"`
+	Title *string `json:"title"`
+	Body  *string `json:"body"`
 }
 
 func (h *IssueHandler) ListIssues(c echo.Context) error {
@@ -78,7 +88,7 @@ func (h *IssueHandler) ListIssues(c echo.Context) error {
 	}
 
 	setPaginationHeaders(c, output.Page, output.PerPage, output.Total)
-	return c.JSON(http.StatusOK, toIssueResponses(output.Issues))
+	return c.JSON(http.StatusOK, toIssueResponses(output.Issues, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
 func (h *IssueHandler) CreateIssue(c echo.Context) error {
@@ -111,7 +121,59 @@ func (h *IssueHandler) CreateIssue(c echo.Context) error {
 		return err
 	}
 
-	return c.JSON(http.StatusCreated, toIssueResponse(issue))
+	return c.JSON(http.StatusCreated, toIssueResponse(issue, c.Param("owner"), c.Param("repo"), c.Request().Host))
+}
+
+func (h *IssueHandler) UpdateIssue(c echo.Context) error {
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+
+	actor, err := middleware.GetActor(c)
+	if err != nil {
+		return err
+	}
+
+	number, err := strconv.Atoi(c.Param("number"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid issue number")
+	}
+
+	var req updateIssueRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	if req.State != "" && req.State != "open" && req.State != "closed" {
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, "invalid state value")
+	}
+
+	var statePtr *string
+	if req.State != "" {
+		statePtr = &req.State
+	}
+
+	issue, err := h.updateIssueUC.Execute(c.Request().Context(), issueusecase.UpdateIssueInput{
+		OrganizationID: actor.OrganizationID,
+		RepositoryID:   repo.ID,
+		IssueNumber:    number,
+		ActorID:        actor.UserID,
+		Title:          req.Title,
+		Body:           req.Body,
+		State:          statePtr,
+	})
+	if err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
+		if errors.Is(err, apperror.ErrValidation) {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, err.Error())
+		}
+		return err
+	}
+
+	return c.JSON(http.StatusOK, toIssueResponse(issue, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
 func (h *IssueHandler) CreateComment(c echo.Context) error {
@@ -205,12 +267,19 @@ func setPaginationHeaders(c echo.Context, page, perPage, total int) {
 	c.Response().Header().Set("Link", strings.Join(links, ", "))
 }
 
+type issueUserResponse struct {
+	Login string `json:"login"`
+}
+
 type issueResponse struct {
-	ID     uuid.UUID `json:"id"`
-	Number int       `json:"number"`
-	Title  string    `json:"title"`
-	Body   string    `json:"body"`
-	State  string    `json:"state"`
+	ID      uuid.UUID         `json:"id"`
+	Number  int               `json:"number"`
+	Title   string            `json:"title"`
+	Body    string            `json:"body"`
+	State   string            `json:"state"`
+	NodeID  string            `json:"node_id"`
+	HTMLURL string            `json:"html_url"`
+	User    issueUserResponse `json:"user"`
 }
 
 type commentResponse struct {
@@ -218,20 +287,25 @@ type commentResponse struct {
 	Body string    `json:"body"`
 }
 
-func toIssueResponse(issue *entity.Issue) issueResponse {
+func toIssueResponse(issue *entity.Issue, owner, repoName, host string) issueResponse {
 	return issueResponse{
-		ID:     issue.ID,
-		Number: issue.Number,
-		Title:  issue.Title,
-		Body:   issue.Body,
-		State:  issue.State,
+		ID:      issue.ID,
+		Number:  issue.Number,
+		Title:   issue.Title,
+		Body:    issue.Body,
+		State:   issue.State,
+		NodeID:  IssueNodeID(issue.ID),
+		HTMLURL: "https://" + host + "/" + owner + "/" + repoName + "/issues/" + strconv.Itoa(issue.Number),
+		User: issueUserResponse{
+			Login: issue.AuthorLogin,
+		},
 	}
 }
 
-func toIssueResponses(issues []*entity.Issue) []issueResponse {
+func toIssueResponses(issues []*entity.Issue, owner, repoName, host string) []issueResponse {
 	result := make([]issueResponse, 0, len(issues))
 	for _, issue := range issues {
-		result = append(result, toIssueResponse(issue))
+		result = append(result, toIssueResponse(issue, owner, repoName, host))
 	}
 	return result
 }
