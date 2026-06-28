@@ -14,6 +14,6 @@ type IActionSecretRepository interface {
 	ListByOrg(ctx context.Context, orgID uuid.UUID) ([]*entity.ActionSecret, error)
 	Delete(ctx context.Context, orgID uuid.UUID, repoID *uuid.UUID, name string) error
 	ListForWorkflow(ctx context.Context, orgID, repoID uuid.UUID) ([]*entity.ActionSecret, error)
-	SetSelectedRepositories(ctx context.Context, secretID uuid.UUID, repoIDs []uuid.UUID) error
-	GetSelectedRepositories(ctx context.Context, secretID uuid.UUID) ([]uuid.UUID, error)
+	SetSelectedRepositories(ctx context.Context, orgID, secretID uuid.UUID, repoIDs []uuid.UUID) error
+	GetSelectedRepositories(ctx context.Context, orgID, secretID uuid.UUID) ([]uuid.UUID, error)
 }

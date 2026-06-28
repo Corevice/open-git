@@ -179,6 +179,111 @@ func TestActionSecretRepository_Delete(t *testing.T) {
 	}
 }
 
+func TestActionSecretRepository_ListByRepo(t *testing.T) {
+	db := newActionSecretTestDB(t)
+	enc := newTestActionSecretEncryptor()
+	repo := repository.NewActionSecretRepository(db, enc)
+
+	orgID := createTestOrganization(t, db, "list-repo-org")
+	userID := createTestUser(t, db, "list-repo-user")
+	repoID := createTestRepositoryRecord(t, db, orgID, userID, "demo")
+
+	secret := &entity.ActionSecret{
+		OrganizationID: orgID,
+		RepositoryID:   repoID,
+		Name:           "REPO_LIST_SECRET",
+		KeyID:          "repo-key",
+		EncryptedValue: string([]byte("repo-value")),
+	}
+	if _, err := repo.Upsert(context.Background(), secret); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	secrets, err := repo.ListByRepo(context.Background(), orgID, repoID)
+	if err != nil {
+		t.Fatalf("ListByRepo: %v", err)
+	}
+	if len(secrets) != 1 {
+		t.Fatalf("expected 1 secret, got %d", len(secrets))
+	}
+	if secrets[0].Name != "REPO_LIST_SECRET" {
+		t.Fatalf("unexpected secret name: %q", secrets[0].Name)
+	}
+	if secrets[0].KeyID != "repo-key" {
+		t.Fatalf("expected key id repo-key, got %q", secrets[0].KeyID)
+	}
+}
+
+func TestActionSecretRepository_ListByOrg(t *testing.T) {
+	db := newActionSecretTestDB(t)
+	enc := newTestActionSecretEncryptor()
+	repo := repository.NewActionSecretRepository(db, enc)
+
+	orgID := createTestOrganization(t, db, "list-org-org")
+	insertOrgActionSecret(t, db, enc, orgID, "ORG_LIST_SECRET", "selected", []byte("org-value"))
+
+	secrets, err := repo.ListByOrg(context.Background(), orgID)
+	if err != nil {
+		t.Fatalf("ListByOrg: %v", err)
+	}
+	if len(secrets) != 1 {
+		t.Fatalf("expected 1 secret, got %d", len(secrets))
+	}
+	if secrets[0].Name != "ORG_LIST_SECRET" {
+		t.Fatalf("unexpected secret name: %q", secrets[0].Name)
+	}
+	if secrets[0].Visibility != "selected" {
+		t.Fatalf("expected visibility selected, got %q", secrets[0].Visibility)
+	}
+}
+
+func TestActionSecretRepository_GetSelectedRepositories(t *testing.T) {
+	db := newActionSecretTestDB(t)
+	enc := newTestActionSecretEncryptor()
+	repo := repository.NewActionSecretRepository(db, enc)
+
+	orgID := createTestOrganization(t, db, "selected-get-org")
+	userID := createTestUser(t, db, "selected-get-user")
+	repoID := createTestRepositoryRecord(t, db, orgID, userID, "demo")
+	otherRepoID := createTestRepositoryRecord(t, db, orgID, userID, "other")
+
+	secretID := insertOrgActionSecret(t, db, enc, orgID, "SELECTED_GET", "selected", []byte("selected-value"))
+	if err := repo.SetSelectedRepositories(context.Background(), orgID, secretID, []uuid.UUID{repoID, otherRepoID}); err != nil {
+		t.Fatalf("SetSelectedRepositories: %v", err)
+	}
+
+	got, err := repo.GetSelectedRepositories(context.Background(), orgID, secretID)
+	if err != nil {
+		t.Fatalf("GetSelectedRepositories: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 selected repositories, got %d", len(got))
+	}
+}
+
+func TestActionSecretRepository_SetSelectedRepositories_RejectsOtherOrg(t *testing.T) {
+	db := newActionSecretTestDB(t)
+	enc := newTestActionSecretEncryptor()
+	repo := repository.NewActionSecretRepository(db, enc)
+
+	orgID := createTestOrganization(t, db, "owner-org")
+	otherOrgID := createTestOrganization(t, db, "attacker-org")
+	userID := createTestUser(t, db, "owner-user")
+	repoID := createTestRepositoryRecord(t, db, orgID, userID, "demo")
+
+	secretID := insertOrgActionSecret(t, db, enc, orgID, "PROTECTED", "selected", []byte("protected-value"))
+
+	err := repo.SetSelectedRepositories(context.Background(), otherOrgID, secretID, []uuid.UUID{repoID})
+	if !errors.Is(err, apperror.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-org write, got %v", err)
+	}
+
+	_, err = repo.GetSelectedRepositories(context.Background(), otherOrgID, secretID)
+	if !errors.Is(err, apperror.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-org read, got %v", err)
+	}
+}
+
 func TestActionSecretRepository_ListForWorkflowIncludesOrgAll(t *testing.T) {
 	db := newActionSecretTestDB(t)
 	enc := newTestActionSecretEncryptor()
@@ -214,8 +319,10 @@ func TestActionSecretRepository_ListForWorkflowIncludesOrgAll(t *testing.T) {
 	}
 
 	names := make(map[string]string, len(secrets))
+	orderedNames := make([]string, 0, len(secrets))
 	for _, secret := range secrets {
 		names[secret.Name] = secret.EncryptedValue
+		orderedNames = append(orderedNames, secret.Name)
 	}
 	if _, ok := names["REPO_SECRET"]; !ok {
 		t.Fatal("expected repo secret in workflow list")
@@ -225,6 +332,9 @@ func TestActionSecretRepository_ListForWorkflowIncludesOrgAll(t *testing.T) {
 	}
 	if names["REPO_SECRET"] != string(innerRepo) {
 		t.Fatalf("expected decrypted repo value, got %q", names["REPO_SECRET"])
+	}
+	if len(orderedNames) != 2 || orderedNames[0] != "ORG_SECRET" || orderedNames[1] != "REPO_SECRET" {
+		t.Fatalf("expected deterministic name ordering, got %v", orderedNames)
 	}
 }
 
@@ -241,7 +351,7 @@ func TestActionSecretRepository_ListForWorkflowExcludesSelectedWhenNotAllowed(t 
 	insertOrgActionSecret(t, db, enc, orgID, "SELECTED_SECRET", "selected", []byte("selected-aes-value"))
 
 	secretID := insertOrgActionSecret(t, db, enc, orgID, "ALLOWED_SELECTED", "selected", []byte("allowed-aes-value"))
-	if err := repo.SetSelectedRepositories(context.Background(), secretID, []uuid.UUID{otherRepoID}); err != nil {
+	if err := repo.SetSelectedRepositories(context.Background(), orgID, secretID, []uuid.UUID{otherRepoID}); err != nil {
 		t.Fatalf("SetSelectedRepositories: %v", err)
 	}
 
