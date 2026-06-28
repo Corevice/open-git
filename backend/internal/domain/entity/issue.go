@@ -2,6 +2,7 @@ package entity
 
 import (
 	"errors"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -15,7 +16,11 @@ type Issue struct {
 	Title          string
 	Body           string
 	State          string
+	StateReason    *string
 	AuthorID       uuid.UUID
+	MilestoneID    *uuid.UUID
+	Labels         []Label
+	ClosedAt       *time.Time
 }
 
 func (i *Issue) ValidateTitle() error {

@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 	"github.com/open-git/backend/internal/domain/entity"
+	domainrepo "github.com/open-git/backend/internal/domain/repository"
 )
 
 const issueNextNumberMaxRetries = 5
@@ -76,40 +77,94 @@ func (r *sqlxIssueRepository) GetByNumber(ctx context.Context, repoID uuid.UUID,
 	return &issue, nil
 }
 
-func (r *sqlxIssueRepository) ListByRepo(ctx context.Context, repoID uuid.UUID, state, labels string, page, perPage int) ([]*entity.Issue, error) {
+func (r *sqlxIssueRepository) GetByID(ctx context.Context, id uuid.UUID) (*entity.Issue, error) {
+	const query = `
+		SELECT id, organization_id, repository_id, number, title, body, state, author_id
+		FROM issues
+		WHERE id = $1
+	`
+
+	row := r.DB.QueryRowxContext(ctx, query, id)
+
+	var issue entity.Issue
+	err := row.Scan(
+		&issue.ID,
+		&issue.OrganizationID,
+		&issue.RepositoryID,
+		&issue.Number,
+		&issue.Title,
+		&issue.Body,
+		&issue.State,
+		&issue.AuthorID,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &issue, nil
+}
+
+func (r *sqlxIssueRepository) ListByRepo(ctx context.Context, filter domainrepo.ListIssuesFilter) ([]*entity.Issue, int, error) {
+	page := filter.Page
 	if page < 1 {
 		page = 1
 	}
+	perPage := filter.PerPage
 	if perPage < 1 {
 		perPage = 30
 	}
 	offset := (page - 1) * perPage
 
-	query := `
+	countQuery := `
+		SELECT COUNT(*)
+		FROM issues
+		WHERE repository_id = $1
+	`
+	countArgs := []any{filter.RepositoryID}
+	countIdx := 2
+
+	listQuery := `
 		SELECT id, organization_id, repository_id, number, title, body, state, author_id
 		FROM issues
 		WHERE repository_id = $1
 	`
-	args := []any{repoID}
-	idx := 2
+	listArgs := []any{filter.RepositoryID}
+	listIdx := 2
 
-	if state != "" {
-		query += " AND state = $" + itoa(idx)
-		args = append(args, state)
-		idx++
+	if filter.State != "" {
+		countQuery += " AND state = $" + itoa(countIdx)
+		countArgs = append(countArgs, filter.State)
+		countIdx++
+
+		listQuery += " AND state = $" + itoa(listIdx)
+		listArgs = append(listArgs, filter.State)
+		listIdx++
 	}
-	if labels != "" {
-		query += " AND id IN (SELECT issue_id FROM issue_labels il JOIN labels l ON il.label_id = l.id WHERE l.name = $" + itoa(idx) + ")"
-		args = append(args, labels)
-		idx++
+	if len(filter.Labels) > 0 {
+		labelClause := " AND id IN (SELECT issue_id FROM issue_labels il JOIN labels l ON il.label_id = l.id WHERE l.name = $" + itoa(countIdx) + ")"
+		countQuery += labelClause
+		countArgs = append(countArgs, filter.Labels[0])
+		countIdx++
+
+		labelClause = " AND id IN (SELECT issue_id FROM issue_labels il JOIN labels l ON il.label_id = l.id WHERE l.name = $" + itoa(listIdx) + ")"
+		listQuery += labelClause
+		listArgs = append(listArgs, filter.Labels[0])
+		listIdx++
 	}
 
-	query += " ORDER BY number DESC LIMIT $" + itoa(idx) + " OFFSET $" + itoa(idx+1)
-	args = append(args, perPage, offset)
+	var total int
+	if err := r.DB.QueryRowxContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 
-	rows, err := r.DB.QueryxContext(ctx, query, args...)
+	listQuery += " ORDER BY number DESC LIMIT $" + itoa(listIdx) + " OFFSET $" + itoa(listIdx+1)
+	listArgs = append(listArgs, perPage, offset)
+
+	rows, err := r.DB.QueryxContext(ctx, listQuery, listArgs...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -126,14 +181,62 @@ func (r *sqlxIssueRepository) ListByRepo(ctx context.Context, repoID uuid.UUID, 
 			&issue.State,
 			&issue.AuthorID,
 		); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		issues = append(issues, &issue)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return issues, nil
+	return issues, total, nil
+}
+
+func (r *sqlxIssueRepository) Update(ctx context.Context, issue *entity.Issue) error {
+	const query = `
+		UPDATE issues
+		SET title = :title, body = :body, state = :state, author_id = :author_id
+		WHERE id = :id
+	`
+
+	_, err := r.DB.NamedExecContext(ctx, query, map[string]any{
+		"id":        issue.ID,
+		"title":     issue.Title,
+		"body":      issue.Body,
+		"state":     issue.State,
+		"author_id": issue.AuthorID,
+	})
+	return err
+}
+
+func (r *sqlxIssueRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	_, err := r.DB.ExecContext(ctx, `UPDATE issues SET state = 'deleted' WHERE id = $1`, id)
+	return err
+}
+
+func (r *sqlxIssueRepository) Count(ctx context.Context, filter domainrepo.ListIssuesFilter) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM issues
+		WHERE repository_id = $1
+	`
+	args := []any{filter.RepositoryID}
+	idx := 2
+
+	if filter.State != "" {
+		query += " AND state = $" + itoa(idx)
+		args = append(args, filter.State)
+		idx++
+	}
+	if len(filter.Labels) > 0 {
+		query += " AND id IN (SELECT issue_id FROM issue_labels il JOIN labels l ON il.label_id = l.id WHERE l.name = $" + itoa(idx) + ")"
+		args = append(args, filter.Labels[0])
+	}
+
+	var total int
+	if err := r.DB.QueryRowxContext(ctx, query, args...).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
 }
 
 // NextNumber allocates the next sequential issue number for the given repository.

@@ -22,6 +22,10 @@ func (m *mockCommentRepo) Create(_ context.Context, comment *entity.Comment) err
 	return nil
 }
 
+func (m *mockCommentRepo) ListByIssue(_ context.Context, _ uuid.UUID) ([]*entity.Comment, error) {
+	return m.comments, nil
+}
+
 type commentIssueRepo struct {
 	issue *entity.Issue
 }
@@ -34,8 +38,27 @@ func (m *commentIssueRepo) GetByNumber(_ context.Context, _ uuid.UUID, _ int) (*
 	return m.issue, nil
 }
 
+func (m *commentIssueRepo) GetByID(_ context.Context, id uuid.UUID) (*entity.Issue, error) {
+	if m.issue != nil && m.issue.ID == id {
+		return m.issue, nil
+	}
+	return nil, nil
+}
+
 func (m *commentIssueRepo) ListByRepo(_ context.Context, _ repository.ListIssuesFilter) ([]*entity.Issue, int, error) {
 	return nil, 0, nil
+}
+
+func (m *commentIssueRepo) Update(_ context.Context, _ *entity.Issue) error {
+	return nil
+}
+
+func (m *commentIssueRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *commentIssueRepo) Count(_ context.Context, _ repository.ListIssuesFilter) (int, error) {
+	return 0, nil
 }
 
 func (m *commentIssueRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) {

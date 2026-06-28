@@ -36,8 +36,35 @@ func (m *mockIssueRepo) GetByNumber(_ context.Context, _ uuid.UUID, number int) 
 	return nil, errors.New("issue not found")
 }
 
+func (m *mockIssueRepo) GetByID(_ context.Context, id uuid.UUID) (*entity.Issue, error) {
+	for _, issue := range m.issues {
+		if issue.ID == id {
+			return issue, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *mockIssueRepo) ListByRepo(_ context.Context, _ repository.ListIssuesFilter) ([]*entity.Issue, int, error) {
 	return m.issues, len(m.issues), nil
+}
+
+func (m *mockIssueRepo) Update(_ context.Context, issue *entity.Issue) error {
+	for i, existing := range m.issues {
+		if existing.ID == issue.ID {
+			m.issues[i] = issue
+			return nil
+		}
+	}
+	return errors.New("issue not found")
+}
+
+func (m *mockIssueRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *mockIssueRepo) Count(_ context.Context, _ repository.ListIssuesFilter) (int, error) {
+	return len(m.issues), nil
 }
 
 func (m *mockIssueRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) {

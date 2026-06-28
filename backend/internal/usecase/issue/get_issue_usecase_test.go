@@ -24,16 +24,31 @@ func (m *getIssueRepo) GetByNumber(_ context.Context, _ uuid.UUID, _ int) (*enti
 	return m.issue, nil
 }
 
+func (m *getIssueRepo) GetByID(_ context.Context, id uuid.UUID) (*entity.Issue, error) {
+	if m.issue != nil && m.issue.ID == id {
+		return m.issue, nil
+	}
+	return nil, nil
+}
+
 func (m *getIssueRepo) ListByRepo(_ context.Context, _ repository.ListIssuesFilter) ([]*entity.Issue, int, error) {
 	return nil, 0, nil
 }
 
-func (m *getIssueRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) {
+func (m *getIssueRepo) Update(_ context.Context, _ *entity.Issue) error {
+	return nil
+}
+
+func (m *getIssueRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *getIssueRepo) Count(_ context.Context, _ repository.ListIssuesFilter) (int, error) {
 	return 0, nil
 }
 
-func (m *getIssueRepo) Update(_ context.Context, _ *entity.Issue) error {
-	return nil
+func (m *getIssueRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) {
+	return 0, nil
 }
 
 func TestGetIssueNotFoundWhenNil(t *testing.T) {

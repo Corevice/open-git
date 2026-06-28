@@ -26,17 +26,32 @@ func (m *updateIssueRepo) GetByNumber(_ context.Context, _ uuid.UUID, _ int) (*e
 	return m.issue, nil
 }
 
-func (m *updateIssueRepo) ListByRepo(_ context.Context, _ repository.ListIssuesFilter) ([]*entity.Issue, int, error) {
-	return nil, 0, nil
+func (m *updateIssueRepo) GetByID(_ context.Context, id uuid.UUID) (*entity.Issue, error) {
+	if m.issue != nil && m.issue.ID == id {
+		return m.issue, nil
+	}
+	return nil, nil
 }
 
-func (m *updateIssueRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) {
-	return 0, nil
+func (m *updateIssueRepo) ListByRepo(_ context.Context, _ repository.ListIssuesFilter) ([]*entity.Issue, int, error) {
+	return nil, 0, nil
 }
 
 func (m *updateIssueRepo) Update(_ context.Context, issue *entity.Issue) error {
 	m.issue = issue
 	return nil
+}
+
+func (m *updateIssueRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *updateIssueRepo) Count(_ context.Context, _ repository.ListIssuesFilter) (int, error) {
+	return 0, nil
+}
+
+func (m *updateIssueRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) {
+	return 0, nil
 }
 
 type updateLabelRepo struct {
