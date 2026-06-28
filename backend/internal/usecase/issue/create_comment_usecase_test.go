@@ -54,6 +54,14 @@ func (commentAuditLogRepo) InsertAuditLog(
 	return nil
 }
 
+func (commentAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (commentAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 func TestCommentOnDeletedIssue(t *testing.T) {
 	repoID := uuid.New()
 	issue := &entity.Issue{
