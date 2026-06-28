@@ -63,7 +63,20 @@ var (
 	buildTime = "unknown"
 )
 
+func validateRequiredEnv(vars []string) error {
+	for _, v := range vars {
+		if os.Getenv(v) == "" {
+			return fmt.Errorf("missing required environment variable: %s", v)
+		}
+	}
+	return nil
+}
+
 func main() {
+	if err := validateRequiredEnv([]string{"JWT_SECRET", "DB_DSN"}); err != nil {
+		log.Fatalf("%v", err)
+	}
+
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("invalid config: %v", err)
