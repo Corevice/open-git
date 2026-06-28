@@ -105,3 +105,19 @@ export type OAuthAuthorizationInfo = {
   granted_scopes: string[];
   updated_at: string;
 };
+
+export interface ActionCompatibilityResult {
+  action: string;
+  version: string;
+  status: "pass" | "partial" | "fail" | "untested" | "error";
+  note: string | null;
+  last_verified_at: string | null;
+}
+
+export interface ActionVerification {
+  id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  started_at: string | null;
+  finished_at: string | null;
+  results: ActionCompatibilityResult[];
+}
