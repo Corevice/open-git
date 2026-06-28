@@ -32,11 +32,11 @@ function formatLastSeen(lastSeenAt: string | null): string {
 }
 
 export function RegistrationTokenModal({
-  org,
+  owner,
   open,
   onClose,
 }: {
-  org: string;
+  owner: string;
   open: boolean;
   onClose: () => void;
 }) {
@@ -51,7 +51,7 @@ export function RegistrationTokenModal({
     setError(null);
     setCopied(false);
     try {
-      const response = await createRegistrationToken(org);
+      const response = await createRegistrationToken(owner);
       setToken(response.token);
       setExpiresAt(response.expires_at);
     } catch (err) {
@@ -135,10 +135,10 @@ export function RegistrationTokenModal({
 }
 
 export function RunnersPageClient({
-  org,
+  owner,
   initialRunners,
 }: {
-  org: string;
+  owner: string;
   initialRunners: Runner[];
 }) {
   const router = useRouter();
@@ -155,7 +155,7 @@ export function RunnersPageClient({
     setDeletingId(runnerId);
     setDeleteError(null);
     try {
-      await deleteRunner(org, runnerId);
+      await deleteRunner(owner, runnerId);
       setRunners((current) => current.filter((runner) => runner.id !== runnerId));
       router.refresh();
     } catch (err) {
@@ -235,7 +235,7 @@ export function RunnersPageClient({
       )}
 
       <RegistrationTokenModal
-        org={org}
+        owner={owner}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
       />

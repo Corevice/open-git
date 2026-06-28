@@ -5,15 +5,15 @@ import { RunnersPageClient } from "./RegistrationTokenModal";
 export default async function RunnersPage({
   params,
 }: {
-  params: Promise<{ org: string }>;
+  params: Promise<{ owner: string }>;
 }) {
-  const { org } = await params;
+  const { owner } = await params;
 
   let runners: Runner[] = [];
   let error: string | null = null;
 
   try {
-    const data = await listRunners(org);
+    const data = await listRunners(owner);
     runners = data.runners;
   } catch (err) {
     error = err instanceof Error ? err.message : "Failed to load runners.";
@@ -28,7 +28,7 @@ export default async function RunnersPage({
           <p className="mb-4 text-sm text-[#cf222e]">{error}</p>
         ) : null}
 
-        <RunnersPageClient org={org} initialRunners={runners} />
+        <RunnersPageClient owner={owner} initialRunners={runners} />
       </div>
     </div>
   );
