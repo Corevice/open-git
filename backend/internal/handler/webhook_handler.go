@@ -34,6 +34,24 @@ func NewWebhookHandler(
 	getWebhookUC *webhookusecase.GetWebhookUsecase,
 	updateWebhookUC *webhookusecase.UpdateWebhookUsecase,
 	deleteWebhookUC *webhookusecase.DeleteWebhookUsecase,
+	resolveRepo func(c echo.Context, owner, repo string) (*entity.Repository, error),
+) *WebhookHandler {
+	return &WebhookHandler{
+		createWebhookUC: createWebhookUC,
+		listWebhooksUC:  listWebhooksUC,
+		getWebhookUC:    getWebhookUC,
+		updateWebhookUC: updateWebhookUC,
+		deleteWebhookUC: deleteWebhookUC,
+		resolveRepo:     resolveRepo,
+	}
+}
+
+func NewWebhookHandlerWithDeliveries(
+	createWebhookUC *webhookusecase.CreateWebhookUsecase,
+	listWebhooksUC *webhookusecase.ListWebhooksUsecase,
+	getWebhookUC *webhookusecase.GetWebhookUsecase,
+	updateWebhookUC *webhookusecase.UpdateWebhookUsecase,
+	deleteWebhookUC *webhookusecase.DeleteWebhookUsecase,
 	listDeliveriesUC *webhookusecase.ListDeliveriesUsecase,
 	getDeliveryUC *webhookusecase.GetDeliveryUsecase,
 	redeliverUC *webhookusecase.RedeliverWebhookUsecase,
@@ -63,9 +81,11 @@ func (h *WebhookHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc)
 	g.GET("/repos/:owner/:repo/hooks/:hook_id", h.GetHook, auth, writeScope)
 	g.PATCH("/repos/:owner/:repo/hooks/:hook_id", h.UpdateHook, auth, adminScope)
 	g.DELETE("/repos/:owner/:repo/hooks/:hook_id", h.DeleteHook, auth, adminScope)
-	g.GET("/repos/:owner/:repo/hooks/:hook_id/deliveries", h.ListDeliveries, auth, writeScope)
-	g.GET("/repos/:owner/:repo/hooks/:hook_id/deliveries/:delivery_id", h.GetDelivery, auth, writeScope)
-	g.POST("/repos/:owner/:repo/hooks/:hook_id/deliveries/:delivery_id/attempts", h.RedeliverDelivery, auth, adminScope)
+	if h.listDeliveriesUC != nil {
+		g.GET("/repos/:owner/:repo/hooks/:hook_id/deliveries", h.ListDeliveries, auth, writeScope)
+		g.GET("/repos/:owner/:repo/hooks/:hook_id/deliveries/:delivery_id", h.GetDelivery, auth, writeScope)
+		g.POST("/repos/:owner/:repo/hooks/:hook_id/deliveries/:delivery_id/attempts", h.RedeliverDelivery, auth, adminScope)
+	}
 	g.POST("/repos/:owner/:repo/hooks/:hook_id/pings", h.PingHook, auth, adminScope)
 	g.POST("/repos/:owner/:repo/hooks/:hook_id/tests", h.TestHook, auth, adminScope)
 }
@@ -417,7 +437,17 @@ func (h *WebhookHandler) PingHook(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid hook_id")
 	}
 
-	if _, err := h.pingWebhookUC.Execute(c.Request().Context(), hookID, repo.OrganizationID); err != nil {
+	if h.pingWebhookUC != nil {
+		if _, err := h.pingWebhookUC.Execute(c.Request().Context(), hookID, repo.OrganizationID); err != nil {
+			if errors.Is(err, apperror.ErrNotFound) {
+				return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+			}
+			return err
+		}
+		return c.NoContent(http.StatusNoContent)
+	}
+
+	if _, err := h.getWebhookUC.Execute(c.Request().Context(), repo.OrganizationID, hookID); err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
 		}
