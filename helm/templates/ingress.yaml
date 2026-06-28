@@ -1,14 +1,23 @@
 {{- if and .Values.ingress.enabled (not .Values.ingress.traefikCRD) }}
+{{- $tls := .Values.ingress.tls }}
+{{- $tlsEnabled := false }}
+{{- $tlsCertManager := false }}
+{{- if kindIs "map" $tls }}
+{{- $tlsEnabled = $tls.enabled }}
+{{- $tlsCertManager = $tls.certManager }}
+{{- else if kindIs "bool" $tls }}
+{{- $tlsEnabled = $tls }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "open-git.fullname" . }}
   labels:
     {{- include "open-git.labels" . | nindent 4 }}
-  {{- if or .Values.ingress.tls.certManager .Values.ingress.annotations }}
+  {{- if or $tlsCertManager .Values.ingress.annotations }}
   annotations:
-    {{- if .Values.ingress.tls.certManager }}
-    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | default "letsencrypt-prod" | quote }}
+    {{- if $tlsCertManager }}
+    cert-manager.io/cluster-issuer: {{ (index $tls "clusterIssuer" | default "letsencrypt-prod") | quote }}
     {{- end }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
@@ -18,7 +27,7 @@ spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
   {{- end }}
-  {{- if .Values.ingress.tls.enabled }}
+  {{- if $tlsEnabled }}
   tls:
     - hosts:
         - {{ .Values.ingress.host | quote }}
