@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/hibiken/asynq"
 
@@ -18,6 +19,7 @@ const (
 	conclusionSuccess   = "success"
 	conclusionFailure   = "failure"
 	conclusionCancelled = "cancelled"
+	conclusionTimedOut  = "timed_out"
 )
 
 type schedulableJob struct {
@@ -214,7 +216,7 @@ func computeRunConclusion(jobs []*schedulableJob) (status, conclusion string) {
 	hasCancelled := false
 
 	for _, job := range jobs {
-		if job.Conclusion == conclusionFailure || job.Status == entity.WorkflowJobStatusFailed {
+		if job.Conclusion == conclusionFailure || job.Status == entity.WorkflowJobStatusFailed || job.Conclusion == conclusionTimedOut {
 			hasFailure = true
 		}
 		if job.Conclusion == conclusionCancelled || job.Status == "cancelled" {
@@ -231,6 +233,17 @@ func computeRunConclusion(jobs []*schedulableJob) (status, conclusion string) {
 	return runStatusCompleted, conclusionSuccess
 }
 
-func workflowJobNeeds(_ *entity.WorkflowJob) []string {
-	return nil
+func workflowJobNeeds(job *entity.WorkflowJob) []string {
+	if job == nil {
+		return nil
+	}
+	field := reflect.ValueOf(job).Elem().FieldByName("Needs")
+	if !field.IsValid() || field.Kind() != reflect.Slice {
+		return nil
+	}
+	out := make([]string, field.Len())
+	for i := 0; i < field.Len(); i++ {
+		out[i] = field.Index(i).String()
+	}
+	return out
 }

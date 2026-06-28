@@ -191,6 +191,15 @@ func TestComputeRunConclusion_CancelledWhenNoFailure(t *testing.T) {
 	}
 }
 
+func TestComputeRunConclusion_TimedOutIsFailure(t *testing.T) {
+	_, conclusion := computeRunConclusion([]*schedulableJob{
+		{Conclusion: conclusionTimedOut, Status: entity.WorkflowJobStatusCompleted},
+	})
+	if conclusion != conclusionFailure {
+		t.Fatalf("expected failure conclusion for timed out job, got %q", conclusion)
+	}
+}
+
 func newScheduleTask(payload WorkflowSchedulePayload) (*asynq.Task, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {

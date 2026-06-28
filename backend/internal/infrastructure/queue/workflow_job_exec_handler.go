@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"sync"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -104,6 +106,9 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 	if job.RepositoryID == "" {
 		return fmt.Errorf("job repository id missing: %w", asynq.SkipRetry)
 	}
+	if job.WorkflowRunID != payload.RunID {
+		return fmt.Errorf("job run mismatch: %w", asynq.SkipRetry)
+	}
 
 	steps, err := h.stepRepo.ListByJobID(ctx, payload.OrgID, payload.JobID)
 	if err != nil {
@@ -134,8 +139,8 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 
 	status, conclusion := entity.WorkflowJobStatusCompleted, conclusionSuccess
 	if runErr != nil {
-		if errors.Is(execCtx.Err(), context.DeadlineExceeded) {
-			status = entity.WorkflowJobStatusFailed
+		if errors.Is(runErr, context.DeadlineExceeded) || errors.Is(execCtx.Err(), context.DeadlineExceeded) {
+			status = entity.WorkflowJobStatusCompleted
 			conclusion = conclusionTimedOut
 		} else {
 			status = entity.WorkflowJobStatusFailed
@@ -163,7 +168,10 @@ func (h *WorkflowJobExecHandler) buildLogCallback(
 	payload WorkflowJobExecPayload,
 	job *entity.WorkflowJob,
 ) (func(offset int64, chunk string), func() error) {
-	var appendErr error
+	var (
+		appendErr error
+		appendMu  sync.Mutex
+	)
 	return func(offset int64, chunk string) {
 		if h.logRepo == nil {
 			return
@@ -178,14 +186,25 @@ func (h *WorkflowJobExecHandler) buildLogCallback(
 			Text:           chunk,
 			CreatedAt:      time.Now().UTC(),
 		}
+		appendMu.Lock()
+		defer appendMu.Unlock()
 		if err := h.logRepo.AppendLines(ctx, []*entity.JobLogLine{line}); err != nil && appendErr == nil {
 			appendErr = err
 		}
 	}, func() error {
+		appendMu.Lock()
+		defer appendMu.Unlock()
 		return appendErr
 	}
 }
 
-func jobTimeoutMinutes(_ *entity.WorkflowJob) int {
+func jobTimeoutMinutes(job *entity.WorkflowJob) int {
+	if job == nil {
+		return defaultJobTimeoutMinutes
+	}
+	field := reflect.ValueOf(job).Elem().FieldByName("TimeoutMinutes")
+	if field.IsValid() && field.Kind() == reflect.Int && field.Int() > 0 {
+		return int(field.Int())
+	}
 	return defaultJobTimeoutMinutes
 }

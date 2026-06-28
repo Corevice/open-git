@@ -46,3 +46,19 @@ func TestMaskSecrets_SecretAppearsMultipleTimes(t *testing.T) {
 		t.Fatalf("MaskSecrets() = %q, want %q", got, want)
 	}
 }
+
+func TestMaskSecrets_MaskReplacementNotReplaced(t *testing.T) {
+	input := "already *** masked"
+	got := runner.MaskSecrets(input, []string{"***"})
+	if got != input {
+		t.Fatalf("MaskSecrets() = %q, want %q", got, input)
+	}
+}
+
+func TestMaskSecrets_MixedCaseSecret(t *testing.T) {
+	got := runner.MaskSecrets("token=AbC123 done", []string{"AbC123"})
+	want := "token=*** done"
+	if got != want {
+		t.Fatalf("MaskSecrets() = %q, want %q", got, want)
+	}
+}

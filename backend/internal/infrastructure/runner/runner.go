@@ -7,11 +7,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/open-git/backend/internal/domain/entity"
 )
+
+var validActJobName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 type Step struct {
 	Number int
@@ -66,13 +69,19 @@ func (r *DockerActRunner) ExecuteJob(
 	secrets map[string]string,
 	logFn func(offset int64, chunk string),
 ) error {
+	if err := validateActJobName(job.Name); err != nil {
+		return err
+	}
+
 	workflowYAML := buildWorkflowYAML(job, steps)
 
 	secretFile, err := writeSecretsFile(secrets)
 	if err != nil {
 		return fmt.Errorf("write secrets file: %w", err)
 	}
-	defer os.Remove(secretFile)
+	defer func() {
+		_ = os.Remove(secretFile)
+	}()
 
 	args := []string{"--workflow", "/dev/stdin", "--job", job.Name, "--secret-file", secretFile}
 
@@ -91,6 +100,13 @@ func (r *DockerActRunner) ExecuteJob(
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start act: %w", err)
 	}
+
+	waitDone := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = cmd.Wait()
+		close(waitDone)
+	}()
 
 	secretValues := make([]string, 0, len(secrets))
 	for _, value := range secrets {
@@ -126,15 +142,25 @@ func (r *DockerActRunner) ExecuteJob(
 
 	if stdoutErr != nil {
 		_ = cmd.Process.Kill()
+		<-waitDone
 		return fmt.Errorf("read act stdout: %w", stdoutErr)
 	}
 	if stderrErr != nil {
 		_ = cmd.Process.Kill()
+		<-waitDone
 		return fmt.Errorf("read act stderr: %w", stderrErr)
 	}
 
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("act execution failed: %w", err)
+	<-waitDone
+	if waitErr != nil {
+		return fmt.Errorf("act execution failed: %w", waitErr)
+	}
+	return nil
+}
+
+func validateActJobName(name string) error {
+	if !validActJobName.MatchString(name) {
+		return fmt.Errorf("invalid act job name %q", name)
 	}
 	return nil
 }
@@ -145,16 +171,27 @@ func writeSecretsFile(secrets map[string]string) (string, error) {
 		return "", err
 	}
 	path := f.Name()
+	cleanup := func() {
+		f.Close()
+		os.Remove(path)
+	}
+
 	for key, value := range secrets {
+		if err := validateSecretKey(key); err != nil {
+			cleanup()
+			return "", fmt.Errorf("secret key %q: %w", key, err)
+		}
+		if err := validateSecretValue(value); err != nil {
+			cleanup()
+			return "", fmt.Errorf("secret value for %q: %w", key, err)
+		}
 		if _, err := fmt.Fprintf(f, "%s=%s\n", key, value); err != nil {
-			f.Close()
-			os.Remove(path)
+			cleanup()
 			return "", err
 		}
 	}
 	if err := f.Chmod(0o600); err != nil {
-		f.Close()
-		os.Remove(path)
+		cleanup()
 		return "", err
 	}
 	if err := f.Close(); err != nil {
@@ -164,6 +201,20 @@ func writeSecretsFile(secrets map[string]string) (string, error) {
 	return path, nil
 }
 
+func validateSecretKey(key string) error {
+	if key == "" || strings.ContainsAny(key, "\n\r=") {
+		return fmt.Errorf("invalid secret key")
+	}
+	return nil
+}
+
+func validateSecretValue(value string) error {
+	if strings.ContainsAny(value, "\n\r") {
+		return fmt.Errorf("invalid secret value")
+	}
+	return nil
+}
+
 func buildWorkflowYAML(job *entity.WorkflowJob, steps []*Step) string {
 	var b strings.Builder
 	b.WriteString("on: workflow_dispatch\njobs:\n  ")
@@ -171,9 +222,9 @@ func buildWorkflowYAML(job *entity.WorkflowJob, steps []*Step) string {
 	b.WriteString(":\n    runs-on: ubuntu-latest\n    steps:\n")
 	for _, step := range steps {
 		b.WriteString("      - name: ")
-		b.WriteString(strconvQuote(step.Name))
+		b.WriteString(yamlDoubleQuote(step.Name))
 		b.WriteString("\n        run: echo ")
-		b.WriteString(strconvQuote(step.Name))
+		b.WriteString(yamlDoubleQuote(step.Name))
 		b.WriteString("\n")
 	}
 	return b.String()
@@ -182,14 +233,29 @@ func buildWorkflowYAML(job *entity.WorkflowJob, steps []*Step) string {
 func yamlQuoteKey(s string) string {
 	if s == "" || strings.ContainsAny(s, ":{}[]&*#?|-<>!=@\\\"',") ||
 		strings.HasPrefix(s, " ") || strings.HasSuffix(s, " ") {
-		return fmt.Sprintf("%q", s)
+		return yamlDoubleQuote(s)
 	}
 	return s
 }
 
-func strconvQuote(s string) string {
-	if strings.ContainsAny(s, ":'\"\n") {
-		return fmt.Sprintf("%q", s)
+func yamlDoubleQuote(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '"', '\\':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			b.WriteRune(r)
+		}
 	}
-	return s
+	b.WriteByte('"')
+	return b.String()
 }
