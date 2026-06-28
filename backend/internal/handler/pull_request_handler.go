@@ -62,6 +62,8 @@ type pullRequestResponse struct {
 	HeadRef  string    `json:"head_ref"`
 	BaseRef  string    `json:"base_ref"`
 	State    string    `json:"state"`
+	NodeID   string    `json:"node_id"`
+	HTMLURL  string    `json:"html_url"`
 	MergedAt *string   `json:"merged_at"`
 }
 
@@ -105,7 +107,7 @@ func (h *PullRequestHandler) ListPullRequests(c echo.Context) error {
 	}
 
 	setPaginationHeaders(c, page, perPage, total)
-	return c.JSON(http.StatusOK, toPullRequestResponses(pulls))
+	return c.JSON(http.StatusOK, toPullRequestResponses(pulls, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
 func (h *PullRequestHandler) CreatePullRequest(c echo.Context) error {
@@ -140,7 +142,7 @@ func (h *PullRequestHandler) CreatePullRequest(c echo.Context) error {
 		return err
 	}
 
-	return c.JSON(http.StatusCreated, toPullRequestResponse(pr))
+	return c.JSON(http.StatusCreated, toPullRequestResponse(pr, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
 func (h *PullRequestHandler) GetPullRequest(c echo.Context) error {
@@ -159,7 +161,7 @@ func (h *PullRequestHandler) GetPullRequest(c echo.Context) error {
 		return err
 	}
 
-	return c.JSON(http.StatusOK, toPullRequestResponse(pr))
+	return c.JSON(http.StatusOK, toPullRequestResponse(pr, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
 func (h *PullRequestHandler) MergePullRequest(c echo.Context) error {
@@ -210,7 +212,7 @@ func (h *PullRequestHandler) MergePullRequest(c echo.Context) error {
 	})
 }
 
-func toPullRequestResponse(pr *entity.PullRequest) pullRequestResponse {
+func toPullRequestResponse(pr *entity.PullRequest, owner, repoName, host string) pullRequestResponse {
 	resp := pullRequestResponse{
 		ID:      pr.ID,
 		Number:  pr.Number,
@@ -219,6 +221,8 @@ func toPullRequestResponse(pr *entity.PullRequest) pullRequestResponse {
 		HeadRef: pr.HeadRef,
 		BaseRef: pr.BaseRef,
 		State:   pr.State,
+		NodeID:  PRNodeID(pr.ID),
+		HTMLURL: "https://" + host + "/" + owner + "/" + repoName + "/pull/" + strconv.Itoa(pr.Number),
 	}
 	if pr.MergedAt != nil {
 		formatted := pr.MergedAt.UTC().Format("2006-01-02T15:04:05Z")
@@ -227,10 +231,10 @@ func toPullRequestResponse(pr *entity.PullRequest) pullRequestResponse {
 	return resp
 }
 
-func toPullRequestResponses(pulls []*entity.PullRequest) []pullRequestResponse {
+func toPullRequestResponses(pulls []*entity.PullRequest, owner, repoName, host string) []pullRequestResponse {
 	result := make([]pullRequestResponse, 0, len(pulls))
 	for _, pr := range pulls {
-		result = append(result, toPullRequestResponse(pr))
+		result = append(result, toPullRequestResponse(pr, owner, repoName, host))
 	}
 	return result
 }
