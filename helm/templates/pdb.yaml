@@ -1,0 +1,12 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "open-git.fullname" . }}-backend
+  labels:
+    {{- include "open-git.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "open-git.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: backend

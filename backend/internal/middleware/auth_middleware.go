@@ -27,6 +27,13 @@ type jwtClaims struct {
 	jwt.StandardClaims
 }
 
+type githubAuthError struct {
+	Message          string `json:"message"`
+	DocumentationURL string `json:"documentation_url"`
+}
+
+const githubDocsURL = "https://docs.github.com/rest"
+
 type patTokenLookup interface {
 	FindByTokenHash(ctx context.Context, tokenHash string) (*domain.AccessToken, error)
 }
@@ -36,7 +43,10 @@ func AuthMiddleware(tokens patTokenLookup) echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			raw, ok := bearerToken(c.Request().Header.Get("Authorization"))
 			if !ok {
-				return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "missing authorization token"})
+				return echo.NewHTTPError(http.StatusUnauthorized, githubAuthError{
+					Message:          "missing authorization token",
+					DocumentationURL: githubDocsURL,
+				})
 			}
 
 			if userID, scopes, ok := parseJWTAuth(raw); ok {
@@ -48,16 +58,28 @@ func AuthMiddleware(tokens patTokenLookup) echo.MiddlewareFunc {
 			tokenHash := hashToken(raw)
 			record, err := tokens.FindByTokenHash(c.Request().Context(), tokenHash)
 			if err != nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "invalid authorization token"})
+				return echo.NewHTTPError(http.StatusUnauthorized, githubAuthError{
+					Message:          "invalid authorization token",
+					DocumentationURL: githubDocsURL,
+				})
 			}
 			if record == nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "invalid authorization token"})
+				return echo.NewHTTPError(http.StatusUnauthorized, githubAuthError{
+					Message:          "invalid authorization token",
+					DocumentationURL: githubDocsURL,
+				})
 			}
 			if record.RevokedAt != nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "token has been revoked"})
+				return echo.NewHTTPError(http.StatusUnauthorized, githubAuthError{
+					Message:          "token has been revoked",
+					DocumentationURL: githubDocsURL,
+				})
 			}
 			if record.ExpiresAt != nil && !record.ExpiresAt.After(time.Now().UTC()) {
-				return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "token has expired"})
+				return echo.NewHTTPError(http.StatusUnauthorized, githubAuthError{
+					Message:          "token has expired",
+					DocumentationURL: githubDocsURL,
+				})
 			}
 
 			c.Set(userIDContextKey, record.UserID)

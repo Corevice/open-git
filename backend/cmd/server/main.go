@@ -572,8 +572,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	sshKeyHandler := handler.NewSSHKeyHandler(sshKeyRepo)
 
 	api := e.Group("")
-	e.POST("/register", authHandler.Register)
-	e.POST("/login", authHandler.Login)
+	e.POST("/register", authHandler.Register, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
+	e.POST("/login", authHandler.Login, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
 
 	tokens := api.Group("/user/tokens", authMiddleware)
 	tokens.GET("", tokenHandler.List)
