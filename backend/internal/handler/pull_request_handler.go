@@ -204,11 +204,6 @@ func (h *PullRequestHandler) CreatePullRequest(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
-	if err != nil {
-		return err
-	}
-
 	var req createPullRequestRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -218,6 +213,11 @@ func (h *PullRequestHandler) CreatePullRequest(c echo.Context) error {
 	}
 	if req.Head == req.Base {
 		return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", []GitHubFieldError{{Resource: "PullRequest", Field: "head", Code: "invalid"}})
+	}
+
+	actor, err := middleware.GetActor(c)
+	if err != nil {
+		return err
 	}
 
 	pr, err := h.createPRUC.Execute(c.Request().Context(), prusecase.CreatePRInput{

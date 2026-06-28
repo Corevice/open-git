@@ -97,17 +97,17 @@ func (h *IssueHandler) CreateIssue(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
-	if err != nil {
-		return err
-	}
-
 	var req createIssueRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 	if req.Title == "" {
 		return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", []GitHubFieldError{{Resource: "Issue", Field: "title", Code: "missing_field"}})
+	}
+
+	actor, err := middleware.GetActor(c)
+	if err != nil {
+		return err
 	}
 
 	issue, err := h.createIssueUC.Execute(c.Request().Context(), issueusecase.CreateIssueInput{
