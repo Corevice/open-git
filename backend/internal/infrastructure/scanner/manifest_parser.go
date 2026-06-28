@@ -18,9 +18,9 @@ const (
 var ErrUnknownManifest = errors.New("unknown manifest type")
 
 type Dependency struct {
-	Name       string
-	Version    string
-	Ecosystem  string
+	Name      string
+	Version   string
+	Ecosystem string
 }
 
 func ParseManifest(manifestType string, content []byte) ([]Dependency, error) {
