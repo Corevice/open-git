@@ -1,0 +1,154 @@
+services:
+  traefik-init:
+    image: busybox:latest
+    entrypoint: sh -c "[ -n \"$$DOMAIN\" ] || (echo 'ERROR: DOMAIN env var is required' >&2; exit 1); touch /letsencrypt/acme.json; chmod 600 /letsencrypt/acme.json"
+    volumes:
+      - open-git-letsencrypt:/letsencrypt
+
+  traefik:
+    image: traefik:v3
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.file.directory=/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.ssh.address=:22"
+      - "--certificatesresolvers.le.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.le.acme.tlschallenge=true"
+      - "--api.dashboard=false"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "22:22"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "open-git-letsencrypt:/letsencrypt"
+      - "./traefik/dynamic:/traefik/dynamic:ro"
+    networks:
+      - proxy
+    depends_on:
+      traefik-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      GRAFANA_BASE_URL: ${GRAFANA_BASE_URL:-http://localhost:3001}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - open-git-git-storage:/data/repositories
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app.rule=Host(`${DOMAIN}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.app.entrypoints=websecure"
+      - "traefik.http.routers.app.tls.certresolver=le"
+      - "traefik.http.services.app.loadbalancer.server.port=8080"
+      - "traefik.http.services.app.loadbalancer.healthcheck.path=/healthz"
+      - "traefik.http.services.app.loadbalancer.healthcheck.interval=30s"
+      - "traefik.http.routers.app.middlewares=sec-headers@file,ratelimit-auth@file"
+      - "traefik.tcp.routers.ssh.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.ssh.entrypoints=ssh"
+      - "traefik.tcp.services.ssh.loadbalancer.server.port=2222"
+    networks:
+      - proxy
+      - internal
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - NEXT_PUBLIC_API_URL=http://app:8080
+    depends_on:
+      - app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=le"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      - "traefik.http.routers.frontend.middlewares=sec-headers@file,compress@file"
+    networks:
+      - proxy
+      - internal
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-opengit}
+      - POSTGRES_USER=${POSTGRES_USER:-opengit}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-opengit}
+    volumes:
+      - open-git-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-opengit}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - open-git-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address :9001
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - open-git-minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - internal
+    restart: unless-stopped
+
+networks:
+  proxy:
+  internal:
+
+volumes:
+  open-git-letsencrypt:
+  open-git-postgres:
+  open-git-redis:
+  open-git-minio:
+  open-git-git-storage:

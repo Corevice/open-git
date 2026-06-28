@@ -1,0 +1,23 @@
+http:
+  middlewares:
+    sec-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "no-referrer-when-downgrade"
+        customResponseHeaders:
+          X-Powered-By: ""
+    ratelimit-auth:
+      rateLimit:
+        average: 10
+        burst: 20
+        period: 1m
+    compress:
+      compress:
+        excludedContentTypes:
+          - text/event-stream
