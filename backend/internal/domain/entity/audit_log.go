@@ -10,6 +10,7 @@ type AuditLog struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID
 	ActorID        uuid.UUID
+	ActorLogin     string
 	Action         string
 	TargetType     string
 	TargetID       string
