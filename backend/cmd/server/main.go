@@ -451,21 +451,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	wfRepo := infrarepo.NewWorkflowRunRepository(sqlxDB)
 	prAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
 	prTxManager := infrarepo.NewTransactionManager(sqlxDB)
-	createPRUC := prusecase.NewCreatePRUsecase(prRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo)
 	mergePRUC := prusecase.NewMergePRUsecase(prRepo, bpRepo, prReviewRepo, wfRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo)
 	createReviewUC := prusecase.NewCreateReviewUsecase(prRepo, prReviewRepo, prAuditRepo, membershipRepo)
 	listReviewsUC := prusecase.NewListReviewsUsecase(prRepo, prReviewRepo)
-	pullRequestHandler := handler.NewPullRequestHandler(
-		createPRUC,
-		mergePRUC,
-		createReviewUC,
-		listReviewsUC,
-		prRepo,
-		prReviewRepo,
-		prReviewCommentRepo,
-		gitSvc,
-		resolveRepo,
-	)
 
 	bpReadRepo := &branchProtectionReadRepo{db: sqlxDB}
 	bpWriteRepo := &branchProtectionWriteRepo{db: sqlxDB}
@@ -564,6 +552,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		mux := asynq.NewServeMux()
 		mcpWorker := worker.NewMCPVerificationWorker(mcpVerificationRepo, cfg.WebBaseURL)
 		mux.HandleFunc(queue.TypeMCPVerification, mcpWorker.HandleMCPVerification)
+		prMergeableWorker := queue.NewPRMergeableWorker(prRepo, repoRepo, gitSvc)
+		mux.HandleFunc(queue.TypePRMergeableCheck, prMergeableWorker.HandlePRMergeableCheck)
 		go func() {
 			middleware.Log().Info("asynq server starting")
 			if err := asynqServer.Run(mux); err != nil {
@@ -577,6 +567,23 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 			noopMCPEnqueuer{},
 		)
 	}
+
+	var prMergeableEnqueuer prusecase.PRMergeableEnqueuer = prusecase.NoopPRMergeableEnqueuer{}
+	if asynqClient != nil {
+		prMergeableEnqueuer = asynqPRMergeableEnqueuer{client: asynqClient}
+	}
+	createPRUC := prusecase.NewCreatePRUsecase(prRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo, prMergeableEnqueuer)
+	pullRequestHandler := handler.NewPullRequestHandler(
+		createPRUC,
+		mergePRUC,
+		createReviewUC,
+		listReviewsUC,
+		prRepo,
+		prReviewRepo,
+		prReviewCommentRepo,
+		gitSvc,
+		resolveRepo,
+	)
 
 	mcpVerificationHandler := handler.NewMCPVerificationHandler(
 		runVerificationUC,
@@ -592,6 +599,29 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		membershipRepo,
 		searchAuditLogsUC,
 		exportAuditLogsUC,
+	)
+
+	securityAdvisoryRepo := infrarepo.NewSecurityAdvisoryRepository(sqlxDB)
+	dependabotAlertRepo := infrarepo.NewDependabotAlertRepository(sqlxDB)
+	listAdvisoriesUC := securityUC.NewListAdvisoriesUsecase(securityAdvisoryRepo)
+	getAdvisoryUC := securityUC.NewGetAdvisoryUsecase(securityAdvisoryRepo)
+	updateAdvisoryStateUC := securityUC.NewUpdateAdvisoryStateUsecase(securityAdvisoryRepo)
+	listDependabotAlertsUC := securityUC.NewListDependabotAlertsUsecase(dependabotAlertRepo)
+	updateDependabotAlertUC := securityUC.NewUpdateDependabotAlertUsecase(dependabotAlertRepo)
+	securityAdvisoryHandler := handler.NewSecurityAdvisoryHandler(
+		getOrgUC,
+		membershipRepo,
+		listAdvisoriesUC,
+		getAdvisoryUC,
+		updateAdvisoryStateUC,
+		resolveRepo,
+	)
+	dependabotAlertHandler := handler.NewDependabotAlertHandler(
+		membershipRepo,
+		listDependabotAlertsUC,
+		updateDependabotAlertUC,
+		dependabotAlertRepo,
+		resolveRepo,
 	)
 
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
@@ -645,6 +675,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3.Group("", authMiddleware, middleware.RequireScope("admin:org")).PUT("/orgs/:org/memberships/:username", orgHandler.UpdateMembership)
 	orgHandler.RegisterRoutes(v3, authMiddleware)
 	orgAuditLogHandler.RegisterRoutes(v3, authMiddleware)
+	securityAdvisoryHandler.RegisterRoutes(v3, authMiddleware)
+	dependabotAlertHandler.RegisterRoutes(v3, authMiddleware)
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
 	collaboratorHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
@@ -738,6 +770,20 @@ type noopMCPEnqueuer struct{}
 
 func (noopMCPEnqueuer) EnqueueMCPVerification(context.Context, queue.MCPVerificationPayload) error {
 	return errors.New("redis not configured")
+}
+
+type asynqPRMergeableEnqueuer struct {
+	client *asynq.Client
+}
+
+func (e asynqPRMergeableEnqueuer) Enqueue(ctx context.Context, payload prusecase.PRMergeableEnqueuePayload) error {
+	_, err := queue.EnqueuePRMergeableCheck(ctx, e.client, queue.PRMergeableCheckPayload{
+		GitPath: payload.GitPath,
+		HeadRef: payload.HeadRef,
+		BaseRef: payload.BaseRef,
+		PRID:    payload.PRID,
+	})
+	return err
 }
 
 type artifactMinioStorage struct {
