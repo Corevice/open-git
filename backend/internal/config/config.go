@@ -26,7 +26,8 @@ type Config struct {
 	SSHHostKeyPath    string
 	APIBaseURL        string
 	WebBaseURL        string
-	DocsBaseURL       string
+	DocsBaseURL        string
+	WebhookSecretKey   string
 }
 
 func Load() Config {
@@ -64,6 +65,7 @@ func Load() Config {
 		APIBaseURL:        getenv("API_BASE_URL", "http://localhost:8080/api/v3"),
 		WebBaseURL:        getenv("WEB_BASE_URL", "http://localhost:8080"),
 		DocsBaseURL:       getenv("DOCS_BASE_URL", "https://docs.github.com/rest"),
+		WebhookSecretKey:  os.Getenv("WEBHOOK_SECRET_KEY"),
 	}
 }
 
