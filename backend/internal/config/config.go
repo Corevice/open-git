@@ -24,6 +24,9 @@ type Config struct {
 	SSHEnabled        bool
 	SSHListenAddr     string
 	SSHHostKeyPath    string
+	APIBaseURL        string
+	WebBaseURL        string
+	DocsBaseURL       string
 }
 
 func Load() Config {
@@ -58,6 +61,9 @@ func Load() Config {
 		SSHEnabled:        getenvBool("SSH_ENABLED", true),
 		SSHListenAddr:     sshListenAddr,
 		SSHHostKeyPath:    getenv("SSH_HOST_KEY_PATH", "./data/ssh_host_rsa_key"),
+		APIBaseURL:        getenv("API_BASE_URL", "http://localhost:8080/api/v3"),
+		WebBaseURL:        getenv("WEB_BASE_URL", "http://localhost:8080"),
+		DocsBaseURL:       getenv("DOCS_BASE_URL", "https://docs.github.com/rest"),
 	}
 }
 
