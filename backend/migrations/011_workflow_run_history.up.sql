@@ -7,20 +7,9 @@ ALTER TABLE workflow_runs ADD COLUMN actor_id TEXT REFERENCES users(id);
 
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_repo_created ON workflow_runs(repository_id, created_at DESC);
 
-CREATE TABLE workflow_jobs (
-    id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL REFERENCES workflow_runs(id),
-    organization_id TEXT NOT NULL REFERENCES organizations(id),
-    name TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'queued',
-    conclusion TEXT,
-    started_at TIMESTAMP,
-    completed_at TIMESTAMP,
-    runner_name TEXT NOT NULL DEFAULT '',
-    runner_labels TEXT NOT NULL DEFAULT '[]'
-);
-
-CREATE INDEX idx_workflow_jobs_run_id ON workflow_jobs(run_id);
+ALTER TABLE workflow_jobs ADD COLUMN started_at TIMESTAMP;
+ALTER TABLE workflow_jobs ADD COLUMN runner_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE workflow_jobs ADD COLUMN runner_labels TEXT NOT NULL DEFAULT '[]';
 
 CREATE TABLE workflow_steps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
