@@ -1,0 +1,28 @@
+services:
+  app:
+    restart: always
+
+  frontend:
+    depends_on:
+      app:
+        condition: service_healthy
+
+  postgres:
+    profiles: ["postgres"]
+
+  migrate:
+    image: migrate/migrate
+    restart: "no"
+    profiles: ["postgres"]
+    volumes:
+      - ./backend/migrations:/migrations:ro
+    command: ["-path=/migrations", "-database", "${DB_DSN}", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  runner:
+    image: busybox
+    command: ["sh", "-c", "echo runner not yet configured"]
+    profiles: ["runner"]
+    restart: "no"
