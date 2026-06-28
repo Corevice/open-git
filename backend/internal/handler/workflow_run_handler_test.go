@@ -331,16 +331,15 @@ func TestStreamJobLogs_ReturnsChunksFromOffset(t *testing.T) {
 	h := newWorkflowRunStreamHandler(t, logRepo, jobRepo)
 
 	e := echo.New()
+	g := e.Group("")
+	g.GET("/repos/:owner/:repo/actions/jobs/:job_id/logs/stream", h.StreamJobLogs, wfTestAuth)
+
 	req := httptest.NewRequest(http.MethodGet, "/repos/alice/demo/actions/jobs/"+wfTestJobID.String()+"/logs/stream?offset=0", nil)
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/repos/:owner/:repo/actions/jobs/:job_id/logs/stream")
-	c.SetParamNames("owner", "repo", "job_id")
-	c.SetParamValues("alice", "demo", wfTestJobID.String())
-	middleware.SetAuthContext(c, wfTestUserID, []string{"read", "repo"})
+	e.ServeHTTP(rec, req)
 
-	if err := h.StreamJobLogs(c); err != nil {
-		t.Fatalf("StreamJobLogs() error = %v", err)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 
 	if ct := rec.Header().Get("Content-Type"); ct != "text/event-stream" {

@@ -346,9 +346,16 @@ func (h *WorkflowRunHandler) StreamJobLogs(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid offset")
 	}
 
-	flusher, ok := c.Response().Writer.(http.Flusher)
-	if !ok {
-		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
+	var flusher http.Flusher
+	if f, ok := c.Response().Writer.(http.Flusher); ok {
+		flusher = f
+	} else {
+		var rw http.ResponseWriter = c.Response()
+		f, ok := rw.(http.Flusher)
+		if !ok {
+			return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
+		}
+		flusher = f
 	}
 
 	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
