@@ -115,6 +115,10 @@ func (f *fakeWorkflowJobRepo) ListQueued(_ context.Context, _ uuid.UUID) ([]*ent
 	return nil, nil
 }
 
+func (f *fakeWorkflowJobRepo) ListByRunID(_ context.Context, _, _ uuid.UUID) ([]*entity.WorkflowJob, error) {
+	return nil, nil
+}
+
 type fakeRepoLookup struct {
 	repo *entity.Repository
 }

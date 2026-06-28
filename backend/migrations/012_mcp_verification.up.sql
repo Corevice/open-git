@@ -1,28 +1,28 @@
 CREATE TABLE mcp_verification_runs (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    organization_id uuid NOT NULL,
-    repository_id uuid NULL,
-    triggered_by uuid NULL,
-    status text NOT NULL DEFAULT 'queued',
-    overall_status text NULL,
-    targets jsonb NOT NULL DEFAULT '[]',
-    started_at timestamptz NULL,
-    finished_at timestamptz NULL,
-    created_at timestamptz NOT NULL DEFAULT NOW()
+    id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL,
+    repository_id TEXT,
+    triggered_by TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    overall_status TEXT,
+    targets TEXT NOT NULL DEFAULT '[]',
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE mcp_verification_checks (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id uuid NOT NULL REFERENCES mcp_verification_runs(id) ON DELETE CASCADE,
-    organization_id uuid NOT NULL,
-    check_id text NOT NULL,
-    category text NOT NULL,
-    status text NOT NULL,
-    expected jsonb NULL,
-    actual jsonb NULL,
-    error text NULL,
-    duration_ms int NOT NULL DEFAULT 0,
-    created_at timestamptz NOT NULL DEFAULT NOW()
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES mcp_verification_runs(id) ON DELETE CASCADE,
+    organization_id TEXT NOT NULL,
+    check_id TEXT NOT NULL,
+    category TEXT NOT NULL,
+    status TEXT NOT NULL,
+    expected TEXT,
+    actual TEXT,
+    error TEXT,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_mcp_runs_org_created ON mcp_verification_runs (organization_id, created_at DESC);

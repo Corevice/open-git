@@ -19,6 +19,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/transport"
+	fdiff "github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
 	domainservice "github.com/open-git/backend/internal/domain/service"
 )
@@ -73,7 +74,7 @@ func InitBare(path string) error {
 	return err
 }
 
-func repoServer(repoPath string) (*server.Server, *transport.Endpoint, error) {
+func repoServer(repoPath string) (transport.Transport, *transport.Endpoint, error) {
 	abs, err := filepath.Abs(repoPath)
 	if err != nil {
 		return nil, nil, err
@@ -446,7 +447,15 @@ func DeleteBranch(repoPath, name string) error {
 		return err
 	}
 
-	err = repo.Storer.RemoveReference(plumbing.NewBranchReferenceName(name))
+	refName := plumbing.NewBranchReferenceName(name)
+	if _, err := repo.Reference(refName, true); err != nil {
+		if errors.Is(err, plumbing.ErrReferenceNotFound) {
+			return ErrPathNotFound
+		}
+		return err
+	}
+
+	err = repo.Storer.RemoveReference(refName)
 	if err != nil {
 		if errors.Is(err, plumbing.ErrReferenceNotFound) {
 			return ErrPathNotFound
@@ -492,7 +501,7 @@ func GetDiff(repoPath, baseRef, headRef string) ([]FileDiff, error) {
 		return nil, err
 	}
 
-	changes, err := object.DiffTree(context.Background(), baseTree, headTree)
+	changes, err := object.DiffTreeContext(context.Background(), baseTree, headTree)
 	if err != nil {
 		return nil, err
 	}
@@ -519,18 +528,20 @@ func GetDiff(repoPath, baseRef, headRef string) ([]FileDiff, error) {
 		var patchContent strings.Builder
 		for _, chunk := range fp.Chunks() {
 			switch chunk.Type() {
-			case object.Add:
+			case fdiff.Add:
 				if status == "" {
 					status = "add"
 				}
-			case object.Delete:
+			case fdiff.Delete:
 				status = "delete"
-			case object.Modify:
+			case fdiff.Equal:
+				continue
+			default:
 				if status != "delete" {
 					status = "modify"
 				}
 			}
-			if chunk.Type() != object.Equal {
+			if chunk.Type() != fdiff.Equal {
 				patchContent.WriteString(chunk.Content())
 			}
 		}

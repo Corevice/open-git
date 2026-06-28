@@ -309,13 +309,14 @@ func (uc *TriggerWorkflowUsecase) createQueuedRun(
 		jobID := uuid.New()
 		job := &entity.WorkflowJob{
 			ID:             jobID,
-			RunID:          runID,
+			WorkflowRunID:  &runID,
 			OrganizationID: input.OrgID,
+			RepositoryID:   input.RepositoryID,
 			Name:           jobName,
 			Status:         "queued",
 			Conclusion:     "",
 			Needs:          append([]string(nil), irJob.Needs...),
-			RunnerLabel:    irJob.RunsOn,
+			RunsOn:         []string{irJob.RunsOn},
 			CreatedAt:      now,
 		}
 		jobs = append(jobs, job)

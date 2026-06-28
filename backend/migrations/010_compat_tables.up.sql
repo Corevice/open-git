@@ -1,35 +1,35 @@
 CREATE TABLE compat_test_run (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    suite varchar NOT NULL,
-    status varchar NOT NULL DEFAULT 'queued',
-    triggered_by uuid REFERENCES users(id),
-    organization_id uuid NOT NULL,
-    total_endpoints int NOT NULL DEFAULT 0,
-    passing int NOT NULL DEFAULT 0,
-    failing int NOT NULL DEFAULT 0,
-    unimplemented int NOT NULL DEFAULT 0,
-    coverage_rate numeric(5,4) NOT NULL DEFAULT 0,
-    started_at timestamptz,
-    finished_at timestamptz,
-    created_at timestamptz NOT NULL DEFAULT now()
+    id TEXT PRIMARY KEY,
+    suite TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    triggered_by TEXT REFERENCES users(id),
+    organization_id TEXT NOT NULL,
+    total_endpoints INTEGER NOT NULL DEFAULT 0,
+    passing INTEGER NOT NULL DEFAULT 0,
+    failing INTEGER NOT NULL DEFAULT 0,
+    unimplemented INTEGER NOT NULL DEFAULT 0,
+    coverage_rate REAL NOT NULL DEFAULT 0,
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE compat_endpoint_result (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id uuid NOT NULL REFERENCES compat_test_run(id) ON DELETE CASCADE,
-    method varchar NOT NULL,
-    path varchar NOT NULL,
-    status varchar NOT NULL,
-    checks jsonb,
-    diff jsonb
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES compat_test_run(id) ON DELETE CASCADE,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    status TEXT NOT NULL,
+    checks TEXT,
+    diff TEXT
 );
 
 CREATE TABLE compat_golden_fixture (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    method varchar NOT NULL,
-    path varchar NOT NULL,
-    response_schema jsonb,
-    sample_response jsonb,
-    github_api_version varchar NOT NULL DEFAULT '2022-11-28',
+    id TEXT PRIMARY KEY,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    response_schema TEXT,
+    sample_response TEXT,
+    github_api_version TEXT NOT NULL DEFAULT '2022-11-28',
     UNIQUE(method, path)
 );

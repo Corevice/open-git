@@ -16,4 +16,8 @@ type IWorkflowJobRepository interface {
 	Complete(ctx context.Context, jobID uuid.UUID, conclusion string, finishedAt time.Time) error
 	Cancel(ctx context.Context, jobID uuid.UUID) error
 	ListQueued(ctx context.Context, orgID uuid.UUID) ([]*entity.WorkflowJob, error)
+	ListByRunID(ctx context.Context, orgID, runID uuid.UUID) ([]*entity.WorkflowJob, error)
+	CreateBatch(ctx context.Context, jobs []*entity.WorkflowJob) error
+	ResetQueuedByRunID(ctx context.Context, runID uuid.UUID) error
+	CancelInProgressByRunID(ctx context.Context, orgID, runID uuid.UUID) error
 }
