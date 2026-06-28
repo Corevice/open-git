@@ -2,17 +2,10 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 
-	"github.com/google/uuid"
+	"github.com/open-git/backend/internal/domain/entity"
 )
 
 type IAuditLogRepository interface {
-	InsertAuditLog(
-		ctx context.Context,
-		orgID, actorID uuid.UUID,
-		action, targetType string,
-		targetID uuid.UUID,
-		metadata json.RawMessage,
-	) error
+	Create(ctx context.Context, log *entity.AuditLog) error
 }
