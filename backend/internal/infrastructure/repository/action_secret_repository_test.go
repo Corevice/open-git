@@ -1,8 +1,8 @@
 package repository_test
 
 import (
-	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"testing"
 	"time"
@@ -52,7 +52,11 @@ func newActionSecretTestDB(t *testing.T) *sqlx.DB {
 }
 
 func newTestActionSecretEncryptor() *crypto.ActionSecretEncryptor {
-	return crypto.NewActionSecretEncryptor(bytes.Repeat([]byte{0x33}, 32))
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		panic(err)
+	}
+	return crypto.NewActionSecretEncryptor(key)
 }
 
 func insertOrgActionSecret(
@@ -116,6 +120,36 @@ func TestActionSecretRepository_Upsert(t *testing.T) {
 	}
 }
 
+func TestActionSecretRepository_UpsertOrgLevel(t *testing.T) {
+	db := newActionSecretTestDB(t)
+	enc := newTestActionSecretEncryptor()
+	repo := repository.NewActionSecretRepository(db, enc)
+
+	orgID := createTestOrganization(t, db, "org-level-secret-org")
+
+	secret := &entity.ActionSecret{
+		OrganizationID: orgID,
+		Name:           "ORG_UPSERT",
+		EncryptedValue: string([]byte("org-aes-value")),
+	}
+
+	created, err := repo.Upsert(context.Background(), secret)
+	if err != nil {
+		t.Fatalf("Upsert create org secret: %v", err)
+	}
+	if !created {
+		t.Fatal("expected created=true on first org upsert")
+	}
+
+	created, err = repo.Upsert(context.Background(), secret)
+	if err != nil {
+		t.Fatalf("Upsert update org secret: %v", err)
+	}
+	if created {
+		t.Fatal("expected created=false on second org upsert")
+	}
+}
+
 func TestActionSecretRepository_GetByName(t *testing.T) {
 	db := newActionSecretTestDB(t)
 	enc := newTestActionSecretEncryptor()
@@ -126,11 +160,12 @@ func TestActionSecretRepository_GetByName(t *testing.T) {
 	userID := createTestUser(t, db, "get-secret-user")
 	repoID := createTestRepositoryRecord(t, db, orgID, userID, "demo")
 
+	innerValue := []byte("aes-encrypted-value")
 	secret := &entity.ActionSecret{
 		OrganizationID: orgID,
 		RepositoryID:   repoID,
 		Name:           "FETCH_ME",
-		EncryptedValue: string([]byte("aes-encrypted-value")),
+		EncryptedValue: string(innerValue),
 	}
 	if _, err := repo.Upsert(context.Background(), secret); err != nil {
 		t.Fatalf("Upsert: %v", err)
@@ -142,6 +177,9 @@ func TestActionSecretRepository_GetByName(t *testing.T) {
 	}
 	if got == nil || got.Name != "FETCH_ME" {
 		t.Fatalf("unexpected secret: %+v", got)
+	}
+	if got.EncryptedValue != string(innerValue) {
+		t.Fatalf("expected decrypted value %q, got %q", string(innerValue), got.EncryptedValue)
 	}
 
 	_, err = repo.GetByName(context.Background(), otherOrgID, &repoID, "FETCH_ME")
@@ -214,6 +252,35 @@ func TestActionSecretRepository_ListByRepo(t *testing.T) {
 	}
 }
 
+func TestActionSecretRepository_ListByRepo_CrossOrgIsolation(t *testing.T) {
+	db := newActionSecretTestDB(t)
+	enc := newTestActionSecretEncryptor()
+	repo := repository.NewActionSecretRepository(db, enc)
+
+	orgID := createTestOrganization(t, db, "list-repo-owner-org")
+	otherOrgID := createTestOrganization(t, db, "list-repo-other-org")
+	userID := createTestUser(t, db, "list-repo-isolation-user")
+	repoID := createTestRepositoryRecord(t, db, orgID, userID, "demo")
+
+	secret := &entity.ActionSecret{
+		OrganizationID: orgID,
+		RepositoryID:   repoID,
+		Name:           "ISOLATED_REPO_SECRET",
+		EncryptedValue: string([]byte("repo-value")),
+	}
+	if _, err := repo.Upsert(context.Background(), secret); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	secrets, err := repo.ListByRepo(context.Background(), otherOrgID, repoID)
+	if err != nil {
+		t.Fatalf("ListByRepo: %v", err)
+	}
+	if len(secrets) != 0 {
+		t.Fatalf("expected no secrets for other org, got %d", len(secrets))
+	}
+}
+
 func TestActionSecretRepository_ListByOrg(t *testing.T) {
 	db := newActionSecretTestDB(t)
 	enc := newTestActionSecretEncryptor()
@@ -281,6 +348,59 @@ func TestActionSecretRepository_SetSelectedRepositories_RejectsOtherOrg(t *testi
 	_, err = repo.GetSelectedRepositories(context.Background(), otherOrgID, secretID)
 	if !errors.Is(err, apperror.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for cross-org read, got %v", err)
+	}
+}
+
+func TestActionSecretRepository_SetSelectedRepositories_RejectsDuplicateRepoIDs(t *testing.T) {
+	db := newActionSecretTestDB(t)
+	enc := newTestActionSecretEncryptor()
+	repo := repository.NewActionSecretRepository(db, enc)
+
+	orgID := createTestOrganization(t, db, "dedupe-org")
+	userID := createTestUser(t, db, "dedupe-user")
+	repoID := createTestRepositoryRecord(t, db, orgID, userID, "demo")
+
+	secretID := insertOrgActionSecret(t, db, enc, orgID, "DEDUPED", "selected", []byte("dedupe-value"))
+
+	err := repo.SetSelectedRepositories(context.Background(), orgID, secretID, []uuid.UUID{repoID, repoID})
+	if !errors.Is(err, apperror.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for duplicate repo IDs, got %v", err)
+	}
+}
+
+func TestActionSecretRepository_SetSelectedRepositories_RejectsCrossOrgRepoIDOR(t *testing.T) {
+	db := newActionSecretTestDB(t)
+	enc := newTestActionSecretEncryptor()
+	repo := repository.NewActionSecretRepository(db, enc)
+
+	orgID := createTestOrganization(t, db, "idor-org")
+	otherOrgID := createTestOrganization(t, db, "idor-victim-org")
+	userID := createTestUser(t, db, "idor-user")
+	ownRepoID := createTestRepositoryRecord(t, db, orgID, userID, "own")
+	otherRepoID := createTestRepositoryRecord(t, db, otherOrgID, userID, "victim")
+
+	secretID := insertOrgActionSecret(t, db, enc, orgID, "IDOR_TARGET", "selected", []byte("idor-value"))
+
+	err := repo.SetSelectedRepositories(context.Background(), orgID, secretID, []uuid.UUID{ownRepoID, otherRepoID, ownRepoID})
+	if !errors.Is(err, apperror.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-org repo IDOR attempt, got %v", err)
+	}
+}
+
+func TestActionSecretRepository_SetSelectedRepositories_RejectsNonSelectedVisibility(t *testing.T) {
+	db := newActionSecretTestDB(t)
+	enc := newTestActionSecretEncryptor()
+	repo := repository.NewActionSecretRepository(db, enc)
+
+	orgID := createTestOrganization(t, db, "visibility-org")
+	userID := createTestUser(t, db, "visibility-user")
+	repoID := createTestRepositoryRecord(t, db, orgID, userID, "demo")
+
+	secretID := insertOrgActionSecret(t, db, enc, orgID, "ALL_VISIBILITY", "all", []byte("all-value"))
+
+	err := repo.SetSelectedRepositories(context.Background(), orgID, secretID, []uuid.UUID{repoID})
+	if !errors.Is(err, apperror.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for non-selected visibility, got %v", err)
 	}
 }
 
