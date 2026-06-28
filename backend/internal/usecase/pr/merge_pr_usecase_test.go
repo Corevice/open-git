@@ -135,7 +135,7 @@ func (m *mockMembershipRepo) Add(_ context.Context, _ *entity.Membership) error 
 	return nil
 }
 
-func (m *mockMembershipRepo) GetRole(_ context.Context, _, userID uuid.UUID) (string, error) {
+func (m *mockMembershipRepo) GetRole(_ context.Context, orgID, userID uuid.UUID) (string, error) {
 	if m.roles == nil {
 		return entity.RoleMember, nil
 	}
@@ -299,6 +299,7 @@ func TestSuccessfulMerge(t *testing.T) {
 func TestEnforceAdminsFalseAdminBypassesProtection(t *testing.T) {
 	pr := newOpenPR()
 	prRepo := &mockPullRequestRepo{prs: []*entity.PullRequest{pr}}
+	auditRepo := &mockAuditLogRepo{}
 	actorID := uuid.New()
 
 	uc := prusecase.NewMergePRUsecase(
@@ -313,7 +314,7 @@ func TestEnforceAdminsFalseAdminBypassesProtection(t *testing.T) {
 		&mockMembershipRepo{roles: map[uuid.UUID]string{actorID: entity.RoleAdmin}},
 		&mockReviewRepo{satisfiedReviews: 0},
 		&mockWorkflowRunRepo{},
-		&mockAuditLogRepo{},
+		auditRepo,
 		&mockGitService{},
 		mockTxManager{},
 	)
@@ -329,6 +330,12 @@ func TestEnforceAdminsFalseAdminBypassesProtection(t *testing.T) {
 	}
 	if merged.State != "merged" {
 		t.Fatalf("expected state merged, got %q", merged.State)
+	}
+	if len(auditRepo.calls) != 2 {
+		t.Fatalf("expected 2 audit log calls (admin bypass + merge), got %d", len(auditRepo.calls))
+	}
+	if auditRepo.calls[0].action != "pr.merge.admin_bypass" || auditRepo.calls[0].targetType != "branch_protection" {
+		t.Fatalf("unexpected admin bypass audit payload: %+v", auditRepo.calls[0])
 	}
 }
 
@@ -357,6 +364,38 @@ func TestEnforceAdminsTrueAdminBlockedByReviews(t *testing.T) {
 		RepositoryID:   pr.RepositoryID,
 		ActorID:        actorID,
 		Number:         pr.Number,
+	})
+	if !errors.Is(err, apperror.ErrProtectionNotSatisfied) {
+		t.Fatalf("expected ErrProtectionNotSatisfied, got %v", err)
+	}
+}
+
+func TestEnforceAdminsFalseAdminStillBlockedByRequiredLinearHistory(t *testing.T) {
+	pr := newOpenPR()
+	actorID := uuid.New()
+
+	uc := prusecase.NewMergePRUsecase(
+		&mockPullRequestRepo{prs: []*entity.PullRequest{pr}},
+		&mockBranchProtectionRepo{
+			protection: &entity.BranchProtection{
+				EnforceAdmins:         false,
+				RequiredLinearHistory: true,
+			},
+		},
+		&mockMembershipRepo{roles: map[uuid.UUID]string{actorID: entity.RoleAdmin}},
+		&mockReviewRepo{},
+		&mockWorkflowRunRepo{},
+		&mockAuditLogRepo{},
+		&mockGitService{},
+		mockTxManager{},
+	)
+
+	_, err := uc.Execute(context.Background(), prusecase.MergePRInput{
+		OrganizationID: pr.OrganizationID,
+		RepositoryID:   pr.RepositoryID,
+		ActorID:        actorID,
+		Number:         pr.Number,
+		MergeMethod:    "merge",
 	})
 	if !errors.Is(err, apperror.ErrProtectionNotSatisfied) {
 		t.Fatalf("expected ErrProtectionNotSatisfied, got %v", err)

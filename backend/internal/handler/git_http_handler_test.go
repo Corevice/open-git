@@ -505,6 +505,70 @@ func TestAdminBlockedByProtectedForcePushWhenEnforceAdminsTrue(t *testing.T) {
 	}
 }
 
+func TestAdminBlockedByProtectedDirectPushWhenEnforceAdminsTrue(t *testing.T) {
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "alice", "demo.git")
+	if err := infragit.InitBare(repoPath); err != nil {
+		t.Fatalf("init bare repo: %v", err)
+	}
+	if err := seedMainBranch(t, repoPath); err != nil {
+		t.Fatalf("seed main branch: %v", err)
+	}
+
+	repo, err := gogit.PlainOpen(repoPath)
+	if err != nil {
+		t.Fatalf("open repo: %v", err)
+	}
+	mainRef, err := repo.Reference(plumbing.Head, true)
+	if err != nil {
+		t.Fatalf("head ref: %v", err)
+	}
+	oldHash := mainRef.Hash()
+	newHash := createCommit(t, repo, "fast-forward", oldHash)
+
+	repoID := uuid.New()
+	orgID := uuid.New()
+	h := handler.NewGitHTTPHandler(
+		root,
+		&stubResolver{repo: &handler.ResolvedGitRepository{
+			ID:             repoID,
+			OrganizationID: orgID,
+			OwnerID:        42,
+			DiskPath:       repoPath,
+		}},
+		&stubMembership{write: true, role: entity.RoleAdmin, orgID: orgID},
+		&stubProtection{rules: map[string]stubProtectionRule{
+			"main": {Protected: true, EnforceAdmins: true},
+		}},
+		nil,
+	)
+
+	body := encodeReceivePackRequest(t, oldHash, newHash)
+	req := httptest.NewRequest(http.MethodPost, "/alice/demo.git/git-receive-pack", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	c.SetPath("/:owner/:repo.git/git-receive-pack")
+	c.SetParamNames("owner", "repo")
+	c.SetParamValues("alice", "demo")
+	middleware.SetAuthContext(c, 42, []string{"repo"})
+
+	err = h.ReceivePack(c)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok {
+		t.Fatalf("error type = %T, want *echo.HTTPError", err)
+	}
+	if he.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", he.Code, http.StatusUnprocessableEntity)
+	}
+	msg, ok := he.Message.(map[string]string)
+	if !ok || msg["message"] != "direct push is not allowed on protected branch: main" {
+		t.Fatalf("unexpected message: %#v", he.Message)
+	}
+}
+
 func TestRejectProtectedDirectPush(t *testing.T) {
 	root := t.TempDir()
 	repoPath := filepath.Join(root, "alice", "demo.git")

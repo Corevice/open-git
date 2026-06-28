@@ -15,6 +15,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const mergeMethodMerge = "merge"
+
 type MergePRInput struct {
 	OrganizationID uuid.UUID
 	RepositoryID   uuid.UUID
@@ -44,6 +46,9 @@ func NewMergePRUsecase(
 	gitService service.GitService,
 	txManager repository.TransactionManager,
 ) *MergePRUsecase {
+	if membershipRepo == nil {
+		panic("membershipRepo is required")
+	}
 	return &MergePRUsecase{
 		prRepo:               prRepo,
 		branchProtectionRepo: branchProtectionRepo,
@@ -65,17 +70,22 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 		return nil, apperror.ErrAlreadyMerged
 	}
 
-	mergeMethod := input.MergeMethod
-	if mergeMethod == "" {
-		mergeMethod = "merge"
-	}
+	mergeMethod := normalizeMergeMethod(input.MergeMethod)
 
 	requesterRole, err := uc.resolveRequesterRole(ctx, input.OrganizationID, input.ActorID)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := uc.checkBranchProtection(ctx, input.RepositoryID, pr, mergeMethod, requesterRole); err != nil {
+	if err := uc.checkBranchProtection(
+		ctx,
+		input.OrganizationID,
+		input.ActorID,
+		input.RepositoryID,
+		pr,
+		mergeMethod,
+		requesterRole,
+	); err != nil {
 		return nil, err
 	}
 
@@ -111,13 +121,21 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 	return pr, nil
 }
 
+func normalizeMergeMethod(method string) string {
+	if method == "" {
+		return mergeMethodMerge
+	}
+	return method
+}
+
+func mergeMethodCreatesMergeCommit(method string) bool {
+	return normalizeMergeMethod(method) == mergeMethodMerge
+}
+
 func (uc *MergePRUsecase) resolveRequesterRole(
 	ctx context.Context,
 	organizationID, actorID uuid.UUID,
 ) (string, error) {
-	if uc.membershipRepo == nil {
-		return "", fmt.Errorf("membership repository is required")
-	}
 	role, err := uc.membershipRepo.GetRole(ctx, organizationID, actorID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return "", nil
@@ -130,7 +148,7 @@ func (uc *MergePRUsecase) resolveRequesterRole(
 
 func (uc *MergePRUsecase) checkBranchProtection(
 	ctx context.Context,
-	repositoryID uuid.UUID,
+	organizationID, actorID, repositoryID uuid.UUID,
 	pr *entity.PullRequest,
 	mergeMethod string,
 	requesterRole string,
@@ -146,7 +164,22 @@ func (uc *MergePRUsecase) checkBranchProtection(
 		return nil
 	}
 
+	if rule.RequiredLinearHistory && mergeMethodCreatesMergeCommit(mergeMethod) {
+		return fmt.Errorf("%w: merge commit is not allowed; use squash or rebase merge instead", apperror.ErrProtectionNotSatisfied)
+	}
+
+	if rule.RequiredConversationResolution {
+		hasOpenConversations, err := uc.reviewRepo.HasOpenConversations(ctx, pr.ID)
+		if err != nil {
+			return err
+		}
+		if hasOpenConversations {
+			return apperror.ErrProtectionNotSatisfied
+		}
+	}
+
 	if !rule.EnforceAdmins && requesterRole == entity.RoleAdmin {
+		uc.logAdminProtectionBypass(ctx, organizationID, actorID, pr.ID)
 		return nil
 	}
 
@@ -173,21 +206,25 @@ func (uc *MergePRUsecase) checkBranchProtection(
 		}
 	}
 
-	if rule.RequiredLinearHistory && mergeMethod != "squash" && mergeMethod != "rebase" {
-		return fmt.Errorf("%w: merge commit is not allowed; use squash or rebase merge instead", apperror.ErrProtectionNotSatisfied)
-	}
-
-	if rule.RequiredConversationResolution {
-		hasOpenConversations, err := uc.reviewRepo.HasOpenConversations(ctx, pr.ID)
-		if err != nil {
-			return err
-		}
-		if hasOpenConversations {
-			return apperror.ErrProtectionNotSatisfied
-		}
-	}
-
 	return nil
+}
+
+func (uc *MergePRUsecase) logAdminProtectionBypass(
+	ctx context.Context,
+	organizationID, actorID, pullRequestID uuid.UUID,
+) {
+	if uc.auditLogRepo == nil {
+		return
+	}
+	_ = uc.auditLogRepo.InsertAuditLog(
+		ctx,
+		organizationID,
+		actorID,
+		"pr.merge.admin_bypass",
+		"branch_protection",
+		pullRequestID,
+		json.RawMessage(`{}`),
+	)
 }
 
 func allRequiredChecksPassed(required []string, runs []*entity.WorkflowRun) bool {

@@ -25,7 +25,8 @@ import (
 	"github.com/open-git/backend/internal/middleware"
 )
 
-// GitMembershipAccess checks organization read/write permission and resolves roles.
+// GitMembershipAccess checks organization read/write permission and resolves member roles.
+// GetRole was added to support admin bypass decisions during protected-branch push enforcement.
 type GitMembershipAccess interface {
 	HasReadAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
 	HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
