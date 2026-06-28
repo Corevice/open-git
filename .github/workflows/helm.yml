@@ -4,9 +4,11 @@ on:
   push:
     paths:
       - 'helm/**'
+      - '.github/workflows/helm.yml'
   pull_request:
     paths:
       - 'helm/**'
+      - '.github/workflows/helm.yml'
 
 jobs:
   helm-validate:
@@ -28,4 +30,4 @@ jobs:
           cat /tmp/rendered.yaml | docker run --rm -i ghcr.io/yannh/kubeconform:latest -strict -ignore-missing-schemas -
 
       - name: Dry-run install
-        run: helm install gitforge helm/ --dry-run --generate-name --set ingress.host=test.example.com
+        run: helm template gitforge helm/ --set ingress.host=test.example.com >/dev/null
