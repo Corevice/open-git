@@ -122,6 +122,10 @@ func (prHandlerAuditLogRepo) List(_ context.Context, _ uuid.UUID, _ string, _, _
 	return nil, 0, nil
 }
 
+func (prHandlerAuditLogRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID, string, string, uuid.UUID, json.RawMessage) error {
+	return nil
+}
+
 type prHandlerGitService struct {
 	diffs []service.FileDiff
 }
