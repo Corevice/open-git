@@ -129,13 +129,14 @@ func normalizeMergeMethod(method string) string {
 }
 
 func mergeMethodCreatesMergeCommit(method string) bool {
-	return normalizeMergeMethod(method) == mergeMethodMerge
+	return method == mergeMethodMerge
 }
 
 func (uc *MergePRUsecase) resolveRequesterRole(
 	ctx context.Context,
 	organizationID, actorID uuid.UUID,
 ) (string, error) {
+	// GetRole argument order is (organizationID, userID) per IMembershipRepository.
 	role, err := uc.membershipRepo.GetRole(ctx, organizationID, actorID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return "", nil
@@ -164,6 +165,13 @@ func (uc *MergePRUsecase) checkBranchProtection(
 		return nil
 	}
 
+	if !rule.EnforceAdmins && requesterRole == entity.RoleAdmin {
+		if err := uc.logAdminProtectionBypass(ctx, organizationID, actorID, pr.ID); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	if rule.RequiredLinearHistory && mergeMethodCreatesMergeCommit(mergeMethod) {
 		return fmt.Errorf("%w: merge commit is not allowed; use squash or rebase merge instead", apperror.ErrProtectionNotSatisfied)
 	}
@@ -176,11 +184,6 @@ func (uc *MergePRUsecase) checkBranchProtection(
 		if hasOpenConversations {
 			return apperror.ErrProtectionNotSatisfied
 		}
-	}
-
-	if !rule.EnforceAdmins && requesterRole == entity.RoleAdmin {
-		uc.logAdminProtectionBypass(ctx, organizationID, actorID, pr.ID)
-		return nil
 	}
 
 	satisfiedReviews, err := uc.reviewRepo.CountSatisfiedReviews(ctx, pr.ID)
@@ -212,11 +215,11 @@ func (uc *MergePRUsecase) checkBranchProtection(
 func (uc *MergePRUsecase) logAdminProtectionBypass(
 	ctx context.Context,
 	organizationID, actorID, pullRequestID uuid.UUID,
-) {
+) error {
 	if uc.auditLogRepo == nil {
-		return
+		return nil
 	}
-	_ = uc.auditLogRepo.InsertAuditLog(
+	return uc.auditLogRepo.InsertAuditLog(
 		ctx,
 		organizationID,
 		actorID,

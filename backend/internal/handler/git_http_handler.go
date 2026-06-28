@@ -30,7 +30,8 @@ import (
 type GitMembershipAccess interface {
 	HasReadAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
 	HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
-	GetRole(ctx context.Context, userID int64, organizationID uuid.UUID) (string, error)
+	// Parameter order matches IMembershipRepository: organization first, user second.
+	GetRole(ctx context.Context, organizationID uuid.UUID, userID int64) (string, error)
 }
 
 // ResolvedGitRepository is metadata required to serve Git Smart HTTP for a repo.
@@ -317,14 +318,14 @@ func (h *GitHTTPHandler) rejectProtectedUpdates(ctx context.Context, userID int6
 		if h.adminBypassesProtection(ctx, userID, repo.OrganizationID, rule) {
 			continue
 		}
-		if err := h.rejectProtectedDeletion(rule, cmd.New); err != nil {
-			return err
-		}
 		if cmd.New == plumbing.ZeroHash {
+			if err := h.rejectProtectedDeletion(rule); err != nil {
+				return err
+			}
 			continue
 		}
 		if isForcePush(grepo, cmd.Old, cmd.New) {
-			if err := h.rejectProtectedForcePush(rule, branch); err != nil {
+			if err := h.rejectDisallowedForcePush(rule, branch); err != nil {
 				return err
 			}
 			continue
@@ -352,7 +353,7 @@ func (h *GitHTTPHandler) isOrgAdmin(ctx context.Context, userID int64, organizat
 	if userID == 0 || organizationID == uuid.Nil || h.memberships == nil {
 		return false
 	}
-	role, err := h.memberships.GetRole(ctx, userID, organizationID)
+	role, err := h.memberships.GetRole(ctx, organizationID, userID)
 	return err == nil && role == entity.RoleAdmin
 }
 
@@ -362,7 +363,7 @@ func (h *GitHTTPHandler) rejectProtectedDirectPush(branch string) error {
 	})
 }
 
-func (h *GitHTTPHandler) rejectProtectedForcePush(rule GitBranchProtectionRule, branch string) error {
+func (h *GitHTTPHandler) rejectDisallowedForcePush(rule GitBranchProtectionRule, branch string) error {
 	if rule.AllowForcePushes {
 		return nil
 	}
@@ -371,10 +372,7 @@ func (h *GitHTTPHandler) rejectProtectedForcePush(rule GitBranchProtectionRule, 
 	})
 }
 
-func (h *GitHTTPHandler) rejectProtectedDeletion(rule GitBranchProtectionRule, newRef plumbing.Hash) error {
-	if newRef != plumbing.ZeroHash {
-		return nil
-	}
+func (h *GitHTTPHandler) rejectProtectedDeletion(rule GitBranchProtectionRule) error {
 	if rule.AllowDeletions {
 		return nil
 	}

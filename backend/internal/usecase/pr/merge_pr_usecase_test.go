@@ -370,12 +370,14 @@ func TestEnforceAdminsTrueAdminBlockedByReviews(t *testing.T) {
 	}
 }
 
-func TestEnforceAdminsFalseAdminStillBlockedByRequiredLinearHistory(t *testing.T) {
+func TestEnforceAdminsFalseAdminBypassesRequiredLinearHistory(t *testing.T) {
 	pr := newOpenPR()
+	prRepo := &mockPullRequestRepo{prs: []*entity.PullRequest{pr}}
+	auditRepo := &mockAuditLogRepo{}
 	actorID := uuid.New()
 
 	uc := prusecase.NewMergePRUsecase(
-		&mockPullRequestRepo{prs: []*entity.PullRequest{pr}},
+		prRepo,
 		&mockBranchProtectionRepo{
 			protection: &entity.BranchProtection{
 				EnforceAdmins:         false,
@@ -385,20 +387,71 @@ func TestEnforceAdminsFalseAdminStillBlockedByRequiredLinearHistory(t *testing.T
 		&mockMembershipRepo{roles: map[uuid.UUID]string{actorID: entity.RoleAdmin}},
 		&mockReviewRepo{},
 		&mockWorkflowRunRepo{},
-		&mockAuditLogRepo{},
+		auditRepo,
 		&mockGitService{},
 		mockTxManager{},
 	)
 
-	_, err := uc.Execute(context.Background(), prusecase.MergePRInput{
+	merged, err := uc.Execute(context.Background(), prusecase.MergePRInput{
 		OrganizationID: pr.OrganizationID,
 		RepositoryID:   pr.RepositoryID,
 		ActorID:        actorID,
 		Number:         pr.Number,
 		MergeMethod:    "merge",
 	})
-	if !errors.Is(err, apperror.ErrProtectionNotSatisfied) {
-		t.Fatalf("expected ErrProtectionNotSatisfied, got %v", err)
+	if err != nil {
+		t.Fatalf("expected admin bypass merge, got %v", err)
+	}
+	if merged.State != "merged" {
+		t.Fatalf("expected state merged, got %q", merged.State)
+	}
+	if len(auditRepo.calls) != 2 {
+		t.Fatalf("expected 2 audit log calls (admin bypass + merge), got %d", len(auditRepo.calls))
+	}
+	if auditRepo.calls[0].action != "pr.merge.admin_bypass" {
+		t.Fatalf("unexpected admin bypass audit payload: %+v", auditRepo.calls[0])
+	}
+}
+
+func TestEnforceAdminsFalseAdminBypassesRequiredConversationResolution(t *testing.T) {
+	pr := newOpenPR()
+	prRepo := &mockPullRequestRepo{prs: []*entity.PullRequest{pr}}
+	auditRepo := &mockAuditLogRepo{}
+	actorID := uuid.New()
+
+	uc := prusecase.NewMergePRUsecase(
+		prRepo,
+		&mockBranchProtectionRepo{
+			protection: &entity.BranchProtection{
+				EnforceAdmins:                  false,
+				RequiredConversationResolution: true,
+			},
+		},
+		&mockMembershipRepo{roles: map[uuid.UUID]string{actorID: entity.RoleAdmin}},
+		&mockReviewRepo{hasOpenConversations: true},
+		&mockWorkflowRunRepo{},
+		auditRepo,
+		&mockGitService{},
+		mockTxManager{},
+	)
+
+	merged, err := uc.Execute(context.Background(), prusecase.MergePRInput{
+		OrganizationID: pr.OrganizationID,
+		RepositoryID:   pr.RepositoryID,
+		ActorID:        actorID,
+		Number:         pr.Number,
+	})
+	if err != nil {
+		t.Fatalf("expected admin bypass merge, got %v", err)
+	}
+	if merged.State != "merged" {
+		t.Fatalf("expected state merged, got %q", merged.State)
+	}
+	if len(auditRepo.calls) != 2 {
+		t.Fatalf("expected 2 audit log calls (admin bypass + merge), got %d", len(auditRepo.calls))
+	}
+	if auditRepo.calls[0].action != "pr.merge.admin_bypass" {
+		t.Fatalf("unexpected admin bypass audit payload: %+v", auditRepo.calls[0])
 	}
 }
 
