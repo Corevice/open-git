@@ -326,6 +326,11 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	auditLogRepo := infraDB.NewAuditLogRepository(db)
 	sshKeyRepo := infrarepo.NewSSHKeyRepository(sqlxDB)
 	issueRepo := infrarepo.NewIssueRepository(sqlxDB)
+	issueAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	commentRepo := infrarepo.NewCommentRepository(sqlxDB)
+	labelRepo := infrarepo.NewLabelRepository(sqlxDB)
+	milestoneRepo := infrarepo.NewMilestoneRepository(sqlxDB)
+	txManager := infraDB.NewDomainTxManager(sqlxDB)
 
 	authMiddleware := appmiddleware.AuthMiddleware(tokenRepo)
 	realGitBasicAuth := appmiddleware.GitBasicAuthMiddleware(tokenRepo)
@@ -386,8 +391,11 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		})
 	}
 
+	createIssueUC := issueusecase.NewCreateIssueUsecase(issueRepo, issueAuditRepo, txManager)
+	updateIssueUC := issueusecase.NewUpdateIssueUsecase(issueRepo, labelRepo, milestoneRepo, issueAuditRepo)
+	createCommentUC := issueusecase.NewCreateCommentUsecase(issueRepo, commentRepo, issueAuditRepo)
 	listIssuesUC := issueusecase.NewListIssuesUsecase(issueRepo)
-	issueHandler := handler.NewIssueHandler(nil, listIssuesUC, nil, resolveRepo)
+	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, createCommentUC, updateIssueUC, resolveRepo)
 	pullRequestHandler := handler.NewPullRequestHandler(nil, nil, nil, resolveRepo)
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 
