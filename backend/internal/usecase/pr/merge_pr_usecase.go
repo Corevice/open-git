@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"testing"
 	"time"
 
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/domain/service"
@@ -19,10 +19,8 @@ type MergePRInput struct {
 	OrganizationID uuid.UUID
 	RepositoryID   uuid.UUID
 	ActorID        uuid.UUID
-	// Deprecated: role is resolved from ActorID via membershipRepo; this field is ignored.
-	RequesterRole string
-	Number        int
-	MergeMethod   string
+	Number         int
+	MergeMethod    string
 }
 
 type MergePRUsecase struct {
@@ -36,37 +34,26 @@ type MergePRUsecase struct {
 	txManager            repository.TransactionManager
 }
 
-type MergePRUsecaseOption func(*MergePRUsecase)
-
-func WithMembershipRepo(membershipRepo repository.IMembershipRepository) MergePRUsecaseOption {
-	return func(uc *MergePRUsecase) {
-		uc.membershipRepo = membershipRepo
-	}
-}
-
 func NewMergePRUsecase(
 	prRepo repository.IPullRequestRepository,
 	branchProtectionRepo repository.IBranchProtectionRepository,
+	membershipRepo repository.IMembershipRepository,
 	reviewRepo repository.IReviewRepository,
 	workflowRunRepo repository.IWorkflowRunRepository,
 	auditLogRepo repository.IAuditLogRepository,
 	gitService service.GitService,
 	txManager repository.TransactionManager,
-	opts ...MergePRUsecaseOption,
 ) *MergePRUsecase {
-	uc := &MergePRUsecase{
+	return &MergePRUsecase{
 		prRepo:               prRepo,
 		branchProtectionRepo: branchProtectionRepo,
+		membershipRepo:       membershipRepo,
 		reviewRepo:           reviewRepo,
 		workflowRunRepo:      workflowRunRepo,
 		auditLogRepo:         auditLogRepo,
 		gitService:           gitService,
 		txManager:            txManager,
 	}
-	for _, opt := range opts {
-		opt(uc)
-	}
-	return uc
 }
 
 func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*entity.PullRequest, error) {
@@ -83,7 +70,7 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 		mergeMethod = "merge"
 	}
 
-	requesterRole, err := uc.resolveRequesterRole(ctx, input.OrganizationID, input.ActorID, input.RequesterRole)
+	requesterRole, err := uc.resolveRequesterRole(ctx, input.OrganizationID, input.ActorID)
 	if err != nil {
 		return nil, err
 	}
@@ -127,19 +114,18 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 func (uc *MergePRUsecase) resolveRequesterRole(
 	ctx context.Context,
 	organizationID, actorID uuid.UUID,
-	deprecatedRequesterRole string,
 ) (string, error) {
-	if uc.membershipRepo != nil {
-		role, err := uc.membershipRepo.GetRole(ctx, organizationID, actorID)
-		if err != nil {
-			return "", err
-		}
-		return role, nil
+	if uc.membershipRepo == nil {
+		return "", fmt.Errorf("membership repository is required")
 	}
-	if testing.Testing() {
-		return deprecatedRequesterRole, nil
+	role, err := uc.membershipRepo.GetRole(ctx, organizationID, actorID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return "", nil
 	}
-	return "", nil
+	if err != nil {
+		return "", err
+	}
+	return role, nil
 }
 
 func (uc *MergePRUsecase) checkBranchProtection(

@@ -25,8 +25,10 @@ import (
 	"github.com/open-git/backend/internal/middleware"
 )
 
-// gitMembershipRoleLookup optionally resolves organization roles for branch protection bypass.
-type gitMembershipRoleLookup interface {
+// GitMembershipAccess checks organization read/write permission and resolves roles.
+type GitMembershipAccess interface {
+	HasReadAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
+	HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
 	GetRole(ctx context.Context, userID int64, organizationID uuid.UUID) (string, error)
 }
 
@@ -43,12 +45,6 @@ type ResolvedGitRepository struct {
 // GitRepositoryResolver resolves owner/repo to on-disk bare repository metadata.
 type GitRepositoryResolver interface {
 	Resolve(ctx context.Context, ownerLogin, repoName string) (*ResolvedGitRepository, error)
-}
-
-// GitMembershipAccess checks organization read/write permission.
-type GitMembershipAccess interface {
-	HasReadAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
-	HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
 }
 
 // GitBranchProtectionRule describes enforcement settings for a protected branch.
@@ -330,6 +326,10 @@ func (h *GitHTTPHandler) rejectProtectedUpdates(ctx context.Context, userID int6
 			if err := h.rejectProtectedForcePush(rule, branch); err != nil {
 				return err
 			}
+			continue
+		}
+		if err := h.rejectProtectedDirectPush(branch); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -351,12 +351,14 @@ func (h *GitHTTPHandler) isOrgAdmin(ctx context.Context, userID int64, organizat
 	if userID == 0 || organizationID == uuid.Nil || h.memberships == nil {
 		return false
 	}
-	lookup, ok := h.memberships.(gitMembershipRoleLookup)
-	if !ok {
-		return false
-	}
-	role, err := lookup.GetRole(ctx, userID, organizationID)
+	role, err := h.memberships.GetRole(ctx, userID, organizationID)
 	return err == nil && role == entity.RoleAdmin
+}
+
+func (h *GitHTTPHandler) rejectProtectedDirectPush(branch string) error {
+	return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{
+		"message": fmt.Sprintf("direct push is not allowed on protected branch: %s", branch),
+	})
 }
 
 func (h *GitHTTPHandler) rejectProtectedForcePush(rule GitBranchProtectionRule, branch string) error {

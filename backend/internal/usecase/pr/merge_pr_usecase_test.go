@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/domain/repository"
 	prusecase "github.com/open-git/backend/internal/usecase/pr"
@@ -126,6 +127,37 @@ func (mockTxManager) RunInTransaction(ctx context.Context, fn func(context.Conte
 	return fn(ctx)
 }
 
+type mockMembershipRepo struct {
+	roles map[uuid.UUID]string
+}
+
+func (m *mockMembershipRepo) Add(_ context.Context, _ *entity.Membership) error {
+	return nil
+}
+
+func (m *mockMembershipRepo) GetRole(_ context.Context, _, userID uuid.UUID) (string, error) {
+	if m.roles == nil {
+		return entity.RoleMember, nil
+	}
+	role, ok := m.roles[userID]
+	if !ok {
+		return "", domain.ErrNotFound
+	}
+	return role, nil
+}
+
+func (m *mockMembershipRepo) ListByOrg(_ context.Context, _ uuid.UUID, _, _ int) ([]*entity.Membership, error) {
+	return nil, nil
+}
+
+func (m *mockMembershipRepo) UpdateRole(_ context.Context, _, _ uuid.UUID, _ string) error {
+	return nil
+}
+
+func (m *mockMembershipRepo) Remove(_ context.Context, _, _ uuid.UUID) error {
+	return nil
+}
+
 func newOpenPR() *entity.PullRequest {
 	return &entity.PullRequest{
 		ID:             uuid.New(),
@@ -147,6 +179,7 @@ func TestAlreadyMerged(t *testing.T) {
 	uc := prusecase.NewMergePRUsecase(
 		&mockPullRequestRepo{prs: []*entity.PullRequest{pr}},
 		&mockBranchProtectionRepo{},
+		&mockMembershipRepo{},
 		&mockReviewRepo{},
 		&mockWorkflowRunRepo{},
 		&mockAuditLogRepo{},
@@ -176,6 +209,7 @@ func TestProtectionNotSatisfied(t *testing.T) {
 				RequiredChecks:  []string{"ci/build"},
 			},
 		},
+		&mockMembershipRepo{},
 		&mockReviewRepo{satisfiedReviews: 1},
 		&mockWorkflowRunRepo{
 			runs: []*entity.WorkflowRun{
@@ -204,6 +238,7 @@ func TestConflict(t *testing.T) {
 	uc := prusecase.NewMergePRUsecase(
 		&mockPullRequestRepo{prs: []*entity.PullRequest{pr}},
 		&mockBranchProtectionRepo{},
+		&mockMembershipRepo{},
 		&mockReviewRepo{},
 		&mockWorkflowRunRepo{},
 		&mockAuditLogRepo{},
@@ -230,6 +265,7 @@ func TestSuccessfulMerge(t *testing.T) {
 	uc := prusecase.NewMergePRUsecase(
 		prRepo,
 		&mockBranchProtectionRepo{},
+		&mockMembershipRepo{},
 		&mockReviewRepo{},
 		&mockWorkflowRunRepo{},
 		auditRepo,
@@ -263,6 +299,7 @@ func TestSuccessfulMerge(t *testing.T) {
 func TestEnforceAdminsFalseAdminBypassesProtection(t *testing.T) {
 	pr := newOpenPR()
 	prRepo := &mockPullRequestRepo{prs: []*entity.PullRequest{pr}}
+	actorID := uuid.New()
 
 	uc := prusecase.NewMergePRUsecase(
 		prRepo,
@@ -273,6 +310,7 @@ func TestEnforceAdminsFalseAdminBypassesProtection(t *testing.T) {
 				RequiredChecks:  []string{"ci/build"},
 			},
 		},
+		&mockMembershipRepo{roles: map[uuid.UUID]string{actorID: entity.RoleAdmin}},
 		&mockReviewRepo{satisfiedReviews: 0},
 		&mockWorkflowRunRepo{},
 		&mockAuditLogRepo{},
@@ -283,8 +321,7 @@ func TestEnforceAdminsFalseAdminBypassesProtection(t *testing.T) {
 	merged, err := uc.Execute(context.Background(), prusecase.MergePRInput{
 		OrganizationID: pr.OrganizationID,
 		RepositoryID:   pr.RepositoryID,
-		ActorID:        uuid.New(),
-		RequesterRole:  entity.RoleAdmin,
+		ActorID:        actorID,
 		Number:         pr.Number,
 	})
 	if err != nil {
@@ -297,6 +334,7 @@ func TestEnforceAdminsFalseAdminBypassesProtection(t *testing.T) {
 
 func TestEnforceAdminsTrueAdminBlockedByReviews(t *testing.T) {
 	pr := newOpenPR()
+	actorID := uuid.New()
 
 	uc := prusecase.NewMergePRUsecase(
 		&mockPullRequestRepo{prs: []*entity.PullRequest{pr}},
@@ -306,6 +344,7 @@ func TestEnforceAdminsTrueAdminBlockedByReviews(t *testing.T) {
 				RequiredReviews: 2,
 			},
 		},
+		&mockMembershipRepo{roles: map[uuid.UUID]string{actorID: entity.RoleAdmin}},
 		&mockReviewRepo{satisfiedReviews: 1},
 		&mockWorkflowRunRepo{},
 		&mockAuditLogRepo{},
@@ -316,8 +355,7 @@ func TestEnforceAdminsTrueAdminBlockedByReviews(t *testing.T) {
 	_, err := uc.Execute(context.Background(), prusecase.MergePRInput{
 		OrganizationID: pr.OrganizationID,
 		RepositoryID:   pr.RepositoryID,
-		ActorID:        uuid.New(),
-		RequesterRole:  entity.RoleAdmin,
+		ActorID:        actorID,
 		Number:         pr.Number,
 	})
 	if !errors.Is(err, apperror.ErrProtectionNotSatisfied) {
@@ -335,6 +373,7 @@ func TestRequiredLinearHistoryBlocksMergeCommit(t *testing.T) {
 				RequiredLinearHistory: true,
 			},
 		},
+		&mockMembershipRepo{},
 		&mockReviewRepo{},
 		&mockWorkflowRunRepo{},
 		&mockAuditLogRepo{},
@@ -364,6 +403,7 @@ func TestRequiredLinearHistoryAllowsSquash(t *testing.T) {
 				RequiredLinearHistory: true,
 			},
 		},
+		&mockMembershipRepo{},
 		&mockReviewRepo{},
 		&mockWorkflowRunRepo{},
 		&mockAuditLogRepo{},
@@ -396,6 +436,7 @@ func TestRequiredConversationResolutionBlocksMerge(t *testing.T) {
 				RequiredConversationResolution: true,
 			},
 		},
+		&mockMembershipRepo{},
 		&mockReviewRepo{hasOpenConversations: true},
 		&mockWorkflowRunRepo{},
 		&mockAuditLogRepo{},
