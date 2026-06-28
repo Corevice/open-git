@@ -21,4 +21,7 @@ type PullRequest struct {
 	BaseRef        string
 	State          string
 	MergedAt       *time.Time
+	Title          string
+	Body           string
+	AuthorID       uuid.UUID
 }

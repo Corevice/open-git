@@ -10,6 +10,6 @@ import (
 type IIssueRepository interface {
 	Create(ctx context.Context, issue *entity.Issue) error
 	GetByNumber(ctx context.Context, repoID uuid.UUID, number int) (*entity.Issue, error)
-	ListByRepo(ctx context.Context, repoID uuid.UUID, state, labels string, page, perPage int) ([]*entity.Issue, error)
+	ListByRepo(ctx context.Context, filter ListIssuesFilter) ([]*entity.Issue, int, error)
 	NextNumber(ctx context.Context, repoID uuid.UUID) (int, error)
 }
