@@ -12,7 +12,10 @@ import (
 	"os"
 )
 
-const webhookSecretKeyEnv = "WEBHOOK_SECRET_KEY"
+const (
+	webhookSecretKeyEnv = "WEBHOOK_SECRET_KEY"
+	aes256KeySize       = 32
+)
 
 type SecretEncryptor struct {
 	key []byte
@@ -26,24 +29,24 @@ func NewSecretEncryptorFromEnv() *SecretEncryptor {
 	keyHex := os.Getenv(webhookSecretKeyEnv)
 	if keyHex == "" {
 		log.Printf("warning: %s not set, using dev-only zero key", webhookSecretKeyEnv)
-		return NewSecretEncryptor(make([]byte, aes.BlockSize))
+		return NewSecretEncryptor(make([]byte, aes256KeySize))
 	}
 
 	key, err := hex.DecodeString(keyHex)
 	if err != nil {
 		log.Printf("warning: %s is not valid hex, using dev-only zero key: %v", webhookSecretKeyEnv, err)
-		return NewSecretEncryptor(make([]byte, aes.BlockSize))
+		return NewSecretEncryptor(make([]byte, aes256KeySize))
 	}
-	if len(key) != aes.BlockSize {
-		log.Printf("warning: %s must be 32-byte hex (%d bytes), using dev-only zero key", webhookSecretKeyEnv, aes.BlockSize)
-		return NewSecretEncryptor(make([]byte, aes.BlockSize))
+	if len(key) != aes256KeySize {
+		log.Printf("warning: %s must be 32-byte hex (%d bytes), using dev-only zero key", webhookSecretKeyEnv, aes256KeySize)
+		return NewSecretEncryptor(make([]byte, aes256KeySize))
 	}
 
 	return NewSecretEncryptor(key)
 }
 
 func (e *SecretEncryptor) Encrypt(plaintext []byte) ([]byte, error) {
-	if len(e.key) != aes.BlockSize {
+	if len(e.key) != aes256KeySize {
 		return nil, fmt.Errorf("invalid encryption key length: %d", len(e.key))
 	}
 
@@ -66,7 +69,7 @@ func (e *SecretEncryptor) Encrypt(plaintext []byte) ([]byte, error) {
 }
 
 func (e *SecretEncryptor) Decrypt(ciphertext []byte) ([]byte, error) {
-	if len(e.key) != aes.BlockSize {
+	if len(e.key) != aes256KeySize {
 		return nil, fmt.Errorf("invalid encryption key length: %d", len(e.key))
 	}
 
