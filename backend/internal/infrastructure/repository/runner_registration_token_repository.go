@@ -29,6 +29,11 @@ func (r *sqlxRunnerRegistrationTokenRepository) Create(ctx context.Context, toke
 		token.ID = uuid.New()
 	}
 
+	var usedAt sql.NullTime
+	if token.UsedAt != nil {
+		usedAt = sql.NullTime{Time: *token.UsedAt, Valid: true}
+	}
+
 	const query = `
 		INSERT INTO runner_registration_tokens (id, organization_id, token_hash, expires_at, used_at)
 		VALUES (:id, :organization_id, :token_hash, :expires_at, :used_at)
@@ -39,19 +44,20 @@ func (r *sqlxRunnerRegistrationTokenRepository) Create(ctx context.Context, toke
 		"organization_id": token.OrganizationID,
 		"token_hash":      token.TokenHash,
 		"expires_at":      token.ExpiresAt,
-		"used_at":         token.UsedAt,
+		"used_at":         usedAt,
 	})
 	return dbErrors.MapDBError(err)
 }
 
 func (r *sqlxRunnerRegistrationTokenRepository) GetByTokenHash(ctx context.Context, hash string) (*entity.RunnerRegistrationToken, error) {
+	now := time.Now().UTC()
 	const query = `
 		SELECT id, organization_id, token_hash, expires_at, used_at
 		FROM runner_registration_tokens
-		WHERE token_hash = ?
+		WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?
 	`
 	q := r.db.Rebind(query)
-	row := r.db.QueryRowxContext(ctx, q, hash)
+	row := r.db.QueryRowxContext(ctx, q, hash, now)
 
 	var (
 		token  entity.RunnerRegistrationToken
@@ -74,9 +80,19 @@ func (r *sqlxRunnerRegistrationTokenRepository) MarkUsed(ctx context.Context, id
 	const query = `
 		UPDATE runner_registration_tokens
 		SET used_at = ?
-		WHERE id = ?
+		WHERE id = ? AND used_at IS NULL
 	`
 	q := r.db.Rebind(query)
-	_, err := r.db.ExecContext(ctx, q, usedAt, id)
-	return dbErrors.MapDBError(err)
+	result, err := r.db.ExecContext(ctx, q, usedAt, id)
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }

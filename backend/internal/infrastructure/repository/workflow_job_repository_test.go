@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/infrastructure/repository"
 )
@@ -227,6 +228,50 @@ func TestWorkflowJobRepository_CompleteSetsStatusConclusionFinishedAt(t *testing
 	}
 	if got.FinishedAt == nil || !got.FinishedAt.Equal(finishedAt) {
 		t.Fatalf("finished_at = %v, want %v", got.FinishedAt, finishedAt)
+	}
+}
+
+func TestWorkflowJobRepository_CancelReturnsNotFoundForCompletedJob(t *testing.T) {
+	db := newWorkflowJobTestDB(t)
+	repo := repository.NewWorkflowJobRepository(db)
+
+	jobID := uuid.New()
+	job := &entity.WorkflowJob{
+		ID:             jobID,
+		WorkflowRunID:  workflowRunID(uuid.New()),
+		OrganizationID: uuid.New(),
+		RepositoryID:   uuid.New(),
+		Name:           "already-completed",
+		Status:         entity.WorkflowJobStatusCompleted,
+	}
+	if err := repo.Create(context.Background(), job); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := repo.Cancel(context.Background(), jobID); err != domain.ErrNotFound {
+		t.Fatalf("Cancel completed job: %v, want ErrNotFound", err)
+	}
+}
+
+func TestWorkflowJobRepository_CompleteReturnsNotFoundForQueuedJob(t *testing.T) {
+	db := newWorkflowJobTestDB(t)
+	repo := repository.NewWorkflowJobRepository(db)
+
+	jobID := uuid.New()
+	job := &entity.WorkflowJob{
+		ID:             jobID,
+		WorkflowRunID:  workflowRunID(uuid.New()),
+		OrganizationID: uuid.New(),
+		RepositoryID:   uuid.New(),
+		Name:           "still-queued",
+		Status:         entity.WorkflowJobStatusQueued,
+	}
+	if err := repo.Create(context.Background(), job); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := repo.Complete(context.Background(), jobID, "success", time.Now().UTC()); err != domain.ErrNotFound {
+		t.Fatalf("Complete queued job: %v, want ErrNotFound", err)
 	}
 }
 

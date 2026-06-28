@@ -115,15 +115,35 @@ func (r *sqlxRunnerRepository) UpdateStatus(ctx context.Context, id uuid.UUID, s
 	`
 	q := r.db.Rebind(query)
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, q, status, lastSeenAt, now, id)
-	return dbErrors.MapDBError(err)
+	result, err := r.db.ExecContext(ctx, q, status, lastSeenAt, now, id)
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (r *sqlxRunnerRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	const query = `DELETE FROM runners WHERE id = ?`
 	q := r.db.Rebind(query)
-	_, err := r.db.ExecContext(ctx, q, id)
-	return dbErrors.MapDBError(err)
+	result, err := r.db.ExecContext(ctx, q, id)
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (r *sqlxRunnerRepository) FindAvailable(ctx context.Context, orgID uuid.UUID, labels []string) (*entity.Runner, error) {
@@ -131,8 +151,8 @@ func (r *sqlxRunnerRepository) FindAvailable(ctx context.Context, orgID uuid.UUI
 		SELECT id, organization_id, name, labels, os, arch, runner_type, status,
 			last_seen_at, ephemeral, created_at, updated_at
 		FROM runners
-		WHERE organization_id = ? AND status = 'online' AND ephemeral = FALSE
-		LIMIT 20
+		WHERE organization_id = ? AND status = 'online'
+		ORDER BY created_at ASC
 	`
 	q := r.db.Rebind(query)
 	rows, err := r.db.QueryxContext(ctx, q, orgID)
@@ -151,7 +171,7 @@ func (r *sqlxRunnerRepository) FindAvailable(ctx context.Context, orgID uuid.UUI
 			return runner, nil
 		}
 	}
-	return nil, nil
+	return nil, domain.ErrNotFound
 }
 
 func runnerLabelsMatch(runnerLabels, required []string) bool {

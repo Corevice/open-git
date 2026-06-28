@@ -95,19 +95,28 @@ func (r *sqlxWorkflowJobRepository) GetByID(ctx context.Context, id uuid.UUID) (
 }
 
 func (r *sqlxWorkflowJobRepository) AcquireForRunner(ctx context.Context, jobID uuid.UUID, runnerID uuid.UUID, lockVersion int) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, dbErrors.MapDBError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	startedAt := time.Now().UTC()
 	const query = `
 		UPDATE workflow_jobs
 		SET assigned_runner_id = ?, status = 'in_progress', acquire_lock_version = acquire_lock_version + 1, started_at = ?
 		WHERE id = ? AND status = 'queued' AND acquire_lock_version = ?
 	`
-	q := r.db.Rebind(query)
-	result, err := r.db.ExecContext(ctx, q, runnerID, startedAt, jobID, lockVersion)
+	q := tx.Rebind(query)
+	result, err := tx.ExecContext(ctx, q, runnerID, startedAt, jobID, lockVersion)
 	if err != nil {
 		return false, dbErrors.MapDBError(err)
 	}
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
+		return false, dbErrors.MapDBError(err)
+	}
+	if err := tx.Commit(); err != nil {
 		return false, dbErrors.MapDBError(err)
 	}
 	return rowsAffected == 1, nil
@@ -120,30 +129,60 @@ func (r *sqlxWorkflowJobRepository) UpdateStatus(ctx context.Context, jobID uuid
 		WHERE id = ?
 	`
 	q := r.db.Rebind(query)
-	_, err := r.db.ExecContext(ctx, q, status, conclusion, jobID)
-	return dbErrors.MapDBError(err)
+	result, err := r.db.ExecContext(ctx, q, status, conclusion, jobID)
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (r *sqlxWorkflowJobRepository) Complete(ctx context.Context, jobID uuid.UUID, conclusion string, finishedAt time.Time) error {
 	const query = `
 		UPDATE workflow_jobs
 		SET status = 'completed', conclusion = ?, finished_at = ?
-		WHERE id = ?
+		WHERE id = ? AND status = 'in_progress'
 	`
 	q := r.db.Rebind(query)
-	_, err := r.db.ExecContext(ctx, q, conclusion, finishedAt, jobID)
-	return dbErrors.MapDBError(err)
+	result, err := r.db.ExecContext(ctx, q, conclusion, finishedAt, jobID)
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (r *sqlxWorkflowJobRepository) Cancel(ctx context.Context, jobID uuid.UUID) error {
 	const query = `
 		UPDATE workflow_jobs
 		SET status = 'cancelled'
-		WHERE id = ?
+		WHERE id = ? AND status IN ('queued', 'in_progress')
 	`
 	q := r.db.Rebind(query)
-	_, err := r.db.ExecContext(ctx, q, jobID)
-	return dbErrors.MapDBError(err)
+	result, err := r.db.ExecContext(ctx, q, jobID)
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (r *sqlxWorkflowJobRepository) ListQueued(ctx context.Context, orgID uuid.UUID) ([]*entity.WorkflowJob, error) {

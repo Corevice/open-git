@@ -134,7 +134,7 @@ func TestRunnerRepository_UpdateStatusChangesStatusAndLastSeenAt(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	lastSeen := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	lastSeen := time.Now().UTC().Add(-time.Minute)
 	if err := repo.UpdateStatus(context.Background(), runner.ID, "online", lastSeen); err != nil {
 		t.Fatalf("UpdateStatus: %v", err)
 	}
@@ -178,7 +178,17 @@ func TestRunnerRepository_DeleteRemovesRunner(t *testing.T) {
 	}
 }
 
-func TestRunnerRepository_FindAvailableReturnsNilWhenNoLabelsMatch(t *testing.T) {
+func TestRunnerRepository_DeleteReturnsNotFoundForMissingRunner(t *testing.T) {
+	db := newRunnerTestDB(t)
+	repo := repository.NewRunnerRepository(db)
+
+	err := repo.Delete(context.Background(), uuid.New())
+	if err != domain.ErrNotFound {
+		t.Fatalf("Delete missing runner: %v, want ErrNotFound", err)
+	}
+}
+
+func TestRunnerRepository_FindAvailableReturnsNotFoundWhenNoLabelsMatch(t *testing.T) {
 	db := newRunnerTestDB(t)
 	repo := repository.NewRunnerRepository(db)
 
@@ -194,11 +204,38 @@ func TestRunnerRepository_FindAvailableReturnsNilWhenNoLabelsMatch(t *testing.T)
 	}
 
 	got, err := repo.FindAvailable(context.Background(), orgID, []string{"self-hosted", "linux"})
-	if err != nil {
-		t.Fatalf("FindAvailable: %v", err)
+	if err != domain.ErrNotFound {
+		t.Fatalf("FindAvailable: %v, want ErrNotFound", err)
 	}
 	if got != nil {
 		t.Fatalf("expected nil runner, got %+v", got)
+	}
+}
+
+func TestRunnerRepository_FindAvailableReturnsEphemeralRunner(t *testing.T) {
+	db := newRunnerTestDB(t)
+	repo := repository.NewRunnerRepository(db)
+
+	orgID := uuid.New()
+	if err := repo.Create(context.Background(), &entity.Runner{
+		OrganizationID: orgID,
+		Name:           "ephemeral-linux",
+		Labels:         []string{"linux"},
+		Status:         "online",
+		Ephemeral:      true,
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := repo.FindAvailable(context.Background(), orgID, []string{"linux"})
+	if err != nil {
+		t.Fatalf("FindAvailable: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected ephemeral runner, got nil")
+	}
+	if got.Name != "ephemeral-linux" {
+		t.Fatalf("name = %q, want ephemeral-linux", got.Name)
 	}
 }
 
