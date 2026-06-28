@@ -56,6 +56,7 @@ import (
 	"github.com/open-git/backend/internal/infrastructure/queue"
 	"github.com/open-git/backend/internal/worker"
 	artifactusecase "github.com/open-git/backend/internal/usecase/artifact"
+	secretusecase "github.com/open-git/backend/internal/usecase/secret"
 )
 
 var (
@@ -483,6 +484,39 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		resolveRepo,
 	)
 
+	actionSecretEnc := crypto.NewActionSecretEncryptorFromEnv()
+	actionSecretRepo := infrarepo.NewActionSecretRepository(sqlxDB, actionSecretEnc)
+	actionSecretAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	listRepoSecretsUC := secretusecase.NewListRepoSecretsUsecase(actionSecretRepo)
+	listOrgSecretsUC := secretusecase.NewListOrgSecretsUsecase(actionSecretRepo)
+	getActionSecretUC := secretusecase.NewGetActionSecretUsecase(actionSecretRepo)
+	upsertActionSecretUC := secretusecase.NewUpsertActionSecretUsecase(actionSecretRepo, actionSecretAuditRepo, actionSecretEnc)
+	deleteActionSecretUC := secretusecase.NewDeleteActionSecretUsecase(actionSecretRepo, actionSecretAuditRepo)
+	getActionSecretPublicKeyUC := secretusecase.NewGetPublicKeyUsecase(actionSecretEnc)
+	resolveOrg := func(c echo.Context, orgLogin string) (uuid.UUID, error) {
+		org, err := entityOrgRepo.GetByLogin(c.Request().Context(), orgLogin)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		if org == nil {
+			return uuid.Nil, apperror.ErrNotFound
+		}
+		return org.ID, nil
+	}
+	secretHandler := handler.NewSecretHandler(
+		listRepoSecretsUC,
+		listOrgSecretsUC,
+		getActionSecretUC,
+		upsertActionSecretUC,
+		deleteActionSecretUC,
+		getActionSecretPublicKeyUC,
+		actionSecretRepo,
+		repoRepo,
+		actionSecretEnc,
+		resolveRepo,
+		resolveOrg,
+	)
+
 	compatRepo := infrarepo.NewCompatRepository(sqlxDB)
 	compatRunner := &compat.Runner{}
 	getReportUC := compatusecase.NewGetReportUsecase(compatRepo)
@@ -612,6 +646,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
 	branchProtectionHandler.RegisterRoutes(v3, authMiddleware)
 	webhookHandler.RegisterRoutes(v3, authMiddleware)
+	secretHandler.RegisterRoutes(v3, authMiddleware)
 	artifactHandler.RegisterRoutes(v3, authMiddleware)
 	v3.GET("/rate_limit", rateLimitHandler.Get)
 	v3.GET("", rootHandler.Get)
