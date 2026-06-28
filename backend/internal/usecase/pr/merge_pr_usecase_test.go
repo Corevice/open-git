@@ -135,6 +135,10 @@ func (m *mockAuditLogRepo) Create(_ context.Context, log *entity.AuditLog) error
 	return nil
 }
 
+func (m *mockAuditLogRepo) List(_ context.Context, _ uuid.UUID, _ string, _, _ int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 type mockGitService struct {
 	mergeErr error
 }

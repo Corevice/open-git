@@ -118,6 +118,10 @@ type prHandlerAuditLogRepo struct{}
 
 func (prHandlerAuditLogRepo) Create(_ context.Context, _ *entity.AuditLog) error { return nil }
 
+func (prHandlerAuditLogRepo) List(_ context.Context, _ uuid.UUID, _ string, _, _ int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 type prHandlerGitService struct {
 	diffs []service.FileDiff
 }
