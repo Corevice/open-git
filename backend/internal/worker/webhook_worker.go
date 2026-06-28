@@ -39,6 +39,17 @@ const (
 
 var lookupHost = net.LookupHost
 
+// WebhookDeliveryPayload is the legacy enqueue payload shape used by callers
+// that build webhook:deliver tasks directly. New code should use
+// queue.WebhookDeliveryPayload instead.
+type WebhookDeliveryPayload struct {
+	WebhookID string `json:"webhook_id"`
+	URL       string `json:"url"`
+	Secret    string `json:"secret"`
+	Event     string `json:"event"`
+	Body      []byte `json:"body"`
+}
+
 type WebhookSecretDecrypter func(encrypted []byte) (string, error)
 
 type WebhookWorker struct {
@@ -101,12 +112,16 @@ func (w *WebhookWorker) HandleWebhookDeliver(ctx context.Context, task *asynq.Ta
 
 	addrs, err := lookupHost(host)
 	if err != nil {
-		w.recordBlockedDelivery(ctx, deliveryID, hookID, orgID, payload, deliveryStatusFailed, nil, nil)
+		if recordErr := w.recordBlockedDelivery(ctx, deliveryID, hookID, orgID, payload, deliveryStatusFailed, nil, nil); recordErr != nil {
+			// Best-effort audit; DNS failures must not retry.
+		}
 		return nil
 	}
 	for _, addr := range addrs {
 		if isPrivateIP(net.ParseIP(addr)) {
-			w.recordBlockedDelivery(ctx, deliveryID, hookID, orgID, payload, deliveryStatusSSRFBlocked, nil, nil)
+			if recordErr := w.recordBlockedDelivery(ctx, deliveryID, hookID, orgID, payload, deliveryStatusSSRFBlocked, nil, nil); recordErr != nil {
+				// Best-effort audit; SSRF blocks must not retry.
+			}
 			return nil
 		}
 	}
@@ -151,7 +166,9 @@ func (w *WebhookWorker) HandleWebhookDeliver(ctx context.Context, task *asynq.Ta
 	deliveredAt := time.Now().UTC()
 
 	if sendErr != nil {
-		w.updateDeliveryResult(ctx, deliveryID, deliveryStatusFailed, nil, nil, nil, &durationMs, deliveredAt)
+		if err := w.updateDeliveryResult(ctx, deliveryID, deliveryStatusFailed, nil, nil, nil, &durationMs, deliveredAt); err != nil {
+			return fmt.Errorf("update failed delivery: %w", err)
+		}
 		return w.deliveryRetryError(ctx, sendErr)
 	}
 	defer func() {
@@ -159,7 +176,13 @@ func (w *WebhookWorker) HandleWebhookDeliver(ctx context.Context, task *asynq.Ta
 		_ = resp.Body.Close()
 	}()
 
-	responseBodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	responseBodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	if readErr != nil {
+		if err := w.updateDeliveryResult(ctx, deliveryID, deliveryStatusFailed, nil, nil, nil, &durationMs, deliveredAt); err != nil {
+			return fmt.Errorf("update delivery after read failure: %w", err)
+		}
+		return w.deliveryRetryError(ctx, readErr)
+	}
 	responseBody := string(responseBodyBytes)
 	statusCode := resp.StatusCode
 	responseHeaders := resp.Header.Clone()
@@ -169,7 +192,9 @@ func (w *WebhookWorker) HandleWebhookDeliver(ctx context.Context, task *asynq.Ta
 		status = deliveryStatusFailed
 	}
 
-	w.updateDeliveryResult(ctx, deliveryID, status, &statusCode, responseHeaders, &responseBody, &durationMs, deliveredAt)
+	if err := w.updateDeliveryResult(ctx, deliveryID, status, &statusCode, responseHeaders, &responseBody, &durationMs, deliveredAt); err != nil {
+		return fmt.Errorf("update delivery result: %w", err)
+	}
 
 	if status == deliveryStatusFailed {
 		return w.deliveryRetryError(ctx, fmt.Errorf("non-2xx response: %d", statusCode))
@@ -184,8 +209,8 @@ func (w *WebhookWorker) recordBlockedDelivery(
 	status string,
 	statusCode *int,
 	durationMs *int,
-) {
-	_ = w.deliveryRepo.Create(ctx, &entity.WebhookDelivery{
+) error {
+	return w.deliveryRepo.Create(ctx, &entity.WebhookDelivery{
 		ID:             deliveryID,
 		WebhookID:      hookID,
 		OrganizationID: orgID,
@@ -208,8 +233,8 @@ func (w *WebhookWorker) updateDeliveryResult(
 	responseBody *string,
 	durationMs *int,
 	deliveredAt time.Time,
-) {
-	_ = w.deliveryRepo.UpdateStatus(
+) error {
+	return w.deliveryRepo.UpdateStatus(
 		ctx,
 		deliveryID,
 		status,
