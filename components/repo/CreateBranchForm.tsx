@@ -9,7 +9,7 @@ export interface BranchItem {
   commit: { sha: string };
 }
 
-const BRANCH_NAME_PATTERN = /^[a-zA-Z0-9._\/-]+$/;
+const BRANCH_NAME_PATTERN = /^(?!.*\.\.)[a-zA-Z0-9._\/-]+$/;
 
 interface CreateBranchFormProps {
   owner: string;
@@ -37,18 +37,18 @@ export default function CreateBranchForm({
       setError("Branch name is required");
       return;
     }
-    if (trimmed.includes(" ")) {
-      setError("Branch name cannot contain spaces");
-      return;
-    }
     if (!BRANCH_NAME_PATTERN.test(trimmed)) {
       setError("Branch name contains invalid characters");
+      return;
+    }
+    if (branches.length === 0) {
+      setError("No source branches available");
       return;
     }
 
     const source = branches.find((b) => b.name === fromRef);
     if (!source) {
-      setError("Source branch not found");
+      setError("Select a source branch");
       return;
     }
 
@@ -147,28 +147,51 @@ export function BranchDeleteButton({
 }: BranchDeleteButtonProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleDelete() {
     if (disabled || loading) return;
+    if (
+      !window.confirm(
+        `Delete branch "${branch}"? This action cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
     setLoading(true);
     try {
       await apiClient.deleteBranch(owner, repo, branch);
       router.refresh();
-    } catch {
-      // refresh may still show branch if delete failed
+    } catch (err) {
+      if (isApiError(err)) {
+        setError(err.message);
+      } else {
+        setError("Failed to delete branch");
+      }
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <button
-      type="button"
-      onClick={handleDelete}
-      disabled={disabled || loading}
-      className="px-3 py-1 text-sm text-red-600 border border-[#d0d7de] rounded-md hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
-    >
-      {loading ? "Deleting…" : "Delete"}
-    </button>
+    <div className="flex flex-col items-end gap-1">
+      {error && (
+        <div
+          role="alert"
+          className="px-2 py-1 text-xs text-red-800 bg-red-50 border border-red-200 rounded-md"
+        >
+          {error}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={handleDelete}
+        disabled={disabled || loading}
+        className="px-3 py-1 text-sm text-red-600 border border-[#d0d7de] rounded-md hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {loading ? "Deleting…" : "Delete"}
+      </button>
+    </div>
   );
 }

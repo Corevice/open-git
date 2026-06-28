@@ -2,7 +2,9 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import CreateBranchForm from "@/components/repo/CreateBranchForm";
+import CreateBranchForm, {
+  BranchDeleteButton,
+} from "@/components/repo/CreateBranchForm";
 import { apiClient } from "@/lib/api-client";
 
 const mockRefresh = vi.fn();
@@ -10,6 +12,7 @@ const mockRefresh = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
     createRef: vi.fn(),
+    deleteBranch: vi.fn(),
   },
   isApiError: (err: unknown) =>
     typeof err === "object" &&
@@ -64,5 +67,66 @@ describe("CreateBranchForm", () => {
       );
       expect(mockRefresh).toHaveBeenCalled();
     });
+  });
+});
+
+describe("BranchDeleteButton", () => {
+  beforeEach(() => {
+    mockRefresh.mockClear();
+    vi.mocked(apiClient.deleteBranch).mockReset();
+    vi.mocked(apiClient.deleteBranch).mockResolvedValue(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+  });
+
+  it("does not delete when confirmation is cancelled", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(
+      <BranchDeleteButton owner="acme" repo="demo" branch="feature-x" />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /delete/i }));
+
+    expect(apiClient.deleteBranch).not.toHaveBeenCalled();
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it("calls deleteBranch after confirmation", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <BranchDeleteButton owner="acme" repo="demo" branch="feature-x" />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /delete/i }));
+
+    await waitFor(() => {
+      expect(apiClient.deleteBranch).toHaveBeenCalledWith(
+        "acme",
+        "demo",
+        "feature-x",
+      );
+      expect(mockRefresh).toHaveBeenCalled();
+    });
+  });
+
+  it("shows error when delete fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.deleteBranch).mockRejectedValue({
+      status: 403,
+      message: "Cannot delete this branch",
+    });
+
+    render(
+      <BranchDeleteButton owner="acme" repo="demo" branch="feature-x" />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /delete/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Cannot delete this branch",
+    );
+    expect(mockRefresh).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
+import { notFound, redirect } from "next/navigation";
 import CreateBranchForm, {
   BranchDeleteButton,
   type BranchItem,
@@ -21,18 +22,27 @@ export default async function BranchesPage({
 }) {
   const { owner, repo } = await params;
 
+  const cookieStore = await cookies();
+  const token = cookieStore.get("authToken")?.value;
+  if (!token) {
+    redirect("/login");
+  }
+  const authOpts = { token };
+
   let metadata: RepoMetadata;
   try {
-    metadata = await apiClient.getRepo<RepoMetadata>(owner, repo);
+    metadata = await apiClient.getRepo<RepoMetadata>(owner, repo, authOpts);
   } catch (err) {
+    if (isApiError(err) && err.status === 401) redirect("/login");
     if (isApiError(err) && err.status === 404) notFound();
     throw err;
   }
 
   let branches: BranchItem[];
   try {
-    branches = await apiClient.getBranches<BranchItem[]>(owner, repo);
+    branches = await apiClient.getBranches<BranchItem[]>(owner, repo, authOpts);
   } catch (err) {
+    if (isApiError(err) && err.status === 401) redirect("/login");
     if (isApiError(err) && err.status === 404) notFound();
     throw err;
   }
