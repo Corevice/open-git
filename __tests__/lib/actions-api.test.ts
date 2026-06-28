@@ -11,7 +11,14 @@ describe("actions-api", () => {
     mockFetch.mockReset();
     mockGetItem.mockReset();
     mockGetItem.mockReturnValue("test-token");
-    vi.stubGlobal("localStorage", { getItem: mockGetItem });
+    const localStorageStub = { getItem: mockGetItem };
+    vi.stubGlobal("localStorage", localStorageStub);
+    if (typeof window !== "undefined") {
+      Object.defineProperty(window, "localStorage", {
+        configurable: true,
+        value: localStorageStub,
+      });
+    }
     vi.stubGlobal("fetch", mockFetch);
   });
 

@@ -71,8 +71,8 @@ function getAuthHeaders(): Record<string, string> {
     Accept: "application/vnd.github+json",
   };
 
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (typeof globalThis !== "undefined" && "localStorage" in globalThis) {
+    const token = globalThis.localStorage.getItem(AUTH_TOKEN_KEY);
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
