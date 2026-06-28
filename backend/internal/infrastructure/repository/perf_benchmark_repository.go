@@ -323,13 +323,6 @@ func parseCursorTime(cursor string) (time.Time, error) {
 	return time.Parse(time.RFC3339, cursor)
 }
 
-func nullString(v string) sql.NullString {
-	if v == "" {
-		return sql.NullString{}
-	}
-	return sql.NullString{String: v, Valid: true}
-}
-
 func nullTimePtr(t *time.Time) sql.NullTime {
 	if t == nil {
 		return sql.NullTime{}
