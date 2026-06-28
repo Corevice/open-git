@@ -3,6 +3,7 @@ package security
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 )
 
 const TypeAuditLogExport = "audit_log:export"
+
+var ErrRedisNotConfigured = errors.New("redis not configured")
 
 type ExportAuditLogsInput struct {
 	OrganizationID uuid.UUID
@@ -51,7 +54,7 @@ func newAsynqAuditLogExportEnqueuer(client *asynq.Client) AuditLogExportEnqueuer
 
 func (e *asynqAuditLogExportEnqueuer) EnqueueAuditLogExport(ctx context.Context, payload AuditLogExportPayload) error {
 	if e.client == nil {
-		return fmt.Errorf("redis not configured")
+		return ErrRedisNotConfigured
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -62,19 +65,13 @@ func (e *asynqAuditLogExportEnqueuer) EnqueueAuditLogExport(ctx context.Context,
 	return err
 }
 
-type noopAuditLogExportEnqueuer struct{}
-
-func (noopAuditLogExportEnqueuer) EnqueueAuditLogExport(context.Context, AuditLogExportPayload) error {
-	return fmt.Errorf("redis not configured")
-}
-
 type ExportAuditLogsUsecase struct {
 	enqueuer AuditLogExportEnqueuer
 }
 
 func NewExportAuditLogsUsecase(client *asynq.Client) *ExportAuditLogsUsecase {
 	if client == nil {
-		return NewExportAuditLogsUsecaseWithDeps(noopAuditLogExportEnqueuer{})
+		return &ExportAuditLogsUsecase{}
 	}
 	return NewExportAuditLogsUsecaseWithDeps(newAsynqAuditLogExportEnqueuer(client))
 }
@@ -87,6 +84,11 @@ func (uc *ExportAuditLogsUsecase) Execute(ctx context.Context, input ExportAudit
 	if err := validateAuditLogDateRange(input.After, input.Before); err != nil {
 		return nil, err
 	}
+	if uc.enqueuer == nil {
+		return nil, ErrRedisNotConfigured
+	}
+
+	after, before := normalizeAuditLogDateRange(input.After, input.Before)
 
 	jobID := uuid.New()
 	if err := uc.enqueuer.EnqueueAuditLogExport(ctx, AuditLogExportPayload{
@@ -96,9 +98,12 @@ func (uc *ExportAuditLogsUsecase) Execute(ctx context.Context, input ExportAudit
 		Format:         input.Format,
 		Phrase:         input.Phrase,
 		Action:         input.Action,
-		After:          input.After,
-		Before:         input.Before,
+		After:          after,
+		Before:         before,
 	}); err != nil {
+		if errors.Is(err, ErrRedisNotConfigured) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("enqueue audit log export: %w", err)
 	}
 

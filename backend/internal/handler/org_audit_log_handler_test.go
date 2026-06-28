@@ -200,7 +200,7 @@ func TestOrgAuditLogExport_Accepted(t *testing.T) {
 	before := after.Add(7 * 24 * time.Hour)
 	url := "/orgs/acme/audit-log/export?format=json&after=" + after.Format(time.RFC3339) + "&before=" + before.Format(time.RFC3339)
 
-	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req := httptest.NewRequest(http.MethodPost, url, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -214,5 +214,37 @@ func TestOrgAuditLogExport_Accepted(t *testing.T) {
 	}
 	if _, ok := resp["job_id"]; !ok {
 		t.Fatalf("expected job_id in response, got %v", resp)
+	}
+}
+
+func TestOrgAuditLogExport_RedisNotConfigured(t *testing.T) {
+	orgs := &mockOrgRepo{
+		byLogin: map[string]*domain.Organization{
+			"acme": {ID: listTestOrgID, Login: "acme"},
+		},
+	}
+	memberships := &orgAuditMembershipRepo{
+		roles: map[int64]map[int64]string{
+			listTestOrgID: {listTestUserID: entity.RoleAdmin},
+		},
+	}
+	searchUC := securityusecase.NewSearchAuditLogsUsecase(&orgAuditSearchRepo{})
+	exportUC := securityusecase.NewExportAuditLogsUsecase(nil)
+	h := handler.NewOrgAuditLogHandler(
+		orgUC.NewGetOrgUsecase(orgs),
+		memberships,
+		searchUC,
+		exportUC,
+	)
+	e := echo.New()
+	g := e.Group("")
+	h.RegisterRoutes(g, authMiddleware(listTestUserID))
+
+	req := httptest.NewRequest(http.MethodPost, "/orgs/acme/audit-log/export?format=csv", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
 	}
 }

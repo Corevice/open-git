@@ -384,11 +384,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	listReposUC := repoUC.NewListRepositoriesUsecase(repoRepo, legacyMembershipRepo, userRepo)
 	auditListRepo := infrarepo.NewAuditLogRepository(sqlxDB)
 	listAuditLogsUC := repoUC.NewListAuditLogsUsecase(auditListRepo)
-	auditSearchRepo, ok := auditListRepo.(domainrepo.IAuditLogSearchRepository)
-	if !ok {
-		return nil, fmt.Errorf("audit log repository does not implement search")
-	}
-	searchAuditLogsUC := securityUC.NewSearchAuditLogsUsecase(auditSearchRepo)
+	searchAuditLogsUC := securityUC.NewSearchAuditLogsUsecase(auditListRepo)
 	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, listReposUC, repoRepo, orgRepo, auditLogRepo, listAuditLogsUC)
 
 	getCurrentUserUC := userUC.NewGetCurrentUserUsecase(userRepo)

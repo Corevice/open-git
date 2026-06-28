@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -17,18 +18,26 @@ import (
 	securityusecase "github.com/open-git/backend/internal/usecase/security"
 )
 
+type SearchAuditLogsExecutor interface {
+	Execute(ctx context.Context, input securityusecase.SearchAuditLogsInput) (*securityusecase.SearchAuditLogsOutput, error)
+}
+
+type ExportAuditLogsExecutor interface {
+	Execute(ctx context.Context, input securityusecase.ExportAuditLogsInput) (*securityusecase.ExportAuditLogsOutput, error)
+}
+
 type OrgAuditLogHandler struct {
 	getOrg      *orgUC.GetOrgUsecase
 	memberships domainrepo.IMembershipRepository
-	searchUC    *securityusecase.SearchAuditLogsUsecase
-	exportUC    *securityusecase.ExportAuditLogsUsecase
+	searchUC    SearchAuditLogsExecutor
+	exportUC    ExportAuditLogsExecutor
 }
 
 func NewOrgAuditLogHandler(
 	getOrg *orgUC.GetOrgUsecase,
 	memberships domainrepo.IMembershipRepository,
-	searchUC *securityusecase.SearchAuditLogsUsecase,
-	exportUC *securityusecase.ExportAuditLogsUsecase,
+	searchUC SearchAuditLogsExecutor,
+	exportUC ExportAuditLogsExecutor,
 ) *OrgAuditLogHandler {
 	return &OrgAuditLogHandler{
 		getOrg:      getOrg,
@@ -40,7 +49,7 @@ func NewOrgAuditLogHandler(
 
 func (h *OrgAuditLogHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.MiddlewareFunc) {
 	g.GET("/orgs/:org/audit-log", h.Search, authMiddleware)
-	g.GET("/orgs/:org/audit-log/export", h.Export, authMiddleware)
+	g.POST("/orgs/:org/audit-log/export", h.Export, authMiddleware)
 }
 
 type exportAuditLogsResponse struct {
@@ -121,6 +130,9 @@ func (h *OrgAuditLogHandler) Export(c echo.Context) error {
 	if err != nil {
 		if errors.Is(err, securityusecase.ErrDateRangeExceeded) || errors.Is(err, apperror.ErrValidation) {
 			return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": err.Error()})
+		}
+		if errors.Is(err, securityusecase.ErrRedisNotConfigured) {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, map[string]string{"message": err.Error()})
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to enqueue audit log export"})
 	}

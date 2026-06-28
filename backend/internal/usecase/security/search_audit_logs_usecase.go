@@ -44,12 +44,14 @@ func (uc *SearchAuditLogsUsecase) Execute(ctx context.Context, input SearchAudit
 		return nil, err
 	}
 
+	after, before := normalizeAuditLogDateRange(input.After, input.Before)
+
 	logs, total, err := uc.auditLogs.Search(ctx, domainrepo.AuditLogSearchInput{
 		OrganizationID: input.OrganizationID,
 		Phrase:         input.Phrase,
 		Action:         input.Action,
-		After:          input.After,
-		Before:         input.Before,
+		After:          after,
+		Before:         before,
 		Page:           input.Page,
 		PerPage:        input.PerPage,
 	})
@@ -60,14 +62,34 @@ func (uc *SearchAuditLogsUsecase) Execute(ctx context.Context, input SearchAudit
 	return &SearchAuditLogsOutput{Logs: logs, Total: total}, nil
 }
 
+func normalizeAuditLogDateRange(after, before *time.Time) (*time.Time, *time.Time) {
+	if after == nil && before == nil {
+		return nil, nil
+	}
+
+	now := time.Now().UTC()
+	normAfter := after
+	normBefore := before
+	if normAfter == nil {
+		derived := normBefore.Add(-MaxAuditLogRange)
+		normAfter = &derived
+	}
+	if normBefore == nil {
+		normBefore = &now
+	}
+	return normAfter, normBefore
+}
+
 func validateAuditLogDateRange(after, before *time.Time) error {
-	if after == nil || before == nil {
+	if after == nil && before == nil {
 		return nil
 	}
-	if before.Before(*after) {
+
+	normAfter, normBefore := normalizeAuditLogDateRange(after, before)
+	if normBefore.Before(*normAfter) {
 		return fmt.Errorf("%w: before must be on or after after", apperror.ErrValidation)
 	}
-	if before.Sub(*after) > MaxAuditLogRange {
+	if normBefore.Sub(*normAfter) > MaxAuditLogRange {
 		return ErrDateRangeExceeded
 	}
 	return nil
