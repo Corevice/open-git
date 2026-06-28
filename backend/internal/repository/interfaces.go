@@ -62,3 +62,10 @@ type ISSHKeyStore interface {
 	Create(ctx context.Context, key *entity.SSHKey) error
 	Delete(ctx context.Context, id, userID uuid.UUID) error
 }
+
+type IRepositoryCollaboratorRepository interface {
+	AddCollaborator(ctx context.Context, repoID, userID uuid.UUID, permission string) error
+	RemoveCollaborator(ctx context.Context, repoID, userID uuid.UUID) error
+	GetPermission(ctx context.Context, repoID, userID uuid.UUID) (string, error)
+	ListCollaborators(ctx context.Context, repoID uuid.UUID) ([]*entity.RepositoryCollaborator, error)
+}
