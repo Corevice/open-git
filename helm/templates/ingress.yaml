@@ -5,15 +5,20 @@ metadata:
   name: {{ include "open-git.fullname" . }}
   labels:
     {{- include "open-git.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- if or .Values.ingress.tls.certManager .Values.ingress.annotations }}
   annotations:
+    {{- if .Values.ingress.tls.certManager }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | default "letsencrypt-prod" | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
+    {{- end }}
   {{- end }}
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
   {{- end }}
-  {{- if .Values.ingress.tls }}
+  {{- if .Values.ingress.tls.enabled }}
   tls:
     - hosts:
         - {{ .Values.ingress.host | quote }}
