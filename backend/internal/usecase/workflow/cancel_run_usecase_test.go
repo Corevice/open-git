@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
-	"github.com/open-git/backend/internal/domain/repository"
 )
 
 type mockCancelRunRepo struct {
@@ -24,7 +23,7 @@ func (m *mockCancelRunRepo) ListByHeadSHA(_ context.Context, _ uuid.UUID, _ stri
 	return nil, nil
 }
 
-func (m *mockCancelRunRepo) ListByRepo(_ context.Context, _ repository.ListWorkflowRunsFilter) ([]*entity.WorkflowRun, int, error) {
+func (m *mockCancelRunRepo) ListByRepo(_ context.Context, _ ListWorkflowRunsFilter) ([]*entity.WorkflowRun, int, error) {
 	return nil, 0, nil
 }
 

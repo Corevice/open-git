@@ -5,7 +5,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain/entity"
-	"github.com/open-git/backend/internal/domain/repository"
 )
 
 type ListWorkflowRunsInput struct {
@@ -27,10 +26,10 @@ type ListWorkflowRunsOutput struct {
 }
 
 type ListWorkflowRunsUsecase struct {
-	runRepo repository.IWorkflowRunRepository
+	runRepo WorkflowRunRepository
 }
 
-func NewListWorkflowRunsUsecase(runRepo repository.IWorkflowRunRepository) *ListWorkflowRunsUsecase {
+func NewListWorkflowRunsUsecase(runRepo WorkflowRunRepository) *ListWorkflowRunsUsecase {
 	return &ListWorkflowRunsUsecase{runRepo: runRepo}
 }
 
@@ -47,7 +46,7 @@ func (uc *ListWorkflowRunsUsecase) Execute(ctx context.Context, input ListWorkfl
 		perPage = 100
 	}
 
-	filter := repository.ListWorkflowRunsFilter{
+	filter := ListWorkflowRunsFilter{
 		OrganizationID: input.OrganizationID,
 		RepositoryID:   input.RepositoryID,
 		Status:         input.Status,

@@ -20,12 +20,12 @@ type GetWorkflowRunOutput struct {
 }
 
 type GetWorkflowRunUsecase struct {
-	runRepo repository.IWorkflowRunRepository
+	runRepo WorkflowRunRepository
 	jobRepo repository.IWorkflowJobRepository
 }
 
 func NewGetWorkflowRunUsecase(
-	runRepo repository.IWorkflowRunRepository,
+	runRepo WorkflowRunRepository,
 	jobRepo repository.IWorkflowJobRepository,
 ) *GetWorkflowRunUsecase {
 	return &GetWorkflowRunUsecase{

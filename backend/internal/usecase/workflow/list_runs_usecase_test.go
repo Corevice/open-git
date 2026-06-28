@@ -7,11 +7,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain/entity"
-	"github.com/open-git/backend/internal/domain/repository"
 )
 
 type mockListRunsRepo struct {
-	filter repository.ListWorkflowRunsFilter
+	filter ListWorkflowRunsFilter
 	runs   []*entity.WorkflowRun
 	total  int
 }
@@ -20,7 +19,7 @@ func (m *mockListRunsRepo) ListByHeadSHA(_ context.Context, _ uuid.UUID, _ strin
 	return nil, nil
 }
 
-func (m *mockListRunsRepo) ListByRepo(_ context.Context, filter repository.ListWorkflowRunsFilter) ([]*entity.WorkflowRun, int, error) {
+func (m *mockListRunsRepo) ListByRepo(_ context.Context, filter ListWorkflowRunsFilter) ([]*entity.WorkflowRun, int, error) {
 	m.filter = filter
 	return m.runs, m.total, nil
 }

@@ -13,9 +13,14 @@ const (
 
 type WorkflowRun struct {
 	ID             uuid.UUID
+	OrganizationID uuid.UUID
 	RepositoryID   uuid.UUID
-	HeadSHA        string
+	WorkflowID     uuid.UUID
 	Workflow       string
+	RunNumber      int
+	Event          string
+	HeadBranch     string
+	HeadSHA        string
 	Status         string
 	Conclusion     string
 	CreatedAt      time.Time

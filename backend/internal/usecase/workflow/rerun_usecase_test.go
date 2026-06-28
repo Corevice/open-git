@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
-	"github.com/open-git/backend/internal/domain/repository"
 )
 
 type mockRerunRunRepo struct {
@@ -21,7 +20,7 @@ func (m *mockRerunRunRepo) ListByHeadSHA(_ context.Context, _ uuid.UUID, _ strin
 	return nil, nil
 }
 
-func (m *mockRerunRunRepo) ListByRepo(_ context.Context, _ repository.ListWorkflowRunsFilter) ([]*entity.WorkflowRun, int, error) {
+func (m *mockRerunRunRepo) ListByRepo(_ context.Context, _ ListWorkflowRunsFilter) ([]*entity.WorkflowRun, int, error) {
 	return nil, 0, nil
 }
 

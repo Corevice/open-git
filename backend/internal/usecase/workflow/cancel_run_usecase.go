@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
-	"github.com/open-git/backend/internal/domain/repository"
 )
 
 type CancelRunInput struct {
@@ -15,10 +14,10 @@ type CancelRunInput struct {
 }
 
 type CancelRunUsecase struct {
-	runRepo repository.IWorkflowRunRepository
+	runRepo WorkflowRunRepository
 }
 
-func NewCancelRunUsecase(runRepo repository.IWorkflowRunRepository) *CancelRunUsecase {
+func NewCancelRunUsecase(runRepo WorkflowRunRepository) *CancelRunUsecase {
 	return &CancelRunUsecase{runRepo: runRepo}
 }
 

@@ -6,7 +6,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
-	"github.com/open-git/backend/internal/domain/repository"
 )
 
 type RerunRunInput struct {
@@ -15,10 +14,10 @@ type RerunRunInput struct {
 }
 
 type RerunRunUsecase struct {
-	runRepo repository.IWorkflowRunRepository
+	runRepo WorkflowRunRepository
 }
 
-func NewRerunRunUsecase(runRepo repository.IWorkflowRunRepository) *RerunRunUsecase {
+func NewRerunRunUsecase(runRepo WorkflowRunRepository) *RerunRunUsecase {
 	return &RerunRunUsecase{runRepo: runRepo}
 }
 
