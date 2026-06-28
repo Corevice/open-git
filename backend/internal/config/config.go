@@ -32,6 +32,7 @@ type Config struct {
 	MetricsEnabled     bool
 	MetricsPath        string
 	MetricsAuthToken   string
+	LogLevel           string
 }
 
 func Load() Config {
@@ -73,6 +74,7 @@ func Load() Config {
 		MetricsEnabled:    getenvBool("METRICS_ENABLED", true),
 		MetricsPath:       getenv("METRICS_PATH", "/metrics"),
 		MetricsAuthToken:  os.Getenv("METRICS_AUTH_TOKEN"),
+		LogLevel:          getenv("LOG_LEVEL", "info"),
 	}
 }
 
@@ -92,6 +94,11 @@ func (c *Config) Validate() error {
 		log.Printf("METRICS_PATH %q invalid, falling back to /metrics", c.MetricsPath)
 		c.MetricsPath = "/metrics"
 	}
+	normalized, err := validateLogLevel(c.LogLevel)
+	if err != nil {
+		log.Printf("LOG_LEVEL %q is invalid, falling back to info", c.LogLevel)
+	}
+	c.LogLevel = normalized
 	if c.DBType == "postgres" && c.DBDSN == "" {
 		return fmt.Errorf("DB_DSN is required when DB_TYPE is postgres")
 	}
@@ -99,6 +106,15 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("JWT_SECRET is required")
 	}
 	return nil
+}
+
+func validateLogLevel(level string) (string, error) {
+	switch strings.ToLower(level) {
+	case "trace", "debug", "info", "warn", "error", "fatal":
+		return strings.ToLower(level), nil
+	default:
+		return "info", fmt.Errorf("invalid log level %q", level)
+	}
 }
 
 func getenv(key, defaultVal string) string {

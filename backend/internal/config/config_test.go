@@ -51,6 +51,15 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: "port",
 		},
+		{
+			name: "invalid LogLevel does not fail validation",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				LogLevel:  "badvalue",
+			},
+		},
 	}
 
 	for _, tt := range tests {
