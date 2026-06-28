@@ -40,7 +40,7 @@ func (h *PullRequestHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareF
 	g.GET("/repos/:owner/:repo/pulls", h.ListPullRequests, auth, repoScope)
 	g.POST("/repos/:owner/:repo/pulls", h.CreatePullRequest, auth, repoScope)
 	g.GET("/repos/:owner/:repo/pulls/:number", h.GetPullRequest, auth, repoScope)
-	g.POST("/repos/:owner/:repo/pulls/:number/merge", h.MergePullRequest, auth, repoScope)
+	g.PUT("/repos/:owner/:repo/pulls/:number/merge", h.MergePullRequest, auth, repoScope)
 }
 
 type createPullRequestRequest struct {

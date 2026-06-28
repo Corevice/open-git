@@ -398,6 +398,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, createCommentUC, updateIssueUC, resolveRepo)
 	pullRequestHandler := handler.NewPullRequestHandler(nil, nil, nil, resolveRepo)
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
+	rateLimitHandler := handler.NewRateLimitHandler()
+	rootHandler := handler.NewRootHandler()
 
 	gitHTTPHandler := handler.NewGitHTTPHandler(
 		cfg.GitDataRoot,
@@ -427,6 +429,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	issueHandler.RegisterRoutes(api, authMiddleware)
 	pullRequestHandler.RegisterRoutes(api, authMiddleware)
 	oauthHandler.RegisterRoutes(api, authMiddleware)
+	api.GET("/rate_limit", rateLimitHandler.Get)
+	api.GET("/", rootHandler.Get)
 	e.GET("/:owner/:repo.git/info/refs", gitHTTPHandler.InfoRefs, realOptionalGitAuth)
 	e.POST("/:owner/:repo.git/git-upload-pack", gitHTTPHandler.UploadPack, realOptionalGitAuth)
 	e.POST("/:owner/:repo.git/git-receive-pack", gitHTTPHandler.ReceivePack, realGitBasicAuth)
@@ -442,6 +446,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	contentHandler.RegisterRoutes(v3)
 	issueHandler.RegisterRoutes(v3, authMiddleware)
 	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
+	v3.GET("/rate_limit", rateLimitHandler.Get)
+	v3.GET("", rootHandler.Get)
 
 	v3Tokens := v3.Group("/user/tokens", authMiddleware)
 	v3Tokens.GET("", tokenHandler.List)
