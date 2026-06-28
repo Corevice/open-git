@@ -44,7 +44,7 @@ func (m *mockLabelRepo) Update(_ context.Context, _ *entity.Label) error {
 	return nil
 }
 
-func (m *mockLabelRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+func (m *mockLabelRepo) Delete(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
 
