@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "open-git.fullname" . }}
+  labels:
+    {{- include "open-git.labels" . | nindent 4 }}
+data:
+  DB_TYPE: {{ .Values.db.type | quote }}
+  REDIS_ADDR: {{ .Values.redis.addr | quote }}
+  PORT: {{ .Values.service.backend.port | default 8080 | quote }}
+  GIT_STORAGE_PATH: {{ .Values.persistence.reposPath | default "/data/repos" | quote }}
+  MINIO_ENDPOINT: {{ .Values.minio.endpoint | quote }}

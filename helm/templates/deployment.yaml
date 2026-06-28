@@ -27,9 +27,25 @@ spec:
               protocol: TCP
           env:
             - name: PORT
-              value: "8080"
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "open-git.fullname" . }}
+                  key: PORT
             - name: DB_TYPE
-              value: {{ .Values.db.type | quote }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "open-git.fullname" . }}
+                  key: DB_TYPE
+            - name: GIT_STORAGE_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "open-git.fullname" . }}
+                  key: GIT_STORAGE_PATH
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-git.fullname" . }}
+                  key: jwt-secret
             {{- if eq .Values.db.type "postgres" }}
             - name: POSTGRES_HOST
               value: {{ .Values.db.postgres.host | quote }}
@@ -42,24 +58,30 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "open-git.fullname" . }}-db
-                  key: postgres-password
+                  name: {{ include "open-git.fullname" . }}
+                  key: db-password
             {{- else }}
             - name: SQLITE_PATH
               value: {{ .Values.db.sqlite.path | quote }}
             {{- end }}
             - name: REDIS_ADDR
-              value: {{ .Values.redis.addr | quote }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "open-git.fullname" . }}
+                  key: REDIS_ADDR
             {{- if .Values.minio.enabled }}
             - name: MINIO_ENDPOINT
-              value: {{ .Values.minio.endpoint | quote }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "open-git.fullname" . }}
+                  key: MINIO_ENDPOINT
             - name: MINIO_ACCESS_KEY
               value: {{ .Values.minio.accessKey | quote }}
             - name: MINIO_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "open-git.fullname" . }}-minio
-                  key: secret-key
+                  name: {{ include "open-git.fullname" . }}
+                  key: minio-root-password
             - name: MINIO_BUCKET
               value: {{ .Values.minio.bucket | quote }}
             {{- end }}

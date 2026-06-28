@@ -23,10 +23,8 @@ autoscaling:
   targetCPUUtilizationPercentage: 70
 
 persistence:
-  repositories:
-    size: 50Gi
-    accessMode: ReadWriteOnce
-    retainOnDelete: true
+  enabled: true
+  reposSize: "20Gi"
 
 db:
   type: sqlite  # sqlite or postgres
@@ -64,7 +62,9 @@ ssh:
   serviceType: LoadBalancer
 
 secrets:
-  existingSecret: ""
+  jwtSecret: ""
+  dbPassword: ""
+  minioRootPassword: ""
 
 serviceAccount:
   create: true
