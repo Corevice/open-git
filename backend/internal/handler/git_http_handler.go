@@ -321,10 +321,6 @@ func (h *GitHTTPHandler) rejectProtectedUpdates(ctx context.Context, repo *Resol
 			if err := h.rejectProtectedForcePush(rule, branch); err != nil {
 				return err
 			}
-			continue
-		}
-		if err := h.rejectProtectedDirectPush(branch); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -348,12 +344,6 @@ func (h *GitHTTPHandler) rejectProtectedDeletion(rule GitBranchProtectionRule, n
 	}
 	return echo.NewHTTPError(http.StatusForbidden, map[string]string{
 		"message": "deletion of protected branch not allowed",
-	})
-}
-
-func (h *GitHTTPHandler) rejectProtectedDirectPush(branch string) error {
-	return echo.NewHTTPError(http.StatusForbidden, map[string]string{
-		"message": fmt.Sprintf("direct push to protected branch %q is not allowed; open a pull request instead", branch),
 	})
 }
 
@@ -383,5 +373,10 @@ func isForcePush(repo *gogit.Repository, oldHash, newHash plumbing.Hash) bool {
 	if err != nil || len(mergeBases) == 0 {
 		return true
 	}
-	return mergeBases[0].Hash != oldHash
+	for _, mergeBase := range mergeBases {
+		if mergeBase.Hash == oldHash {
+			return false
+		}
+	}
+	return true
 }

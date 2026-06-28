@@ -18,19 +18,29 @@ type MergePRInput struct {
 	OrganizationID uuid.UUID
 	RepositoryID   uuid.UUID
 	ActorID        uuid.UUID
-	RequesterRole  string
-	Number         int
-	MergeMethod    string
+	// Deprecated: role is resolved from ActorID via membershipRepo; this field is ignored.
+	RequesterRole string
+	Number        int
+	MergeMethod   string
 }
 
 type MergePRUsecase struct {
 	prRepo               repository.IPullRequestRepository
 	branchProtectionRepo repository.IBranchProtectionRepository
+	membershipRepo       repository.IMembershipRepository
 	reviewRepo           repository.IReviewRepository
 	workflowRunRepo      repository.IWorkflowRunRepository
 	auditLogRepo         repository.IAuditLogRepository
 	gitService           service.GitService
 	txManager            repository.TransactionManager
+}
+
+type MergePRUsecaseOption func(*MergePRUsecase)
+
+func WithMembershipRepo(membershipRepo repository.IMembershipRepository) MergePRUsecaseOption {
+	return func(uc *MergePRUsecase) {
+		uc.membershipRepo = membershipRepo
+	}
 }
 
 func NewMergePRUsecase(
@@ -41,8 +51,9 @@ func NewMergePRUsecase(
 	auditLogRepo repository.IAuditLogRepository,
 	gitService service.GitService,
 	txManager repository.TransactionManager,
+	opts ...MergePRUsecaseOption,
 ) *MergePRUsecase {
-	return &MergePRUsecase{
+	uc := &MergePRUsecase{
 		prRepo:               prRepo,
 		branchProtectionRepo: branchProtectionRepo,
 		reviewRepo:           reviewRepo,
@@ -51,6 +62,10 @@ func NewMergePRUsecase(
 		gitService:           gitService,
 		txManager:            txManager,
 	}
+	for _, opt := range opts {
+		opt(uc)
+	}
+	return uc
 }
 
 func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*entity.PullRequest, error) {
@@ -67,7 +82,12 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 		mergeMethod = "merge"
 	}
 
-	if err := uc.checkBranchProtection(ctx, input.RepositoryID, pr, mergeMethod, input.RequesterRole); err != nil {
+	requesterRole, err := uc.resolveRequesterRole(ctx, input.OrganizationID, input.ActorID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := uc.checkBranchProtection(ctx, input.RepositoryID, pr, mergeMethod, requesterRole); err != nil {
 		return nil, err
 	}
 
@@ -101,6 +121,18 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 	}
 
 	return pr, nil
+}
+
+func (uc *MergePRUsecase) resolveRequesterRole(ctx context.Context, organizationID, actorID uuid.UUID) (string, error) {
+	if uc.membershipRepo == nil {
+		return "", nil
+	}
+
+	role, err := uc.membershipRepo.GetRole(ctx, organizationID, actorID)
+	if err != nil {
+		return "", err
+	}
+	return role, nil
 }
 
 func (uc *MergePRUsecase) checkBranchProtection(
@@ -148,7 +180,7 @@ func (uc *MergePRUsecase) checkBranchProtection(
 		}
 	}
 
-	if rule.RequiredLinearHistory && mergeMethod == "merge" {
+	if rule.RequiredLinearHistory && mergeMethod != "squash" && mergeMethod != "rebase" {
 		return fmt.Errorf("%w: merge commit is not allowed; use squash or rebase merge instead", apperror.ErrProtectionNotSatisfied)
 	}
 

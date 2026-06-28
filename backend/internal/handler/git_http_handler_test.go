@@ -225,8 +225,30 @@ func TestForcePushAllowedWhenConfigured(t *testing.T) {
 	middleware.SetAuthContext(c, 42, []string{"repo"})
 
 	err = h.ReceivePack(c)
-	if he, ok := err.(*echo.HTTPError); ok && he.Code == http.StatusUnprocessableEntity {
-		t.Fatalf("force push should be allowed when allow_force_pushes=true, got %v", he)
+	if err != nil {
+		he, ok := err.(*echo.HTTPError)
+		if !ok {
+			t.Fatalf("unexpected error type: %T %v", err, err)
+		}
+		if he.Code == http.StatusForbidden || he.Code == http.StatusUnprocessableEntity {
+			t.Fatalf("force push should be allowed when allow_force_pushes=true, got %v", he)
+		}
+		t.Fatalf("unexpected error: %v", he)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	updatedRepo, err := gogit.PlainOpen(repoPath)
+	if err != nil {
+		t.Fatalf("reopen repo: %v", err)
+	}
+	updatedRef, err := updatedRepo.Reference(plumbing.ReferenceName("refs/heads/main"), true)
+	if err != nil {
+		t.Fatalf("read main ref: %v", err)
+	}
+	if updatedRef.Hash() != newHash {
+		t.Fatalf("main = %s, want %s", updatedRef.Hash(), newHash)
 	}
 }
 
@@ -338,8 +360,19 @@ func TestAllowProtectedBranchDeletionWhenConfigured(t *testing.T) {
 	middleware.SetAuthContext(c, 42, []string{"repo"})
 
 	err = h.ReceivePack(c)
-	if he, ok := err.(*echo.HTTPError); ok && he.Code == http.StatusForbidden {
-		t.Fatalf("branch deletion should be allowed when allow_deletions=true, got %v", he)
+	if err != nil {
+		t.Fatalf("branch deletion should be allowed when allow_deletions=true, got %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	repo, err = gogit.PlainOpen(repoPath)
+	if err != nil {
+		t.Fatalf("reopen repo: %v", err)
+	}
+	if _, err := repo.Reference(plumbing.ReferenceName("refs/heads/main"), true); err == nil {
+		t.Fatal("expected main branch to be deleted")
 	}
 }
 
