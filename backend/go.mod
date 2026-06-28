@@ -13,6 +13,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/prometheus/client_golang v1.22.0
+	github.com/redis/go-redis/v9 v9.14.1
 	github.com/testcontainers/testcontainers-go v0.35.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.35.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -35,7 +36,6 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
-	github.com/redis/go-redis/v9 v9.14.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
