@@ -47,3 +47,25 @@ Chart label
 {{- define "open-git.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
+
+{{/*
+Secret name — existingSecret if set, otherwise auto-generated name.
+*/}}
+{{- define "open-git.secretName" -}}
+{{- if .Values.secrets.existingSecret }}
+{{- .Values.secrets.existingSecret }}
+{{- else }}
+{{- printf "%s-secrets" (include "open-git.fullname" .) }}
+{{- end }}
+{{- end }}
+
+{{/*
+ServiceAccount name
+*/}}
+{{- define "open-git.serviceAccountName" -}}
+{{- if .Values.serviceAccount.name }}
+{{- .Values.serviceAccount.name }}
+{{- else }}
+{{- include "open-git.fullname" . }}
+{{- end }}
+{{- end }}
