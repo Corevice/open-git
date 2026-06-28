@@ -209,3 +209,49 @@ export function createToken(data: {
 export function revokeToken(id: number): Promise<void> {
   return createAuthenticatedClient().tokens.revoke(id);
 }
+
+type ApiUserSummary = { login: string; avatar_url: string };
+
+function getApiBaseUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_API_BASE_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    "http://localhost:8080"
+  );
+}
+
+async function fetchWithToken<T>(token: string, path: string): Promise<T> {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    let message = response.statusText;
+    try {
+      const errorBody = (await response.json()) as { message?: string };
+      message = errorBody.message ?? message;
+    } catch {
+      // ignore JSON parse errors
+    }
+    throw new ApiError(response.status, message);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+export function getOrgs(
+  token: string,
+): Promise<{ login: string; avatar_url: string }[]> {
+  return fetchWithToken<{ login: string; avatar_url: string }[]>(
+    token,
+    "/api/v3/user/orgs",
+  );
+}
+
+export function getCurrentUser(token: string): Promise<ApiUserSummary> {
+  return fetchWithToken<ApiUserSummary>(token, "/api/v3/user");
+}
