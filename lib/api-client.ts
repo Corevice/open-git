@@ -13,6 +13,12 @@ export interface ApiClient {
     body: unknown,
     opts?: { token?: string },
   ): Promise<T>;
+  patch<T>(
+    path: string,
+    body: unknown,
+    opts?: { token?: string },
+  ): Promise<T>;
+  delete(path: string, opts?: { token?: string }): Promise<void>;
 }
 
 export interface CommitsResult<T> {
@@ -53,14 +59,41 @@ export interface MCPLatestResult {
 }
 
 export interface RepoApiClient extends ApiClient {
-  getRepo<T>(owner: string, repo: string): Promise<T>;
+  getRepo<T>(
+    owner: string,
+    repo: string,
+    opts?: { token?: string },
+  ): Promise<T>;
   getContents<T>(
     owner: string,
     repo: string,
     path?: string,
     ref?: string,
   ): Promise<T>;
-  getBranches<T>(owner: string, repo: string): Promise<T>;
+  getBranches<T>(
+    owner: string,
+    repo: string,
+    opts?: { token?: string },
+  ): Promise<T>;
+  createRef(
+    owner: string,
+    repo: string,
+    ref: string,
+    sha: string,
+    opts?: { token?: string },
+  ): Promise<void>;
+  deleteBranch(
+    owner: string,
+    repo: string,
+    branch: string,
+    opts?: { token?: string },
+  ): Promise<void>;
+  updateDefaultBranch(
+    owner: string,
+    repo: string,
+    branch: string,
+    opts?: { token?: string },
+  ): Promise<void>;
   getCommits<T>(
     owner: string,
     repo: string,
@@ -155,6 +188,17 @@ function encodeRepoPath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
+function repoApiPath(owner: string, repo: string, suffix = ""): string {
+  return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${suffix}`;
+}
+
+const SIGN_IN_PATH = "/sign-in";
+
+function redirectToSignIn(): void {
+  if (typeof window === "undefined") return;
+  window.location.assign(new URL(SIGN_IN_PATH, window.location.origin).pathname);
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let body: { code?: string; message?: string } = {};
@@ -168,12 +212,19 @@ async function handleResponse<T>(res: Response): Promise<T> {
       code: body.code ?? String(res.status),
       message: body.message ?? res.statusText,
     };
-    if (res.status === 401 && typeof window !== "undefined") {
-      window.location.href = "/sign-in";
+    if (res.status === 401) {
+      redirectToSignIn();
     }
     throw error;
   }
-  return res.json() as Promise<T>;
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  const text = await res.text();
+  if (!text) {
+    return undefined as T;
+  }
+  return JSON.parse(text) as T;
 }
 
 export function createApiClient(baseUrl: string): ApiClient {
@@ -203,6 +254,30 @@ export function createApiClient(baseUrl: string): ApiClient {
       });
       return handleResponse<T>(res);
     },
+
+    async patch<T>(
+      path: string,
+      body: unknown,
+      opts?: { token?: string },
+    ): Promise<T> {
+      const res = await fetch(`${base}${path}`, {
+        method: "PATCH",
+        headers: {
+          ...buildHeaders(opts?.token),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      return handleResponse<T>(res);
+    },
+
+    async delete(path: string, opts?: { token?: string }): Promise<void> {
+      const res = await fetch(`${base}${path}`, {
+        method: "DELETE",
+        headers: buildHeaders(opts?.token),
+      });
+      await handleResponse<void>(res);
+    },
   };
 }
 
@@ -212,8 +287,8 @@ export function createRepoApiClient(baseUrl: string): RepoApiClient {
 
   return {
     ...base,
-    getRepo(owner, repo) {
-      return base.get(`/repos/${owner}/${repo}`);
+    getRepo(owner, repo, opts) {
+      return base.get(repoApiPath(owner, repo), opts);
     },
     getContents(owner, repo, path = "", ref?) {
       const encodedPath = encodeRepoPath(path);
@@ -221,8 +296,20 @@ export function createRepoApiClient(baseUrl: string): RepoApiClient {
       const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
       return base.get(`/repos/${owner}/${repo}/contents${pathSegment}${query}`);
     },
-    getBranches(owner, repo) {
-      return base.get(`/repos/${owner}/${repo}/branches?per_page=100`);
+    getBranches(owner, repo, opts) {
+      return base.get(`${repoApiPath(owner, repo)}/branches?per_page=100`, opts);
+    },
+    async createRef(owner, repo, ref, sha, opts) {
+      await base.post(`${repoApiPath(owner, repo)}/git/refs`, { ref, sha }, opts);
+    },
+    async deleteBranch(owner, repo, branch, opts) {
+      await base.delete(
+        `${repoApiPath(owner, repo)}/git/refs/heads/${encodeURIComponent(branch)}`,
+        opts,
+      );
+    },
+    async updateDefaultBranch(owner, repo, branch, opts) {
+      await base.patch(repoApiPath(owner, repo), { default_branch: branch }, opts);
     },
     async getCommits(owner, repo, sha, page, perPage = 30) {
       const url = `${apiBase}/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(sha)}&per_page=${perPage}&page=${page}`;
@@ -274,30 +361,10 @@ export function createRepoApiClient(baseUrl: string): RepoApiClient {
       return base.get(path, { token: opts?.token });
     },
     async deleteMCPRun(runId, opts) {
-      const res = await fetch(
-        `${apiBase}/api/v1/mcp/verification/runs/${encodeURIComponent(runId)}`,
-        {
-          method: "DELETE",
-          headers: buildHeaders(opts?.token),
-        },
+      await base.delete(
+        `/api/v1/mcp/verification/runs/${encodeURIComponent(runId)}`,
+        opts,
       );
-      if (!res.ok) {
-        let body: { code?: string; message?: string } = {};
-        try {
-          body = await res.json();
-        } catch {
-          // ignore non-JSON error bodies
-        }
-        const error: ApiError = {
-          status: res.status,
-          code: body.code ?? String(res.status),
-          message: body.message ?? res.statusText,
-        };
-        if (res.status === 401 && typeof window !== "undefined") {
-          window.location.href = "/sign-in";
-        }
-        throw error;
-      }
     },
     createRepo(name, visibility, options) {
       return base.post("/api/v1/user/repos", {
