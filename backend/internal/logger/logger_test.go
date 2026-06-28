@@ -35,7 +35,7 @@ func TestInit_InvalidLevel_FallsBackToInfo(t *testing.T) {
 func TestGet_ReturnsNonZeroLogger(t *testing.T) {
 	Init("info")
 	l := Get()
-	if l == (zerolog.Logger{}) {
-		t.Fatal("Get() returned zero logger")
+	if !l.Info().Enabled() {
+		t.Fatal("Get() returned zero or disabled logger")
 	}
 }
