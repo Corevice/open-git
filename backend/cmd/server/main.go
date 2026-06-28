@@ -30,6 +30,7 @@ import (
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/handler"
 	appmiddleware "github.com/open-git/backend/internal/middleware"
+	"github.com/open-git/backend/internal/infrastructure/crypto"
 	infraDB "github.com/open-git/backend/internal/infrastructure/database"
 	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
@@ -38,6 +39,7 @@ import (
 	orgUC "github.com/open-git/backend/internal/usecase/org"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
 	userUC "github.com/open-git/backend/internal/usecase/user"
+	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
 )
 
 var (
@@ -397,6 +399,24 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	listIssuesUC := issueusecase.NewListIssuesUsecase(issueRepo)
 	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, createCommentUC, updateIssueUC, resolveRepo)
 	pullRequestHandler := handler.NewPullRequestHandler(nil, nil, nil, resolveRepo)
+
+	webhookEncryptor := crypto.NewSecretEncryptorFromEnv()
+	webhookRepo := infrarepo.NewWebhookRepository(sqlxDB, webhookEncryptor)
+	webhookAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	createWebhookUC := webhookusecase.NewCreateWebhookUsecase(webhookRepo, webhookAuditRepo, webhookEncryptor)
+	listWebhooksUC := webhookusecase.NewListWebhooksUsecase(webhookRepo)
+	getWebhookUC := webhookusecase.NewGetWebhookUsecase(webhookRepo)
+	updateWebhookUC := webhookusecase.NewUpdateWebhookUsecase(webhookRepo, webhookAuditRepo, webhookEncryptor)
+	deleteWebhookUC := webhookusecase.NewDeleteWebhookUsecase(webhookRepo, webhookAuditRepo)
+	webhookHandler := handler.NewWebhookHandler(
+		createWebhookUC,
+		listWebhooksUC,
+		getWebhookUC,
+		updateWebhookUC,
+		deleteWebhookUC,
+		resolveRepo,
+	)
+
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 	rateLimitHandler := handler.NewRateLimitHandler()
 	rootHandler := handler.NewRootHandler()
@@ -446,6 +466,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	contentHandler.RegisterRoutes(v3)
 	issueHandler.RegisterRoutes(v3, authMiddleware)
 	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
+	webhookHandler.RegisterRoutes(v3, authMiddleware)
 	v3.GET("/rate_limit", rateLimitHandler.Get)
 	v3.GET("", rootHandler.Get)
 
