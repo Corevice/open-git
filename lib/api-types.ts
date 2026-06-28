@@ -105,3 +105,18 @@ export type OAuthAuthorizationInfo = {
   granted_scopes: string[];
   updated_at: string;
 };
+
+export interface ObservabilityDashboard {
+  uid: string;
+  title: string;
+  category: "system" | "git" | "api" | "ci" | "db";
+  grafana_path: string;
+}
+
+export interface ObservabilityDashboardsResponse {
+  dashboards: ObservabilityDashboard[];
+}
+
+export interface GrafanaURLResponse {
+  url: string;
+}
