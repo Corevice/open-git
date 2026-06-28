@@ -2,25 +2,16 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
-import LogViewer from "@/components/actions/LogViewer";
+import { useEffect, useRef, useState } from "react";
+import { RunStatusBadge } from "@/components/actions/RunStatusBadge";
+import { useJobLogStream } from "@/hooks/useJobLogStream";
 import { API_TOKEN_KEY } from "@/lib/api";
-import { env } from "@/lib/env";
-import type { WorkflowJobResponse } from "@/types/runner";
-
-type WorkflowStep = {
-  name: string;
-  status: string;
-  conclusion: string | null;
-  number: number;
-};
 
 type WorkflowJob = {
   id: number;
   name: string;
   status: string;
   conclusion: string | null;
-  steps?: WorkflowStep[];
 };
 
 type WorkflowRunDetail = {
@@ -33,19 +24,62 @@ type WorkflowRunDetail = {
   head_sha: string;
   parse_error_line?: number;
   parse_error_message?: string;
-  jobs?: WorkflowJob[];
 };
 
-function stepStatusIcon(status: string, conclusion: string | null): string {
-  if (status === "in_progress" || status === "queued") return "🟡";
-  if (conclusion === "success") return "✅";
-  if (conclusion === "failure") return "❌";
-  if (conclusion === "skipped" || conclusion === "cancelled") return "⊘";
-  return "○";
+type WorkflowJobsResponse = {
+  total_count: number;
+  jobs: WorkflowJob[];
+};
+
+function EmptyState({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-md border border-[#d0d7de] bg-white px-6 py-12 text-center">
+      <h2 className="text-base font-semibold text-[#1f2328]">{title}</h2>
+      <p className="mt-2 text-sm text-[#656d76]">{description}</p>
+    </div>
+  );
 }
 
-function jobStatusIcon(job: WorkflowJob): string {
-  return stepStatusIcon(job.status, job.conclusion);
+function StreamingIndicator() {
+  return (
+    <span className="inline-flex items-center gap-2 text-xs text-[#656d76]">
+      <span
+        className="inline-block h-2 w-2 animate-pulse rounded-full bg-[#0969da]"
+        aria-hidden
+      />
+      <span>Streaming</span>
+    </span>
+  );
+}
+
+function LogViewer({ lines, streaming }: { lines: string[]; streaming: boolean }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [lines]);
+
+  return (
+    <div
+      ref={scrollRef}
+      className="max-h-[480px] overflow-y-auto rounded-md border border-[#d0d7de] bg-[#0d1117] p-4 font-mono text-sm text-[#e6edf3]"
+    >
+      {lines.length === 0 ? (
+        <div className="text-[#656d76]">
+          {streaming ? "Waiting for log output…" : "No log output."}
+        </div>
+      ) : (
+        lines.map((line, index) => (
+          <div key={index} className="whitespace-pre-wrap break-all">
+            {line}
+          </div>
+        ))
+      )}
+    </div>
+  );
 }
 
 export default function ActionRunDetailPage() {
@@ -55,13 +89,11 @@ export default function ActionRunDetailPage() {
   const runId = params.id as string;
 
   const [run, setRun] = useState<WorkflowRunDetail | null>(null);
+  const [jobs, setJobs] = useState<WorkflowJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expandedJobIds, setExpandedJobIds] = useState<Set<number>>(new Set());
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
-  const [runnerInfo, setRunnerInfo] = useState<WorkflowJobResponse | null>(
-    null,
-  );
-  const [runnerError, setRunnerError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,14 +101,45 @@ export default function ActionRunDetailPage() {
     async function load() {
       setLoading(true);
       setError(null);
+
+      const headers: Record<string, string> = {
+        Accept: "application/vnd.github+json",
+      };
+      const token =
+        typeof window !== "undefined" ? localStorage.getItem(API_TOKEN_KEY) : null;
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
       try {
-        const res = await fetch(`/api/repos/${owner}/${repo}/actions/runs/${runId}`);
-        if (!res.ok) throw new Error("Failed to load workflow run");
-        const data = (await res.json()) as WorkflowRunDetail;
+        const [runRes, jobsRes] = await Promise.all([
+          fetch(`/api/v3/repos/${owner}/${repo}/actions/runs/${runId}`, {
+            headers,
+          }),
+          fetch(`/api/v3/repos/${owner}/${repo}/actions/runs/${runId}/jobs`, {
+            headers,
+          }),
+        ]);
+
+        if (!runRes.ok) throw new Error("Failed to load workflow run");
+        if (!jobsRes.ok) throw new Error("Failed to load workflow jobs");
+
+        const runData = (await runRes.json()) as WorkflowRunDetail;
+        const jobsData = (await jobsRes.json()) as WorkflowJobsResponse;
+
         if (cancelled) return;
-        setRun(data);
-        if (data.jobs?.length) {
-          setSelectedJobId(data.jobs[0].id);
+
+        setRun(runData);
+        const loadedJobs = jobsData.jobs ?? [];
+        setJobs(loadedJobs);
+
+        const inProgressJob = loadedJobs.find(
+          (job) => job.status === "in_progress" || job.status === "queued",
+        );
+        const initialJob = inProgressJob ?? loadedJobs[0] ?? null;
+        if (initialJob) {
+          setSelectedJobId(initialJob.id);
+          setExpandedJobIds(new Set([initialJob.id]));
         }
       } catch (e) {
         if (!cancelled) {
@@ -93,58 +156,36 @@ export default function ActionRunDetailPage() {
     };
   }, [owner, repo, runId]);
 
-  useEffect(() => {
-    if (selectedJobId === null) {
-      setRunnerInfo(null);
-      setRunnerError(null);
-      return;
-    }
+  const activeJob =
+    jobs.find((job) => job.id === selectedJobId) ??
+    jobs.find((job) => job.status === "in_progress" || job.status === "queued") ??
+    jobs[0] ??
+    null;
 
-    let cancelled = false;
+  const streamEnabled =
+    activeJob != null &&
+    (activeJob.status === "in_progress" ||
+      activeJob.status === "queued" ||
+      activeJob.id === selectedJobId);
 
-    async function loadRunnerInfo() {
-      setRunnerError(null);
-      try {
-        const headers: Record<string, string> = {
-          Accept: "application/json",
-        };
-        const token = localStorage.getItem(API_TOKEN_KEY);
-        if (token) {
-          headers.Authorization = `Bearer ${token}`;
-        }
+  const { lines, status } = useJobLogStream({
+    owner,
+    repo,
+    jobId: activeJob?.id ?? null,
+    enabled: streamEnabled,
+  });
 
-        const baseUrl = env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, "");
-        const response = await fetch(
-          `${baseUrl}/api/v1/${owner}/actions/jobs/${selectedJobId}`,
-          { headers },
-        );
-
-        if (response.status === 404) {
-          if (!cancelled) setRunnerInfo(null);
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error("Failed to load workflow job");
-        }
-
-        const data = (await response.json()) as WorkflowJobResponse;
-        if (!cancelled) setRunnerInfo(data);
-      } catch (e) {
-        if (!cancelled) {
-          setRunnerInfo(null);
-          setRunnerError(
-            e instanceof Error ? e.message : "Failed to load runner info",
-          );
-        }
+  function toggleJobExpanded(jobId: number) {
+    setExpandedJobIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) {
+        next.delete(jobId);
+      } else {
+        next.add(jobId);
       }
-    }
-
-    loadRunnerInfo();
-    return () => {
-      cancelled = true;
-    };
-  }, [owner, selectedJobId]);
+      return next;
+    });
+  }
 
   if (loading) {
     return (
@@ -170,11 +211,9 @@ export default function ActionRunDetailPage() {
     );
   }
 
-  const selectedJob = run.jobs?.find((j) => j.id === selectedJobId) ?? run.jobs?.[0];
-
   return (
     <div className="min-h-screen bg-[#f6f8fa] text-[#1f2328]">
-      <div className="max-w-[1280px] mx-auto px-6 py-6">
+      <div className="mx-auto max-w-[1280px] px-6 py-6">
         <div className="mb-4">
           <Link
             href={`/${owner}/${repo}/actions`}
@@ -182,12 +221,12 @@ export default function ActionRunDetailPage() {
           >
             ← Actions
           </Link>
-          <h1 className="text-2xl font-semibold mt-2">
+          <h1 className="mt-2 text-2xl font-semibold">
             {run.name}{" "}
-            <span className="text-[#656d76] font-normal">#{run.run_number}</span>
+            <span className="font-normal text-[#656d76]">#{run.run_number}</span>
           </h1>
-          <p className="text-sm text-[#656d76] mt-1">
-            <span className="bg-[#ddf4ff] text-[#0969da] px-1.5 py-0.5 rounded font-mono text-[11px]">
+          <p className="mt-1 text-sm text-[#656d76]">
+            <span className="rounded bg-[#ddf4ff] px-1.5 py-0.5 font-mono text-[11px] text-[#0969da]">
               {run.head_branch}
             </span>
             {" · "}
@@ -205,89 +244,66 @@ export default function ActionRunDetailPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-[280px_1fr] gap-6">
-          <div className="space-y-4">
-            <aside className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">
-              <div className="px-4 py-3 bg-[#f6f8fa] border-b border-[#d0d7de] text-sm font-semibold">
-                Jobs
-              </div>
-              {run.jobs && run.jobs.length > 0 ? (
-                <ul>
-                  {run.jobs.map((job) => (
-                    <li key={job.id} className="border-b border-[#d8dee4] last:border-b-0">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedJobId(job.id)}
-                        className={`w-full text-left px-4 py-3 text-sm hover:bg-[#fafbfc] ${
-                          selectedJob?.id === job.id ? "bg-[#ddf4ff] font-semibold" : ""
-                        }`}
-                      >
-                        <span className="mr-2">{jobStatusIcon(job)}</span>
-                        {job.name}
-                      </button>
-                      {selectedJob?.id === job.id && job.steps && job.steps.length > 0 && (
-                        <ul className="bg-[#f6f8fa] border-t border-[#d8dee4]">
-                          {job.steps.map((step) => (
-                            <li
-                              key={step.number}
-                              className="flex items-center gap-2 px-6 py-2 text-xs text-[#656d76]"
-                            >
-                              <span>{stepStatusIcon(step.status, step.conclusion)}</span>
-                              <span>{step.name}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="px-4 py-6 text-sm text-[#656d76]">No jobs</div>
-              )}
+        {jobs.length === 0 ? (
+          <EmptyState
+            title="No jobs found"
+            description="This workflow run does not have any jobs yet."
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_1fr]">
+            <aside className="space-y-2">
+              {jobs.map((job) => {
+                const isExpanded = expandedJobIds.has(job.id);
+                const isSelected = selectedJobId === job.id;
+
+                return (
+                  <section
+                    key={job.id}
+                    className="overflow-hidden rounded-md border border-[#d0d7de] bg-white"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedJobId(job.id);
+                        toggleJobExpanded(job.id);
+                      }}
+                      className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm hover:bg-[#fafbfc] ${
+                        isSelected ? "bg-[#ddf4ff]" : ""
+                      }`}
+                      aria-expanded={isExpanded}
+                    >
+                      <span className="font-medium">{job.name}</span>
+                      <RunStatusBadge status={job.status} conclusion={job.conclusion} />
+                    </button>
+                    {isExpanded && (
+                      <div className="border-t border-[#d8dee4] bg-[#f6f8fa] px-4 py-3 text-xs text-[#656d76]">
+                        Job #{job.id}
+                        {isSelected && activeJob?.id === job.id && status === "streaming" && (
+                          <span className="ml-3 inline-flex items-center gap-1">
+                            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#0969da]" />
+                            Live
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </section>
+                );
+              })}
             </aside>
 
-            <aside className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">
-              <div className="px-4 py-3 bg-[#f6f8fa] border-b border-[#d0d7de] text-sm font-semibold">
-                Runner
+            <main>
+              <div className="mb-3 flex items-center justify-between">
+                <div className="text-sm font-semibold text-[#656d76]">
+                  {activeJob ? `Logs — ${activeJob.name}` : "Logs"}
+                </div>
+                {status === "streaming" && <StreamingIndicator />}
               </div>
-              <div className="space-y-3 px-4 py-4 text-sm">
-                {runnerError ? (
-                  <p className="text-[#cf222e]">{runnerError}</p>
-                ) : runnerInfo ? (
-                  <>
-                    <div>
-                      <div className="text-xs uppercase text-[#656d76]">
-                        Assigned runner
-                      </div>
-                      <div className="mt-1 font-mono text-xs">
-                        {runnerInfo.assigned_runner_id ?? "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs uppercase text-[#656d76]">
-                        Runner type
-                      </div>
-                      <div className="mt-1">{runnerInfo.runner_type ?? "—"}</div>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-[#656d76]">
-                    {selectedJob
-                      ? "No runner assignment for this job."
-                      : "Select a job to view runner assignment."}
-                  </p>
-                )}
-              </div>
-            </aside>
+              {activeJob ? (
+                <LogViewer lines={lines} streaming={status === "streaming"} />
+              ) : null}
+            </main>
           </div>
-
-          <main>
-            <div className="mb-3 text-sm font-semibold text-[#656d76]">
-              {selectedJob ? `Logs — ${selectedJob.name}` : "Logs"}
-            </div>
-            <LogViewer runId={runId} repoOwner={owner} repoName={repo} />
-          </main>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -7,6 +7,8 @@ services:
       - "8080:8080"
     env_file:
       - .env
+    environment:
+      GRAFANA_BASE_URL: ${GRAFANA_BASE_URL:-http://localhost:3001}
     depends_on:
       postgres:
         condition: service_healthy
@@ -132,6 +134,7 @@ services:
       - "3100:3100"
     volumes:
       - open-git-loki:/loki
+      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
     command: -config.file=/etc/loki/local-config.yaml
     restart: unless-stopped
 
@@ -141,9 +144,12 @@ services:
       - "3001:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-admin}
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
     volumes:
       - open-git-grafana:/var/lib/grafana
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
       - loki
