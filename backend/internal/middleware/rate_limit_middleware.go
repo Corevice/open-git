@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"golang.org/x/time/rate"
 )
 
 const (
@@ -22,10 +21,10 @@ const (
 )
 
 type tokenBucket struct {
-	limiter *rate.Limiter
-	limit   int
-	mu      sync.Mutex
-	resetAt time.Time
+	limit     int
+	remaining int
+	mu        sync.Mutex
+	resetAt   time.Time
 }
 
 type rateLimitStore struct {
@@ -73,9 +72,9 @@ func (s *rateLimitStore) getBucket(key string, limit int) *tokenBucket {
 		return bucket
 	}
 	bucket = &tokenBucket{
-		limiter: rate.NewLimiter(rate.Limit(limit), limit),
-		limit:   limit,
-		resetAt: time.Now().Add(time.Hour),
+		limit:     limit,
+		remaining: limit,
+		resetAt:   time.Now().Add(time.Hour),
 	}
 	s.buckets[key] = bucket
 	return bucket
@@ -118,13 +117,14 @@ func RateLimitMiddleware(authenticatedLimit, unauthenticatedLimit int) echo.Midd
 			bucket.mu.Lock()
 			if time.Now().After(bucket.resetAt) {
 				bucket.resetAt = time.Now().Add(time.Hour)
-				bucket.limiter = rate.NewLimiter(rate.Limit(bucket.limit), bucket.limit)
+				bucket.remaining = bucket.limit
 			}
 
-			if !bucket.limiter.Allow() {
+			if bucket.remaining <= 0 {
 				reset := bucket.resetAt.Unix()
+				limitVal := bucket.limit
 				bucket.mu.Unlock()
-				c.Response().Header().Set(rateLimitLimitHeader, strconv.Itoa(bucket.limit))
+				c.Response().Header().Set(rateLimitLimitHeader, strconv.Itoa(limitVal))
 				c.Response().Header().Set(rateLimitRemainingHeader, "0")
 				c.Response().Header().Set(rateLimitResetHeader, strconv.FormatInt(reset, 10))
 				c.Response().Header().Set(retryAfterHeader, strconv.FormatInt(reset, 10))
@@ -133,14 +133,13 @@ func RateLimitMiddleware(authenticatedLimit, unauthenticatedLimit int) echo.Midd
 				})
 			}
 
-			remaining := int(bucket.limiter.Tokens())
-			if remaining < 0 {
-				remaining = 0
-			}
+			bucket.remaining--
+			remaining := bucket.remaining
 			reset := bucket.resetAt.Unix()
+			limitVal := bucket.limit
 			bucket.mu.Unlock()
 
-			c.Response().Header().Set(rateLimitLimitHeader, strconv.Itoa(bucket.limit))
+			c.Response().Header().Set(rateLimitLimitHeader, strconv.Itoa(limitVal))
 			c.Response().Header().Set(rateLimitRemainingHeader, strconv.Itoa(remaining))
 			c.Response().Header().Set(rateLimitResetHeader, strconv.FormatInt(reset, 10))
 			return next(c)
