@@ -27,6 +27,7 @@ import (
 	"github.com/open-git/backend/internal/compat"
 	"github.com/open-git/backend/internal/config"
 	obs "github.com/open-git/backend/observability"
+	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
@@ -413,6 +414,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	prReviewRepo := infrarepo.NewReviewRepository(sqlxDB)
 	prReviewCommentRepo := infrarepo.NewReviewCommentRepository(sqlxDB)
 	bpRepo := infrarepo.NewBranchProtectionRepository(sqlxDB)
+	bpAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
 	wfRepo := infrarepo.NewWorkflowRunRepository(sqlxDB)
 	prAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
 	prTxManager := infrarepo.NewTransactionManager(sqlxDB)
@@ -426,6 +428,30 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		prReviewCommentRepo,
 		gitSvc,
 		resolveRepo,
+	)
+
+	bpReadRepo := &branchProtectionReadRepo{db: sqlxDB}
+	bpWriteRepo := &branchProtectionWriteRepo{db: sqlxDB}
+	bpUpsertUC := repoUC.NewUpsertBranchProtectionUsecase(bpWriteRepo, auditLogRepo)
+	bpDeleteUC := repoUC.NewDeleteBranchProtectionUsecase(bpWriteRepo, auditLogRepo)
+	checkRepoAdmin := func(c echo.Context, repo *entity.Repository) error {
+		userID := appmiddleware.UserUUIDFromContext(c)
+		if repo.OwnerID == userID {
+			return nil
+		}
+		role, err := membershipRepo.GetRole(c.Request().Context(), repo.OrganizationID, userID)
+		if err != nil || (role != "admin" && role != "owner") {
+			return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "Forbidden"})
+		}
+		return nil
+	}
+	branchProtectionHandler := handler.NewBranchProtectionHandler(
+		bpReadRepo,
+		bpUpsertUC,
+		bpDeleteUC,
+		resolveRepo,
+		checkRepoAdmin,
+		bpAuditRepo,
 	)
 
 	webhookEncryptor := crypto.NewSecretEncryptorFromEnv()
@@ -500,6 +526,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	contentHandler.RegisterRoutes(v3)
 	issueHandler.RegisterRoutes(v3, authMiddleware)
 	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
+	branchProtectionHandler.RegisterRoutes(v3, authMiddleware)
 	webhookHandler.RegisterRoutes(v3, authMiddleware)
 	v3.GET("/rate_limit", rateLimitHandler.Get)
 	v3.GET("", rootHandler.Get)
@@ -516,6 +543,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	v1 := e.Group("/api/v1")
 	compatHandler.RegisterRoutes(v1, authMiddleware)
+	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
 
 	var sshServer *sshinfra.SSHServer
 	if cfg.SSHEnabled {
@@ -617,6 +645,131 @@ func httpErrorMessage(he *echo.HTTPError) string {
 	default:
 		return fmt.Sprintf("%v", msg)
 	}
+}
+
+type branchProtectionReadRepo struct {
+	db *sqlx.DB
+}
+
+func (r *branchProtectionReadRepo) GetByPattern(ctx context.Context, orgID, repoID uuid.UUID, pattern string) (*handler.BranchProtectionDetail, error) {
+	query := `SELECT pattern, required_reviews FROM branch_protections WHERE organization_id = ? AND repository_id = ? AND pattern = ?`
+	query = r.db.Rebind(query)
+
+	var (
+		p       string
+		reviews int
+	)
+	err := r.db.QueryRowxContext(ctx, query, orgID, repoID, pattern).Scan(&p, &reviews)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, apperror.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &handler.BranchProtectionDetail{
+		Pattern:                      p,
+		RequiredApprovingReviewCount: reviews,
+		RequiredStatusChecksContexts: []string{},
+	}, nil
+}
+
+func (r *branchProtectionReadRepo) ListByRepository(ctx context.Context, orgID, repoID uuid.UUID) ([]*handler.BranchProtectionDetail, error) {
+	query := `SELECT pattern, required_reviews FROM branch_protections WHERE organization_id = ? AND repository_id = ? ORDER BY pattern`
+	query = r.db.Rebind(query)
+
+	rows, err := r.db.QueryxContext(ctx, query, orgID, repoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]*handler.BranchProtectionDetail, 0)
+	for rows.Next() {
+		var (
+			p       string
+			reviews int
+		)
+		if err := rows.Scan(&p, &reviews); err != nil {
+			return nil, err
+		}
+		result = append(result, &handler.BranchProtectionDetail{
+			Pattern:                      p,
+			RequiredApprovingReviewCount: reviews,
+			RequiredStatusChecksContexts: []string{},
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+type branchProtectionWriteRepo struct {
+	db *sqlx.DB
+}
+
+func (r *branchProtectionWriteRepo) GetByPattern(ctx context.Context, orgID, repoID uuid.UUID, pattern string) (*repoUC.BranchProtectionRule, error) {
+	query := `SELECT pattern, required_reviews FROM branch_protections WHERE organization_id = ? AND repository_id = ? AND pattern = ?`
+	query = r.db.Rebind(query)
+
+	var (
+		p       string
+		reviews int
+	)
+	err := r.db.QueryRowxContext(ctx, query, orgID, repoID, pattern).Scan(&p, &reviews)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, apperror.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &repoUC.BranchProtectionRule{
+		Pattern:                      p,
+		RequiredApprovingReviewCount: reviews,
+	}, nil
+}
+
+func (r *branchProtectionWriteRepo) Upsert(ctx context.Context, orgID, repoID uuid.UUID, rule *repoUC.BranchProtectionRule) (*repoUC.BranchProtectionRule, error) {
+	query := `
+		INSERT OR REPLACE INTO branch_protections (
+			id, organization_id, repository_id, pattern, required_reviews, required_checks, created_at
+		) VALUES (
+			:id, :organization_id, :repository_id, :pattern, :required_reviews, :required_checks, :created_at
+		)
+	`
+	_, err := r.db.NamedExecContext(ctx, query, map[string]any{
+		"id":               uuid.New(),
+		"organization_id":  orgID,
+		"repository_id":    repoID,
+		"pattern":          rule.Pattern,
+		"required_reviews": rule.RequiredApprovingReviewCount,
+		"required_checks":  "[]",
+		"created_at":       time.Now().UTC(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return rule, nil
+}
+
+func (r *branchProtectionWriteRepo) DeleteByPattern(ctx context.Context, orgID, repoID uuid.UUID, pattern string) error {
+	query := `DELETE FROM branch_protections WHERE organization_id = ? AND repository_id = ? AND pattern = ?`
+	query = r.db.Rebind(query)
+
+	result, err := r.db.ExecContext(ctx, query, orgID, repoID, pattern)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
 }
 
 func httpStatusToCode(status int) string {
