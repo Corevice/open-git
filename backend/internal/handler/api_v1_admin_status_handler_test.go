@@ -2,8 +2,6 @@ package handler_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +14,6 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/handler"
 	"github.com/open-git/backend/internal/middleware"
 )
@@ -51,24 +48,6 @@ func (s stubAsynqInspector) GetQueueInfo(string) (*asynq.QueueInfo, error) {
 	return &asynq.QueueInfo{Pending: s.pending}, nil
 }
 
-type adminStatusTokenRepo struct {
-	byHash map[string]*domain.AccessToken
-}
-
-func (m adminStatusTokenRepo) Create(context.Context, *domain.AccessToken) error { return nil }
-func (m adminStatusTokenRepo) ListByUserID(context.Context, int64) ([]*domain.AccessToken, error) {
-	return nil, nil
-}
-func (m adminStatusTokenRepo) Revoke(context.Context, int64, int64) error { return nil }
-func (m adminStatusTokenRepo) FindByTokenHash(_ context.Context, tokenHash string) (*domain.AccessToken, error) {
-	return m.byHash[tokenHash], nil
-}
-
-func adminStatusTokenHash(raw string) string {
-	sum := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(sum[:])
-}
-
 func newAdminStatusTestDB(t *testing.T) *sqlx.DB {
 	t.Helper()
 
@@ -82,22 +61,15 @@ func newAdminStatusTestDB(t *testing.T) *sqlx.DB {
 	return sqlx.NewDb(mockDB, "postgres")
 }
 
-func newAdminStatusEcho(t *testing.T, siteAdmin bool) *echo.Echo {
+func newAdminStatusEcho(t *testing.T, siteAdmin, authenticated bool) *echo.Echo {
 	t.Helper()
 
-	repo := adminStatusTokenRepo{
-		byHash: map[string]*domain.AccessToken{
-			adminStatusTokenHash("valid-token"): {
-				UserID: 42,
-				Scopes: []string{"read"},
-			},
-		},
-	}
-
 	e := echo.New()
-	e.Use(middleware.AuthMiddleware(repo))
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			if authenticated {
+				middleware.SetAuthContext(c, 42, []string{"read"})
+			}
 			if siteAdmin {
 				c.Set("is_admin", true)
 			}
@@ -116,21 +88,18 @@ func newAdminStatusEcho(t *testing.T, siteAdmin bool) *echo.Echo {
 	return e
 }
 
-func serveAdminStatus(t *testing.T, e *echo.Echo, token string) *httptest.ResponseRecorder {
+func serveAdminStatus(t *testing.T, e *echo.Echo) *httptest.ResponseRecorder {
 	t.Helper()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/status", nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	return rec
 }
 
 func TestAPIV1AdminStatusHandler_Unauthenticated(t *testing.T) {
-	e := newAdminStatusEcho(t, false)
-	rec := serveAdminStatus(t, e, "")
+	e := newAdminStatusEcho(t, false, false)
+	rec := serveAdminStatus(t, e)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusUnauthorized, rec.Body.String())
@@ -138,8 +107,8 @@ func TestAPIV1AdminStatusHandler_Unauthenticated(t *testing.T) {
 }
 
 func TestAPIV1AdminStatusHandler_NonAdmin(t *testing.T) {
-	e := newAdminStatusEcho(t, false)
-	rec := serveAdminStatus(t, e, "valid-token")
+	e := newAdminStatusEcho(t, false, true)
+	rec := serveAdminStatus(t, e)
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
@@ -147,8 +116,8 @@ func TestAPIV1AdminStatusHandler_NonAdmin(t *testing.T) {
 }
 
 func TestAPIV1AdminStatusHandler_SiteAdmin(t *testing.T) {
-	e := newAdminStatusEcho(t, true)
-	rec := serveAdminStatus(t, e, "valid-token")
+	e := newAdminStatusEcho(t, true, true)
+	rec := serveAdminStatus(t, e)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())

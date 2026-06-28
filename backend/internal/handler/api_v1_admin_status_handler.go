@@ -9,6 +9,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
 	"github.com/shirou/gopsutil/v3/disk"
+
+	"github.com/open-git/backend/internal/middleware"
 )
 
 const asynqDefaultPendingQueueKey = "asynq:{default}:pending"
@@ -50,6 +52,9 @@ func NewAPIV1AdminStatusHandler(
 }
 
 func (h *APIV1AdminStatusHandler) Handle(c echo.Context) error {
+	if middleware.UserIDFromContext(c) == 0 {
+		return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+	}
 	if !isSiteAdmin(c) {
 		return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "Forbidden"})
 	}
