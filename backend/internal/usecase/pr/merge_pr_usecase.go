@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/open-git/backend/internal/apperror"
@@ -17,6 +18,7 @@ type MergePRInput struct {
 	OrganizationID uuid.UUID
 	RepositoryID   uuid.UUID
 	ActorID        uuid.UUID
+	RequesterRole  string
 	Number         int
 	MergeMethod    string
 }
@@ -65,7 +67,7 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 		mergeMethod = "merge"
 	}
 
-	if err := uc.checkBranchProtection(ctx, input.RepositoryID, pr); err != nil {
+	if err := uc.checkBranchProtection(ctx, input.RepositoryID, pr, mergeMethod, input.RequesterRole); err != nil {
 		return nil, err
 	}
 
@@ -101,15 +103,25 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 	return pr, nil
 }
 
-func (uc *MergePRUsecase) checkBranchProtection(ctx context.Context, repositoryID uuid.UUID, pr *entity.PullRequest) error {
-	protection, err := uc.branchProtectionRepo.GetForRef(ctx, repositoryID, pr.BaseRef)
+func (uc *MergePRUsecase) checkBranchProtection(
+	ctx context.Context,
+	repositoryID uuid.UUID,
+	pr *entity.PullRequest,
+	mergeMethod string,
+	requesterRole string,
+) error {
+	rule, err := uc.branchProtectionRepo.GetForRef(ctx, repositoryID, pr.BaseRef)
 	if err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {
 			return nil
 		}
 		return err
 	}
-	if protection == nil {
+	if rule == nil {
+		return nil
+	}
+
+	if !rule.EnforceAdmins && requesterRole == entity.RoleAdmin {
 		return nil
 	}
 
@@ -117,25 +129,37 @@ func (uc *MergePRUsecase) checkBranchProtection(ctx context.Context, repositoryI
 	if err != nil {
 		return err
 	}
-	if satisfiedReviews < protection.RequiredReviews {
+	if satisfiedReviews < rule.RequiredReviews {
 		return apperror.ErrProtectionNotSatisfied
 	}
 
-	if len(protection.RequiredChecks) == 0 {
-		return nil
+	if len(rule.RequiredChecks) > 0 {
+		headSHA, err := uc.gitService.ResolveRef(ctx, repositoryID, pr.HeadRef)
+		if err != nil {
+			return err
+		}
+
+		runs, err := uc.workflowRunRepo.ListByHeadSHA(ctx, repositoryID, headSHA)
+		if err != nil {
+			return err
+		}
+		if !allRequiredChecksPassed(rule.RequiredChecks, runs) {
+			return apperror.ErrProtectionNotSatisfied
+		}
 	}
 
-	headSHA, err := uc.gitService.ResolveRef(ctx, repositoryID, pr.HeadRef)
-	if err != nil {
-		return err
+	if rule.RequiredLinearHistory && mergeMethod == "merge" {
+		return fmt.Errorf("%w: merge commit is not allowed; use squash or rebase merge instead", apperror.ErrProtectionNotSatisfied)
 	}
 
-	runs, err := uc.workflowRunRepo.ListByHeadSHA(ctx, repositoryID, headSHA)
-	if err != nil {
-		return err
-	}
-	if !allRequiredChecksPassed(protection.RequiredChecks, runs) {
-		return apperror.ErrProtectionNotSatisfied
+	if rule.RequiredConversationResolution {
+		hasOpenConversations, err := uc.reviewRepo.HasOpenConversations(ctx, pr.ID)
+		if err != nil {
+			return err
+		}
+		if hasOpenConversations {
+			return apperror.ErrProtectionNotSatisfied
+		}
 	}
 
 	return nil

@@ -61,11 +61,16 @@ func (m *mockBranchProtectionRepo) GetForRef(_ context.Context, _ uuid.UUID, _ s
 }
 
 type mockReviewRepo struct {
-	satisfiedReviews int
+	satisfiedReviews     int
+	hasOpenConversations bool
 }
 
 func (m *mockReviewRepo) CountSatisfiedReviews(_ context.Context, _ uuid.UUID) (int, error) {
 	return m.satisfiedReviews, nil
+}
+
+func (m *mockReviewRepo) HasOpenConversations(_ context.Context, _ uuid.UUID) (bool, error) {
+	return m.hasOpenConversations, nil
 }
 
 type mockWorkflowRunRepo struct {
@@ -252,5 +257,159 @@ func TestSuccessfulMerge(t *testing.T) {
 	}
 	if auditRepo.calls[0].action != "pr.merge" || auditRepo.calls[0].targetType != "pull_request" {
 		t.Fatalf("unexpected audit payload: %+v", auditRepo.calls[0])
+	}
+}
+
+func TestEnforceAdminsFalseAdminBypassesProtection(t *testing.T) {
+	pr := newOpenPR()
+	prRepo := &mockPullRequestRepo{prs: []*entity.PullRequest{pr}}
+
+	uc := prusecase.NewMergePRUsecase(
+		prRepo,
+		&mockBranchProtectionRepo{
+			protection: &entity.BranchProtection{
+				EnforceAdmins:   false,
+				RequiredReviews: 2,
+				RequiredChecks:  []string{"ci/build"},
+			},
+		},
+		&mockReviewRepo{satisfiedReviews: 0},
+		&mockWorkflowRunRepo{},
+		&mockAuditLogRepo{},
+		&mockGitService{},
+		mockTxManager{},
+	)
+
+	merged, err := uc.Execute(context.Background(), prusecase.MergePRInput{
+		OrganizationID: pr.OrganizationID,
+		RepositoryID:   pr.RepositoryID,
+		ActorID:        uuid.New(),
+		RequesterRole:  entity.RoleAdmin,
+		Number:         pr.Number,
+	})
+	if err != nil {
+		t.Fatalf("expected admin bypass merge, got %v", err)
+	}
+	if merged.State != "merged" {
+		t.Fatalf("expected state merged, got %q", merged.State)
+	}
+}
+
+func TestEnforceAdminsTrueAdminBlockedByReviews(t *testing.T) {
+	pr := newOpenPR()
+
+	uc := prusecase.NewMergePRUsecase(
+		&mockPullRequestRepo{prs: []*entity.PullRequest{pr}},
+		&mockBranchProtectionRepo{
+			protection: &entity.BranchProtection{
+				EnforceAdmins:   true,
+				RequiredReviews: 2,
+			},
+		},
+		&mockReviewRepo{satisfiedReviews: 1},
+		&mockWorkflowRunRepo{},
+		&mockAuditLogRepo{},
+		&mockGitService{},
+		mockTxManager{},
+	)
+
+	_, err := uc.Execute(context.Background(), prusecase.MergePRInput{
+		OrganizationID: pr.OrganizationID,
+		RepositoryID:   pr.RepositoryID,
+		ActorID:        uuid.New(),
+		RequesterRole:  entity.RoleAdmin,
+		Number:         pr.Number,
+	})
+	if !errors.Is(err, apperror.ErrProtectionNotSatisfied) {
+		t.Fatalf("expected ErrProtectionNotSatisfied, got %v", err)
+	}
+}
+
+func TestRequiredLinearHistoryBlocksMergeCommit(t *testing.T) {
+	pr := newOpenPR()
+
+	uc := prusecase.NewMergePRUsecase(
+		&mockPullRequestRepo{prs: []*entity.PullRequest{pr}},
+		&mockBranchProtectionRepo{
+			protection: &entity.BranchProtection{
+				RequiredLinearHistory: true,
+			},
+		},
+		&mockReviewRepo{},
+		&mockWorkflowRunRepo{},
+		&mockAuditLogRepo{},
+		&mockGitService{},
+		mockTxManager{},
+	)
+
+	_, err := uc.Execute(context.Background(), prusecase.MergePRInput{
+		OrganizationID: pr.OrganizationID,
+		RepositoryID:   pr.RepositoryID,
+		ActorID:        uuid.New(),
+		Number:         pr.Number,
+		MergeMethod:    "merge",
+	})
+	if !errors.Is(err, apperror.ErrProtectionNotSatisfied) {
+		t.Fatalf("expected ErrProtectionNotSatisfied, got %v", err)
+	}
+}
+
+func TestRequiredLinearHistoryAllowsSquash(t *testing.T) {
+	pr := newOpenPR()
+
+	uc := prusecase.NewMergePRUsecase(
+		&mockPullRequestRepo{prs: []*entity.PullRequest{pr}},
+		&mockBranchProtectionRepo{
+			protection: &entity.BranchProtection{
+				RequiredLinearHistory: true,
+			},
+		},
+		&mockReviewRepo{},
+		&mockWorkflowRunRepo{},
+		&mockAuditLogRepo{},
+		&mockGitService{},
+		mockTxManager{},
+	)
+
+	merged, err := uc.Execute(context.Background(), prusecase.MergePRInput{
+		OrganizationID: pr.OrganizationID,
+		RepositoryID:   pr.RepositoryID,
+		ActorID:        uuid.New(),
+		Number:         pr.Number,
+		MergeMethod:    "squash",
+	})
+	if err != nil {
+		t.Fatalf("expected squash merge to succeed, got %v", err)
+	}
+	if merged.State != "merged" {
+		t.Fatalf("expected state merged, got %q", merged.State)
+	}
+}
+
+func TestRequiredConversationResolutionBlocksMerge(t *testing.T) {
+	pr := newOpenPR()
+
+	uc := prusecase.NewMergePRUsecase(
+		&mockPullRequestRepo{prs: []*entity.PullRequest{pr}},
+		&mockBranchProtectionRepo{
+			protection: &entity.BranchProtection{
+				RequiredConversationResolution: true,
+			},
+		},
+		&mockReviewRepo{hasOpenConversations: true},
+		&mockWorkflowRunRepo{},
+		&mockAuditLogRepo{},
+		&mockGitService{},
+		mockTxManager{},
+	)
+
+	_, err := uc.Execute(context.Background(), prusecase.MergePRInput{
+		OrganizationID: pr.OrganizationID,
+		RepositoryID:   pr.RepositoryID,
+		ActorID:        uuid.New(),
+		Number:         pr.Number,
+	})
+	if !errors.Is(err, apperror.ErrProtectionNotSatisfied) {
+		t.Fatalf("expected ErrProtectionNotSatisfied, got %v", err)
 	}
 }

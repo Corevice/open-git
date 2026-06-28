@@ -46,9 +46,16 @@ type GitMembershipAccess interface {
 	HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
 }
 
-// GitBranchProtectionStore reports whether a branch matches a protection rule.
+// GitBranchProtectionRule describes enforcement settings for a protected branch.
+type GitBranchProtectionRule struct {
+	Protected        bool
+	AllowForcePushes bool
+	AllowDeletions   bool
+}
+
+// GitBranchProtectionStore reports branch protection settings for push enforcement.
 type GitBranchProtectionStore interface {
-	IsBranchProtected(ctx context.Context, repositoryID uuid.UUID, branch string) (bool, error)
+	GetBranchProtection(ctx context.Context, repositoryID uuid.UUID, branch string) (GitBranchProtectionRule, error)
 }
 
 // GitHTTPHandler serves Git Smart HTTP protocol endpoints.
@@ -214,7 +221,7 @@ func (h *GitHTTPHandler) ReceivePack(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid request body"})
 	}
 
-	if err := h.rejectProtectedForcePush(c.Request().Context(), repo, body); err != nil {
+	if err := h.rejectProtectedUpdates(c.Request().Context(), repo, body); err != nil {
 		var httpErr *echo.HTTPError
 		if errors.As(err, &httpErr) {
 			return httpErr
@@ -277,7 +284,7 @@ func (h *GitHTTPHandler) ensureWriteAccess(ctx context.Context, userID int64, re
 	return nil
 }
 
-func (h *GitHTTPHandler) rejectProtectedForcePush(ctx context.Context, repo *ResolvedGitRepository, body []byte) error {
+func (h *GitHTTPHandler) rejectProtectedUpdates(ctx context.Context, repo *ResolvedGitRepository, body []byte) error {
 	if h.protections == nil {
 		return nil
 	}
@@ -297,20 +304,57 @@ func (h *GitHTTPHandler) rejectProtectedForcePush(ctx context.Context, repo *Res
 		if !ok {
 			continue
 		}
-		protected, err := h.protections.IsBranchProtected(ctx, repo.ID, branch)
+		rule, err := h.protections.GetBranchProtection(ctx, repo.ID, branch)
 		if err != nil {
 			return err
 		}
-		if !protected {
+		if !rule.Protected {
+			continue
+		}
+		if err := h.rejectProtectedDeletion(rule, cmd.New); err != nil {
+			return err
+		}
+		if cmd.New == plumbing.ZeroHash {
 			continue
 		}
 		if isForcePush(grepo, cmd.Old, cmd.New) {
-			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{
-				"message": fmt.Sprintf("force-push is not allowed on protected branch: %s", branch),
-			})
+			if err := h.rejectProtectedForcePush(rule, branch); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := h.rejectProtectedDirectPush(branch); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (h *GitHTTPHandler) rejectProtectedForcePush(rule GitBranchProtectionRule, branch string) error {
+	if rule.AllowForcePushes {
+		return nil
+	}
+	return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{
+		"message": fmt.Sprintf("force-push is not allowed on protected branch: %s", branch),
+	})
+}
+
+func (h *GitHTTPHandler) rejectProtectedDeletion(rule GitBranchProtectionRule, newRef plumbing.Hash) error {
+	if newRef != plumbing.ZeroHash {
+		return nil
+	}
+	if rule.AllowDeletions {
+		return nil
+	}
+	return echo.NewHTTPError(http.StatusForbidden, map[string]string{
+		"message": "deletion of protected branch not allowed",
+	})
+}
+
+func (h *GitHTTPHandler) rejectProtectedDirectPush(branch string) error {
+	return echo.NewHTTPError(http.StatusForbidden, map[string]string{
+		"message": fmt.Sprintf("direct push to protected branch %q is not allowed; open a pull request instead", branch),
+	})
 }
 
 func branchFromRef(ref string) (string, bool) {
