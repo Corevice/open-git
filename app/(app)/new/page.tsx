@@ -196,15 +196,21 @@ export default function NewRepoPage() {
           </div>
 
           <div className="mb-4">
-            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-[#d1d9e0] p-3 hover:bg-[#f6f8fa]">
-              <input type="checkbox" {...register("auto_init")} className="mt-1" />
-              <div>
+            <div className="flex cursor-pointer items-start gap-3 rounded-md border border-[#d1d9e0] p-3 hover:bg-[#f6f8fa]">
+              <input
+                id="auto-init"
+                type="checkbox"
+                checked={watch("auto_init")}
+                onChange={(e) => setValue("auto_init", e.target.checked)}
+                className="mt-1"
+              />
+              <label htmlFor="auto-init" className="cursor-pointer">
                 <div className="text-sm font-semibold">リポジトリをREADMEで初期化する</div>
                 <div className="text-[13px] text-[#59636e]">
                   すぐにクローンできるリポジトリを作成します
                 </div>
-              </div>
-            </label>
+              </label>
+            </div>
           </div>
 
           {error && (

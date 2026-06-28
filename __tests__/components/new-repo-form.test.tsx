@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import NewRepoPage from "@/app/(app)/new/page";
 
@@ -23,9 +23,14 @@ vi.mock("@/lib/api-client", () => ({
 
 describe("NewRepoPage", () => {
   beforeEach(() => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://localhost:8080");
     mockPush.mockClear();
     mockCreateRepo.mockReset();
     mockCreateRepo.mockResolvedValue({ owner: "testuser", name: "my-repo" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("passes auto_init: true to createRepo when checkbox is checked", async () => {
@@ -34,9 +39,7 @@ describe("NewRepoPage", () => {
     render(<NewRepoPage />);
 
     await user.type(screen.getByLabelText(/リポジトリ名/), "my-repo");
-    await user.click(
-      screen.getByRole("checkbox", { name: /リポジトリをREADMEで初期化する/ }),
-    );
+    await user.click(screen.getByLabelText(/リポジトリをREADMEで初期化する/));
     await user.click(screen.getByRole("button", { name: /リポジトリを作成/ }));
 
     await waitFor(() => {
