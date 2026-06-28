@@ -25,6 +25,7 @@ func NewMinioArtifactStorage(endpoint, accessKey, secretKey string, useTLS bool)
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useTLS,
+		Region: "us-east-1",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create minio client: %w", err)

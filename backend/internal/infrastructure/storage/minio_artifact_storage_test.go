@@ -2,6 +2,7 @@ package storage_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,10 +18,27 @@ type fakeMinioOps struct {
 	makeBucketName   string
 }
 
+func (f *fakeMinioOps) noSuchBucketResponse(w http.ResponseWriter, bucket string) {
+	w.Header().Set("Content-Type", "application/xml")
+	w.WriteHeader(http.StatusNotFound)
+	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><Error><Code>NoSuchBucket</Code><Message>The specified bucket does not exist</Message><BucketName>%s</BucketName></Error>`, bucket)
+}
+
 func (f *fakeMinioOps) handleBucket(w http.ResponseWriter, r *http.Request) {
-	bucket := strings.TrimPrefix(r.URL.Path, "/")
+	bucket := strings.Trim(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	if bucket == "" {
 		http.Error(w, "missing bucket", http.StatusBadRequest)
+		return
+	}
+
+	if r.Method == http.MethodGet && r.URL.Query().Has("location") {
+		if f.bucketExists {
+			w.Header().Set("Content-Type", "application/xml")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?><LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/"></LocationConstraint>`)
+			return
+		}
+		f.noSuchBucketResponse(w, bucket)
 		return
 	}
 
@@ -29,7 +47,7 @@ func (f *fakeMinioOps) handleBucket(w http.ResponseWriter, r *http.Request) {
 		if f.bucketExists {
 			w.WriteHeader(http.StatusOK)
 		} else {
-			w.WriteHeader(http.StatusNotFound)
+			f.noSuchBucketResponse(w, bucket)
 		}
 	case http.MethodPut:
 		f.makeBucketCalled = true
