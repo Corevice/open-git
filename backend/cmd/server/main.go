@@ -24,6 +24,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
+	"github.com/open-git/backend/internal/compat"
 	"github.com/open-git/backend/internal/config"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
@@ -36,6 +37,7 @@ import (
 	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
+	compatusecase "github.com/open-git/backend/internal/usecase/compat"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
 	orgUC "github.com/open-git/backend/internal/usecase/org"
 	prusecase "github.com/open-git/backend/internal/usecase/pr"
@@ -438,6 +440,12 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		resolveRepo,
 	)
 
+	compatRepo := infrarepo.NewCompatRepository(sqlxDB)
+	compatRunner := &compat.Runner{}
+	getReportUC := compatusecase.NewGetReportUsecase(compatRepo)
+	triggerRunUC := compatusecase.NewTriggerRunUsecase(compatRepo, compatRunner)
+	compatHandler := handler.NewCompatHandler(getReportUC, triggerRunUC, compatRepo)
+
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 	rateLimitHandler := handler.NewRateLimitHandler()
 	rootHandler := handler.NewRootHandler()
@@ -500,6 +508,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3Keys.GET("", sshKeyHandler.List)
 	v3Keys.POST("", sshKeyHandler.Add)
 	v3Keys.DELETE("/:key_id", sshKeyHandler.Delete)
+
+	v1 := e.Group("/api/v1")
+	compatHandler.RegisterRoutes(v1, authMiddleware)
 
 	var sshServer *sshinfra.SSHServer
 	if cfg.SSHEnabled {
