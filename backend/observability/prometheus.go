@@ -29,6 +29,31 @@ var (
 		},
 		[]string{"method", "path"},
 	)
+
+	gitOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "git_operations_total",
+			Help: "Total git operations.",
+		},
+		[]string{"type", "protocol", "organization_id"},
+	)
+
+	workflowRunsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "workflow_runs_total",
+			Help: "Total workflow runs.",
+		},
+		[]string{"status", "organization_id"},
+	)
+
+	dbQueryDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "db_query_duration_seconds",
+			Help:    "DB query duration.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"query"},
+	)
 )
 
 func init() {
@@ -42,6 +67,25 @@ func init() {
 			log.Printf("metrics: already registered, reusing existing collector: %v", err)
 		}
 	}
+
+	prometheus.MustRegister(gitOperationsTotal)
+	prometheus.MustRegister(workflowRunsTotal)
+	prometheus.MustRegister(dbQueryDuration)
+}
+
+// ObserveGitOperation increments the git operations counter.
+func ObserveGitOperation(opType, protocol, orgID string) {
+	gitOperationsTotal.WithLabelValues(opType, protocol, orgID).Inc()
+}
+
+// ObserveWorkflowRun increments the workflow runs counter.
+func ObserveWorkflowRun(status, orgID string) {
+	workflowRunsTotal.WithLabelValues(status, orgID).Inc()
+}
+
+// ObserveDBQuery records a DB query duration observation.
+func ObserveDBQuery(query string, duration float64) {
+	dbQueryDuration.WithLabelValues(query).Observe(duration)
 }
 
 // EchoPrometheusMiddleware records request count and latency for each route.
@@ -113,6 +157,6 @@ func NewMetricsHandler(authToken string) echo.HandlerFunc {
 }
 
 // RegisterMetricsRoute registers the metrics endpoint on the given Echo instance.
-func RegisterMetricsRoute(e *echo.Echo, path, authToken string) {
-	e.GET(path, NewMetricsHandler(authToken))
+func RegisterMetricsRoute(e *echo.Echo) {
+	e.GET("/metrics", NewMetricsHandler(""))
 }
