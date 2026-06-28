@@ -23,6 +23,7 @@ const newRepoFormSchema = z.object({
   name: repoNameSchema,
   description: z.string().optional(),
   visibility: z.enum(["public", "private"]),
+  auto_init: z.boolean().default(false),
 });
 
 type NewRepoFormValues = z.infer<typeof newRepoFormSchema>;
@@ -47,7 +48,7 @@ export default function NewRepoPage() {
 
   const { register, handleSubmit, formState, watch, setValue } = useForm<NewRepoFormValues>({
     resolver: zodResolver(newRepoFormSchema),
-    defaultValues: { name: "", description: "", visibility: "public" },
+    defaultValues: { name: "", description: "", visibility: "public", auto_init: false },
   });
 
   const visibility = watch("visibility");
@@ -62,7 +63,10 @@ export default function NewRepoPage() {
       const created = (await apiClient.createRepo(
         values.name.trim(),
         values.visibility,
-        values.description?.trim() || undefined,
+        {
+          description: values.description?.trim() || undefined,
+          autoInit: values.auto_init,
+        },
       )) as CreateRepoResponse;
       router.push(`/${created.owner}/${created.name}`);
     } catch (err) {
@@ -189,6 +193,24 @@ export default function NewRepoPage() {
             {visibilityError && (
               <p className="mt-1.5 text-[13px] text-[#cf222e]">{visibilityError}</p>
             )}
+          </div>
+
+          <div className="mb-4">
+            <div className="flex cursor-pointer items-start gap-3 rounded-md border border-[#d1d9e0] p-3 hover:bg-[#f6f8fa]">
+              <input
+                id="auto-init"
+                type="checkbox"
+                checked={watch("auto_init")}
+                onChange={(e) => setValue("auto_init", e.target.checked)}
+                className="mt-1"
+              />
+              <label htmlFor="auto-init" className="cursor-pointer">
+                <div className="text-sm font-semibold">リポジトリをREADMEで初期化する</div>
+                <div className="text-[13px] text-[#59636e]">
+                  すぐにクローンできるリポジトリを作成します
+                </div>
+              </label>
+            </div>
           </div>
 
           {error && (
