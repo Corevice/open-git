@@ -74,7 +74,7 @@ func (m *mockUpdateAdvisoryStateUC) Execute(context.Context, securityusecase.Upd
 
 var testAdvisoryRepo = &entity.Repository{
 	ID:             uuid.MustParse("00000000-0000-0000-0000-000000000099"),
-	OrganizationID: listTestOrgUUID,
+	OrganizationID: middleware.Int64ToUUID(listTestOrgID),
 	Name:           "demo",
 }
 

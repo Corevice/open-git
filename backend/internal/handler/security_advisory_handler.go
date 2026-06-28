@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/apperror"
