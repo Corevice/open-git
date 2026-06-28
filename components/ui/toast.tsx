@@ -64,13 +64,21 @@ function ToastMessage({
     <div
       role="status"
       className={cn(
-        "min-w-[240px] rounded-md border px-4 py-3 text-sm shadow-lg",
+        "flex min-w-[240px] items-start justify-between gap-2 rounded-md border px-4 py-3 text-sm shadow-lg",
         toast.type === "success"
           ? "border-green-200 bg-green-50 text-green-900"
           : "border-red-200 bg-red-50 text-red-900",
       )}
     >
-      {toast.message}
+      <span>{toast.message}</span>
+      <button
+        type="button"
+        aria-label="Dismiss notification"
+        onClick={() => onDismiss(toast.id)}
+        className="shrink-0 rounded p-0.5 text-current opacity-70 hover:opacity-100"
+      >
+        ×
+      </button>
     </div>
   );
 }

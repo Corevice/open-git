@@ -1,13 +1,18 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToastProvider, useToast } from "@/components/ui/toast";
 
-function ToastTrigger() {
+function ToastTrigger({ variant }: { variant: "success" | "error" }) {
   const toast = useToast();
   return (
-    <button type="button" onClick={() => toast.success("Saved")}>
+    <button
+      type="button"
+      onClick={() =>
+        variant === "success" ? toast.success("Saved") : toast.error("Failed")
+      }
+    >
       Show toast
     </button>
   );
@@ -27,7 +32,7 @@ describe("ToastProvider", () => {
 
     render(
       <ToastProvider>
-        <ToastTrigger />
+        <ToastTrigger variant="success" />
       </ToastProvider>,
     );
 
@@ -39,5 +44,18 @@ describe("ToastProvider", () => {
     });
 
     expect(screen.queryByText("Saved")).not.toBeInTheDocument();
+  });
+
+  it("displays error message", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    render(
+      <ToastProvider>
+        <ToastTrigger variant="error" />
+      </ToastProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Show toast" }));
+    expect(screen.getByText("Failed")).toBeInTheDocument();
   });
 });
