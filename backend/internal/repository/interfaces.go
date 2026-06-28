@@ -61,3 +61,14 @@ type ISSHKeyStore interface {
 	Create(ctx context.Context, key *entity.SSHKey) error
 	Delete(ctx context.Context, id, userID uuid.UUID) error
 }
+
+type IWorkflowRepository interface {
+	Upsert(ctx context.Context, wf *entity.Workflow) error
+	GetByID(ctx context.Context, orgID, id uuid.UUID) (*entity.Workflow, error)
+	GetByPath(ctx context.Context, orgID, repoID uuid.UUID, path string) (*entity.Workflow, error)
+	ListByRepo(ctx context.Context, orgID, repoID uuid.UUID) ([]*entity.Workflow, error)
+	SaveRevision(ctx context.Context, rev *entity.WorkflowRevision) error
+	GetLatestRevision(ctx context.Context, workflowID uuid.UUID) (*entity.WorkflowRevision, error)
+	SaveDiagnostics(ctx context.Context, revID uuid.UUID, diags []*entity.WorkflowDiagnostic) error
+	ListDiagnosticsByRevision(ctx context.Context, revID uuid.UUID) ([]*entity.WorkflowDiagnostic, error)
+}
