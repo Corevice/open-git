@@ -16,6 +16,7 @@ type sqlxAuditLogRepository struct {
 }
 
 var _ domainrepo.IAuditLogRepository = (*sqlxAuditLogRepository)(nil)
+var _ domainrepo.IAuditLogSearchRepository = (*sqlxAuditLogRepository)(nil)
 
 func NewAuditLogRepository(db *sqlx.DB) domainrepo.IAuditLogRepository {
 	return &sqlxAuditLogRepository{db: db}
@@ -30,6 +31,8 @@ type AuditLogRow struct {
 	TargetType     string    `db:"target_type"`
 	TargetID       string    `db:"target_id"`
 	Metadata       string    `db:"metadata"`
+	IPAddress      string    `db:"ip_address"`
+	UserAgent      string    `db:"user_agent"`
 	CreatedAt      time.Time `db:"created_at"`
 }
 
@@ -86,9 +89,20 @@ func (r *sqlxAuditLogRepository) Create(ctx context.Context, log *entity.AuditLo
 	}
 
 	const query = `
-		INSERT INTO audit_logs (id, organization_id, actor_id, actor_login, action, target_type, target_id, metadata, created_at)
-		VALUES (:id, :organization_id, :actor_id, :actor_login, :action, :target_type, :target_id, :metadata, :created_at)
+		INSERT INTO audit_logs (id, organization_id, actor_id, actor_login, action, target_type, target_id, metadata, ip_address, user_agent, created_at)
+		VALUES (:id, :organization_id, :actor_id, :actor_login, :action, :target_type, :target_id, :metadata, :ip_address, :user_agent, :created_at)
 	`
+
+	ipAddress := ""
+	userAgent := ""
+	if log.Metadata != nil {
+		if v, ok := log.Metadata["ip_address"].(string); ok {
+			ipAddress = v
+		}
+		if v, ok := log.Metadata["user_agent"].(string); ok {
+			userAgent = v
+		}
+	}
 
 	_, err := r.db.NamedExecContext(ctx, query, map[string]any{
 		"id":              log.ID,
@@ -99,6 +113,8 @@ func (r *sqlxAuditLogRepository) Create(ctx context.Context, log *entity.AuditLo
 		"target_type":     log.TargetType,
 		"target_id":       log.TargetID,
 		"metadata":        string(metaJSON),
+		"ip_address":      ipAddress,
+		"user_agent":      userAgent,
 		"created_at":      log.CreatedAt,
 	})
 	return err
@@ -151,6 +167,104 @@ func (r *sqlxAuditLogRepository) List(ctx context.Context, orgID uuid.UUID, acti
 	}
 
 	offset := (page - 1) * perPage
+	listQuery := baseQuery + ` ORDER BY created_at DESC LIMIT :limit OFFSET :offset`
+	args["limit"] = perPage
+	args["offset"] = offset
+
+	var total int
+	countRows, err := r.db.NamedQueryContext(ctx, countQuery, countArgs)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer countRows.Close()
+	if countRows.Next() {
+		if err := countRows.Scan(&total); err != nil {
+			return nil, 0, err
+		}
+	}
+	if err := countRows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := r.db.NamedQueryContext(ctx, listQuery, args)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var logs []*entity.AuditLog
+	for rows.Next() {
+		var row AuditLogRow
+		if err := rows.StructScan(&row); err != nil {
+			return nil, 0, err
+		}
+		log, err := AuditLogRowToEntity(row)
+		if err != nil {
+			return nil, 0, err
+		}
+		logs = append(logs, log)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	return logs, total, nil
+}
+
+func (r *sqlxAuditLogRepository) Search(ctx context.Context, input domainrepo.AuditLogSearchInput) ([]*entity.AuditLog, int, error) {
+	baseQuery := `
+		SELECT id, organization_id, actor_id, actor_login, action, target_type, target_id, metadata, ip_address, user_agent, created_at
+		FROM audit_logs
+		WHERE organization_id = :org_id
+	`
+	args := map[string]any{
+		"org_id": input.OrganizationID,
+	}
+	countQuery := `SELECT COUNT(*) FROM audit_logs WHERE organization_id = :org_id`
+	countArgs := map[string]any{
+		"org_id": input.OrganizationID,
+	}
+
+	if input.Action != "" {
+		baseQuery += ` AND action = :action`
+		countQuery += ` AND action = :action`
+		args["action"] = input.Action
+		countArgs["action"] = input.Action
+	}
+
+	if input.Phrase != "" {
+		phraseClause := ` AND (action LIKE :phrase OR actor_login LIKE :phrase OR target_type LIKE :phrase OR target_id LIKE :phrase OR metadata LIKE :phrase)`
+		baseQuery += phraseClause
+		countQuery += phraseClause
+		phrase := "%" + input.Phrase + "%"
+		args["phrase"] = phrase
+		countArgs["phrase"] = phrase
+	}
+
+	if input.After != nil {
+		baseQuery += ` AND created_at >= :after`
+		countQuery += ` AND created_at >= :after`
+		args["after"] = *input.After
+		countArgs["after"] = *input.After
+	}
+
+	if input.Before != nil {
+		baseQuery += ` AND created_at <= :before`
+		countQuery += ` AND created_at <= :before`
+		args["before"] = *input.Before
+		countArgs["before"] = *input.Before
+	}
+
+	page := input.Page
+	if page < 1 {
+		page = 1
+	}
+	perPage := input.PerPage
+	if perPage < 1 {
+		perPage = 30
+	}
+	offset := (page - 1) * perPage
+
 	listQuery := baseQuery + ` ORDER BY created_at DESC LIMIT :limit OFFSET :offset`
 	args["limit"] = perPage
 	args["offset"] = offset
