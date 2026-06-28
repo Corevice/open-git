@@ -25,6 +25,11 @@ import (
 	"github.com/open-git/backend/internal/middleware"
 )
 
+// gitMembershipRoleLookup optionally resolves organization roles for branch protection bypass.
+type gitMembershipRoleLookup interface {
+	GetRole(ctx context.Context, userID int64, organizationID uuid.UUID) (string, error)
+}
+
 // ResolvedGitRepository is metadata required to serve Git Smart HTTP for a repo.
 type ResolvedGitRepository struct {
 	ID             uuid.UUID
@@ -49,6 +54,7 @@ type GitMembershipAccess interface {
 // GitBranchProtectionRule describes enforcement settings for a protected branch.
 type GitBranchProtectionRule struct {
 	Protected        bool
+	EnforceAdmins    bool
 	AllowForcePushes bool
 	AllowDeletions   bool
 }
@@ -221,7 +227,7 @@ func (h *GitHTTPHandler) ReceivePack(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid request body"})
 	}
 
-	if err := h.rejectProtectedUpdates(c.Request().Context(), repo, body); err != nil {
+	if err := h.rejectProtectedUpdates(c.Request().Context(), userID, repo, body); err != nil {
 		var httpErr *echo.HTTPError
 		if errors.As(err, &httpErr) {
 			return httpErr
@@ -284,7 +290,7 @@ func (h *GitHTTPHandler) ensureWriteAccess(ctx context.Context, userID int64, re
 	return nil
 }
 
-func (h *GitHTTPHandler) rejectProtectedUpdates(ctx context.Context, repo *ResolvedGitRepository, body []byte) error {
+func (h *GitHTTPHandler) rejectProtectedUpdates(ctx context.Context, userID int64, repo *ResolvedGitRepository, body []byte) error {
 	if h.protections == nil {
 		return nil
 	}
@@ -311,6 +317,9 @@ func (h *GitHTTPHandler) rejectProtectedUpdates(ctx context.Context, repo *Resol
 		if !rule.Protected {
 			continue
 		}
+		if h.adminBypassesProtection(ctx, userID, repo.OrganizationID, rule) {
+			continue
+		}
 		if err := h.rejectProtectedDeletion(rule, cmd.New); err != nil {
 			return err
 		}
@@ -324,6 +333,30 @@ func (h *GitHTTPHandler) rejectProtectedUpdates(ctx context.Context, repo *Resol
 		}
 	}
 	return nil
+}
+
+func (h *GitHTTPHandler) adminBypassesProtection(
+	ctx context.Context,
+	userID int64,
+	organizationID uuid.UUID,
+	rule GitBranchProtectionRule,
+) bool {
+	if rule.EnforceAdmins {
+		return false
+	}
+	return h.isOrgAdmin(ctx, userID, organizationID)
+}
+
+func (h *GitHTTPHandler) isOrgAdmin(ctx context.Context, userID int64, organizationID uuid.UUID) bool {
+	if userID == 0 || organizationID == uuid.Nil || h.memberships == nil {
+		return false
+	}
+	lookup, ok := h.memberships.(gitMembershipRoleLookup)
+	if !ok {
+		return false
+	}
+	role, err := lookup.GetRole(ctx, userID, organizationID)
+	return err == nil && role == entity.RoleAdmin
 }
 
 func (h *GitHTTPHandler) rejectProtectedForcePush(rule GitBranchProtectionRule, branch string) error {

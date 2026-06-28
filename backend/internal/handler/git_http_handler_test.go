@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-git/backend/internal/handler"
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
+	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
 )
 
@@ -32,6 +33,7 @@ func (s *stubResolver) Resolve(_ context.Context, _, _ string) (*handler.Resolve
 
 type stubMembership struct {
 	write bool
+	role  string
 }
 
 func (s *stubMembership) HasReadAccess(_ context.Context, _ int64, _ uuid.UUID) (bool, error) {
@@ -42,8 +44,19 @@ func (s *stubMembership) HasWriteAccess(_ context.Context, _ int64, _ uuid.UUID)
 	return s.write, nil
 }
 
+func (s *stubMembership) GetRole(_ context.Context, _ int64, _ uuid.UUID) (string, error) {
+	if s.role != "" {
+		return s.role, nil
+	}
+	if s.write {
+		return entity.RoleMember, nil
+	}
+	return "", nil
+}
+
 type stubProtectionRule struct {
 	Protected        bool
+	EnforceAdmins    bool
 	AllowForcePushes bool
 	AllowDeletions   bool
 }
@@ -59,6 +72,7 @@ func (s *stubProtection) GetBranchProtection(_ context.Context, _ uuid.UUID, bra
 	}
 	return handler.GitBranchProtectionRule{
 		Protected:        rule.Protected,
+		EnforceAdmins:    rule.EnforceAdmins,
 		AllowForcePushes: rule.AllowForcePushes,
 		AllowDeletions:   rule.AllowDeletions,
 	}, nil
@@ -226,14 +240,7 @@ func TestForcePushAllowedWhenConfigured(t *testing.T) {
 
 	err = h.ReceivePack(c)
 	if err != nil {
-		he, ok := err.(*echo.HTTPError)
-		if !ok {
-			t.Fatalf("unexpected error type: %T %v", err, err)
-		}
-		if he.Code == http.StatusForbidden || he.Code == http.StatusUnprocessableEntity {
-			t.Fatalf("force push should be allowed when allow_force_pushes=true, got %v", he)
-		}
-		t.Fatalf("unexpected error: %v", he)
+		t.Fatalf("force push should be allowed when allow_force_pushes=true, got %v", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -373,6 +380,121 @@ func TestAllowProtectedBranchDeletionWhenConfigured(t *testing.T) {
 	}
 	if _, err := repo.Reference(plumbing.ReferenceName("refs/heads/main"), true); err == nil {
 		t.Fatal("expected main branch to be deleted")
+	}
+}
+
+func TestAdminBypassesProtectedForcePushWhenEnforceAdminsFalse(t *testing.T) {
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "alice", "demo.git")
+	if err := infragit.InitBare(repoPath); err != nil {
+		t.Fatalf("init bare repo: %v", err)
+	}
+	if err := seedMainBranch(t, repoPath); err != nil {
+		t.Fatalf("seed main branch: %v", err)
+	}
+
+	repo, err := gogit.PlainOpen(repoPath)
+	if err != nil {
+		t.Fatalf("open repo: %v", err)
+	}
+	mainRef, err := repo.Reference(plumbing.Head, true)
+	if err != nil {
+		t.Fatalf("head ref: %v", err)
+	}
+	oldHash := mainRef.Hash()
+	newHash := createCommit(t, repo, "other", plumbing.ZeroHash)
+
+	repoID := uuid.New()
+	orgID := uuid.New()
+	h := handler.NewGitHTTPHandler(
+		root,
+		&stubResolver{repo: &handler.ResolvedGitRepository{
+			ID:             repoID,
+			OrganizationID: orgID,
+			OwnerID:        42,
+			DiskPath:       repoPath,
+		}},
+		&stubMembership{write: true, role: entity.RoleAdmin},
+		&stubProtection{rules: map[string]stubProtectionRule{
+			"main": {Protected: true, EnforceAdmins: false},
+		}},
+		nil,
+	)
+
+	body := encodeReceivePackRequest(t, oldHash, newHash)
+	req := httptest.NewRequest(http.MethodPost, "/alice/demo.git/git-receive-pack", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	c.SetPath("/:owner/:repo.git/git-receive-pack")
+	c.SetParamNames("owner", "repo")
+	c.SetParamValues("alice", "demo")
+	middleware.SetAuthContext(c, 42, []string{"repo"})
+
+	if err := h.ReceivePack(c); err != nil {
+		t.Fatalf("admin should bypass protected branch force-push when enforce_admins=false, got %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestAdminBlockedByProtectedForcePushWhenEnforceAdminsTrue(t *testing.T) {
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "alice", "demo.git")
+	if err := infragit.InitBare(repoPath); err != nil {
+		t.Fatalf("init bare repo: %v", err)
+	}
+	if err := seedMainBranch(t, repoPath); err != nil {
+		t.Fatalf("seed main branch: %v", err)
+	}
+
+	repo, err := gogit.PlainOpen(repoPath)
+	if err != nil {
+		t.Fatalf("open repo: %v", err)
+	}
+	mainRef, err := repo.Reference(plumbing.Head, true)
+	if err != nil {
+		t.Fatalf("head ref: %v", err)
+	}
+	oldHash := mainRef.Hash()
+	newHash := createCommit(t, repo, "other", plumbing.ZeroHash)
+
+	repoID := uuid.New()
+	orgID := uuid.New()
+	h := handler.NewGitHTTPHandler(
+		root,
+		&stubResolver{repo: &handler.ResolvedGitRepository{
+			ID:             repoID,
+			OrganizationID: orgID,
+			OwnerID:        42,
+			DiskPath:       repoPath,
+		}},
+		&stubMembership{write: true, role: entity.RoleAdmin},
+		&stubProtection{rules: map[string]stubProtectionRule{
+			"main": {Protected: true, EnforceAdmins: true},
+		}},
+		nil,
+	)
+
+	body := encodeReceivePackRequest(t, oldHash, newHash)
+	req := httptest.NewRequest(http.MethodPost, "/alice/demo.git/git-receive-pack", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	c.SetPath("/:owner/:repo.git/git-receive-pack")
+	c.SetParamNames("owner", "repo")
+	c.SetParamValues("alice", "demo")
+	middleware.SetAuthContext(c, 42, []string{"repo"})
+
+	err = h.ReceivePack(c)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok {
+		t.Fatalf("error type = %T, want *echo.HTTPError", err)
+	}
+	if he.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", he.Code, http.StatusUnprocessableEntity)
 	}
 }
 

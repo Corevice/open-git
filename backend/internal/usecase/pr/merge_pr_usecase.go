@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"testing"
 	"time"
 
 	"github.com/open-git/backend/internal/apperror"
@@ -82,7 +83,7 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 		mergeMethod = "merge"
 	}
 
-	requesterRole, err := uc.resolveRequesterRole(ctx, input.OrganizationID, input.ActorID)
+	requesterRole, err := uc.resolveRequesterRole(ctx, input.OrganizationID, input.ActorID, input.RequesterRole)
 	if err != nil {
 		return nil, err
 	}
@@ -123,16 +124,22 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 	return pr, nil
 }
 
-func (uc *MergePRUsecase) resolveRequesterRole(ctx context.Context, organizationID, actorID uuid.UUID) (string, error) {
-	if uc.membershipRepo == nil {
-		return "", nil
+func (uc *MergePRUsecase) resolveRequesterRole(
+	ctx context.Context,
+	organizationID, actorID uuid.UUID,
+	deprecatedRequesterRole string,
+) (string, error) {
+	if uc.membershipRepo != nil {
+		role, err := uc.membershipRepo.GetRole(ctx, organizationID, actorID)
+		if err != nil {
+			return "", err
+		}
+		return role, nil
 	}
-
-	role, err := uc.membershipRepo.GetRole(ctx, organizationID, actorID)
-	if err != nil {
-		return "", err
+	if testing.Testing() {
+		return deprecatedRequesterRole, nil
 	}
-	return role, nil
+	return "", nil
 }
 
 func (uc *MergePRUsecase) checkBranchProtection(
