@@ -153,18 +153,18 @@ func SetAuthContext(c echo.Context, userID int64, scopes []string) {
 }
 
 func bearerToken(header string) (string, bool) {
-	if header == "" {
+	lower := strings.ToLower(header)
+	var raw string
+	switch {
+	case strings.HasPrefix(lower, "bearer "):
+		raw = header[7:]
+	case strings.HasPrefix(lower, "token "):
+		raw = header[6:]
+	default:
 		return "", false
 	}
-	const prefix = "Bearer "
-	if !strings.HasPrefix(header, prefix) {
-		return "", false
-	}
-	token := strings.TrimSpace(header[len(prefix):])
-	if token == "" {
-		return "", false
-	}
-	return token, true
+	raw = strings.TrimSpace(raw)
+	return raw, raw != ""
 }
 
 func hashToken(raw string) string {
