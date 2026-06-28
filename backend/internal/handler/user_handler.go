@@ -49,20 +49,6 @@ type patchUserRequest struct {
 	Email     string `json:"email"`
 }
 
-type githubErrorBody struct {
-	Message          string `json:"message"`
-	DocumentationURL string `json:"documentation_url,omitempty"`
-}
-
-func RespondGitHubOK(c echo.Context, data any) error {
-	c.Response().Header().Set("X-GitHub-Media-Type", "github.v3")
-	return c.JSON(http.StatusOK, data)
-}
-
-func RespondGitHubError(c echo.Context, status int, message string, _ any) error {
-	return c.JSON(status, githubErrorBody{Message: message})
-}
-
 func (h *UserHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.MiddlewareFunc) {
 	g.GET("/user", h.GetCurrentUser, authMiddleware)
 	g.PATCH("/user", h.UpdateCurrentUser, authMiddleware)
@@ -78,9 +64,9 @@ func (h *UserHandler) GetCurrentUser(c echo.Context) error {
 	user, err := h.getCurrentUser.Execute(c.Request().Context(), userID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return RespondGitHubError(c, http.StatusNotFound, "Not Found", nil)
+			return RespondGitHubError(c, http.StatusNotFound, "Not Found", "", nil)
 		}
-		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
+		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", "", nil)
 	}
 
 	return RespondGitHubOK(c, toUserResponse(user, true, c.Request().Host))
@@ -90,9 +76,9 @@ func (h *UserHandler) GetUserByLogin(c echo.Context) error {
 	user, err := h.getUserByLogin.Execute(c.Request().Context(), c.Param("username"))
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return RespondGitHubError(c, http.StatusNotFound, "Not Found", nil)
+			return RespondGitHubError(c, http.StatusNotFound, "Not Found", "", nil)
 		}
-		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
+		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", "", nil)
 	}
 
 	includeEmail := middleware.UserIDFromContext(c) != 0
@@ -107,7 +93,7 @@ func (h *UserHandler) UpdateCurrentUser(c echo.Context) error {
 
 	var req patchUserRequest
 	if err := c.Bind(&req); err != nil {
-		return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", nil)
+		return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", "", nil)
 	}
 
 	user, err := h.updateCurrentUser.Execute(c.Request().Context(), userUUID, userUC.UpdateUserInput{
@@ -118,12 +104,12 @@ func (h *UserHandler) UpdateCurrentUser(c echo.Context) error {
 	})
 	if err != nil {
 		if err.Error() == "invalid email" {
-			return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", nil)
+			return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", "", nil)
 		}
 		if errors.Is(err, domain.ErrNotFound) {
-			return RespondGitHubError(c, http.StatusNotFound, "Not Found", nil)
+			return RespondGitHubError(c, http.StatusNotFound, "Not Found", "", nil)
 		}
-		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
+		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", "", nil)
 	}
 
 	return RespondGitHubOK(c, entityToUserResponse(user, true, c.Request().Host))
