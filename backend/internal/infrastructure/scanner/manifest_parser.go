@@ -42,6 +42,9 @@ func parseGoMod(content []byte) ([]Dependency, error) {
 		return nil, fmt.Errorf("parse go.mod: %w", err)
 	}
 
+	// Indirect dependencies are included intentionally: they are part of the
+	// module's resolved dependency graph and may carry vulnerabilities even
+	// when not directly imported by application code.
 	deps := make([]Dependency, 0, len(mf.Require))
 	for _, req := range mf.Require {
 		if req == nil {
@@ -81,11 +84,70 @@ func parsePackageJSON(content []byte) ([]Dependency, error) {
 	for name, version := range seen {
 		deps = append(deps, Dependency{
 			Name:      name,
-			Version:   version,
+			Version:   stripSemverPrefix(version),
 			Ecosystem: "npm",
 		})
 	}
 	return deps, nil
+}
+
+// requirementOperators lists PEP 440-style operators in longest-match-first order.
+var requirementOperators = []string{"==", "!=", ">=", "<=", "~=", ">", "<"}
+
+func parseRequirementLine(line string) (name, version string, ok bool) {
+	for _, op := range requirementOperators {
+		idx := strings.Index(line, op)
+		if idx <= 0 {
+			continue
+		}
+		name = strings.TrimSpace(line[:idx])
+		version = strings.TrimSpace(line[idx+len(op):])
+		if name == "" || version == "" {
+			continue
+		}
+		return name, version, true
+	}
+	return "", "", false
+}
+
+func stripSemverPrefix(version string) string {
+	version = strings.TrimSpace(version)
+	for {
+		changed := false
+		switch {
+		case strings.HasPrefix(version, ">="):
+			version = strings.TrimSpace(version[2:])
+			changed = true
+		case strings.HasPrefix(version, "<="):
+			version = strings.TrimSpace(version[2:])
+			changed = true
+		case strings.HasPrefix(version, "!="):
+			version = strings.TrimSpace(version[2:])
+			changed = true
+		case strings.HasPrefix(version, "~"):
+			version = strings.TrimSpace(version[1:])
+			changed = true
+		case strings.HasPrefix(version, "^"):
+			version = strings.TrimSpace(version[1:])
+			changed = true
+		case strings.HasPrefix(version, ">"):
+			version = strings.TrimSpace(version[1:])
+			changed = true
+		case strings.HasPrefix(version, "<"):
+			version = strings.TrimSpace(version[1:])
+			changed = true
+		case strings.HasPrefix(version, "="):
+			version = strings.TrimSpace(version[1:])
+			changed = true
+		case strings.HasPrefix(version, "v") && len(version) > 1 && version[1] >= '0' && version[1] <= '9':
+			version = strings.TrimSpace(version[1:])
+			changed = true
+		}
+		if !changed {
+			break
+		}
+	}
+	return version
 }
 
 func parseRequirementsTxt(content []byte) ([]Dependency, error) {
@@ -105,14 +167,8 @@ func parseRequirementsTxt(content []byte) ([]Dependency, error) {
 			}
 		}
 
-		parts := strings.SplitN(line, "==", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		name := strings.TrimSpace(parts[0])
-		version := strings.TrimSpace(parts[1])
-		if name == "" || version == "" {
+		name, version, ok := parseRequirementLine(line)
+		if !ok {
 			continue
 		}
 

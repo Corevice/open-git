@@ -117,6 +117,33 @@ func TestParseRequirementsTxtInlineComment(t *testing.T) {
 	})
 }
 
+func TestParseRequirementsTxtNonStrictSpecifiers(t *testing.T) {
+	content := []byte("requests>=2.31.0\nflask~=3.0.0\ndjango!=4.2.6\n")
+	deps, err := ParseManifest(ManifestRequirementsTxt, content)
+	if err != nil {
+		t.Fatalf("ParseManifest(requirements.txt) returned error: %v", err)
+	}
+
+	assertDepsEqual(t, deps, []Dependency{
+		{Name: "django", Version: "4.2.6", Ecosystem: "PyPI"},
+		{Name: "flask", Version: "3.0.0", Ecosystem: "PyPI"},
+		{Name: "requests", Version: "2.31.0", Ecosystem: "PyPI"},
+	})
+}
+
+func TestParsePackageJSONStripsSemverPrefix(t *testing.T) {
+	content := []byte(`{"dependencies": {"lodash": "^4.17.21", "express": "~4.18.2"}}`)
+	deps, err := ParseManifest(ManifestPackageJSON, content)
+	if err != nil {
+		t.Fatalf("ParseManifest(package.json) returned error: %v", err)
+	}
+
+	assertDepsEqual(t, deps, []Dependency{
+		{Name: "express", Version: "4.18.2", Ecosystem: "npm"},
+		{Name: "lodash", Version: "4.17.21", Ecosystem: "npm"},
+	})
+}
+
 func TestParseEmptyManifests(t *testing.T) {
 	t.Run("go.mod", func(t *testing.T) {
 		deps, err := ParseManifest(ManifestGoMod, []byte("module example.com/empty\n\ngo 1.21\n"))
