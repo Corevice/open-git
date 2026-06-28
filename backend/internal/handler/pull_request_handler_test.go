@@ -228,6 +228,7 @@ func newPullRequestHandlerEcho(t *testing.T, opts prHandlerOptions) *echo.Echo {
 		gitSvc,
 		prHandlerTxManager{},
 		prHandlerMembershipRepo{},
+		nil,
 	)
 	mergePRUC := prusecase.NewMergePRUsecase(
 		pr,
