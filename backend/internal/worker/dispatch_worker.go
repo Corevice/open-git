@@ -77,7 +77,7 @@ func (w *DispatchWorker) HandleDispatchJob(ctx context.Context, task *asynq.Task
 			TimeoutMinutes: job.TimeoutMinutes,
 		}
 		conclusion := entity.WorkflowJobConclusionSuccess
-		if err := w.actAdapter.Execute(ctx, actPayload); err != nil {
+		if execErr := w.actAdapter.Execute(ctx, actPayload); execErr != nil {
 			conclusion = entity.WorkflowJobConclusionFailure
 		}
 		if err := w.jobRepo.Complete(ctx, jobID, conclusion, time.Now().UTC()); err != nil {
@@ -92,6 +92,9 @@ func (w *DispatchWorker) HandleDispatchJob(ctx context.Context, task *asynq.Task
 			return nil
 		}
 		return fmt.Errorf("find available runner: %w", err)
+	}
+	if runnerEntity == nil {
+		return nil
 	}
 
 	acquired, err := w.jobRepo.AcquireForRunner(ctx, jobID, runnerEntity.ID, job.AcquireLockVersion)

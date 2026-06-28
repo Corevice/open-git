@@ -311,15 +311,20 @@ func TestHandleDispatchJob_ActAdapterFailureCompletesWithFailure(t *testing.T) {
 
 	worker := NewDispatchWorker(nil, &mockRunnerRepo{}, jobRepo, actAdapter, nil)
 
-	payload, _ := json.Marshal(queue.DispatchJobPayload{
+	payload, err := json.Marshal(queue.DispatchJobPayload{
 		JobID:          jobID.String(),
 		OrganizationID: orgID.String(),
 	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
 	task := asynq.NewTask(queue.TypeDispatchJob, payload)
 	if err := worker.HandleDispatchJob(ctx, task); err != nil {
 		t.Fatalf("HandleDispatchJob returned error: %v", err)
 	}
-
+	if jobRepo.completeCalls != 1 {
+		t.Fatalf("expected Complete to be called once, got %d", jobRepo.completeCalls)
+	}
 	if jobRepo.completeConclusion != entity.WorkflowJobConclusionFailure {
 		t.Fatalf("expected failure conclusion, got %q", jobRepo.completeConclusion)
 	}
