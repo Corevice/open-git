@@ -106,6 +106,9 @@ func (h *IssueHandler) CreateIssue(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
+	if req.Title == "" {
+		return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", []GitHubFieldError{{Resource: "Issue", Field: "title", Code: "missing_field"}})
+	}
 
 	issue, err := h.createIssueUC.Execute(c.Request().Context(), issueusecase.CreateIssueInput{
 		OrganizationID: actor.OrganizationID,

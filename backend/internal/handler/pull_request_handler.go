@@ -213,6 +213,12 @@ func (h *PullRequestHandler) CreatePullRequest(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
+	if req.Title == "" {
+		return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", []GitHubFieldError{{Resource: "PullRequest", Field: "title", Code: "missing_field"}})
+	}
+	if req.Head == req.Base {
+		return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", []GitHubFieldError{{Resource: "PullRequest", Field: "head", Code: "invalid"}})
+	}
 
 	pr, err := h.createPRUC.Execute(c.Request().Context(), prusecase.CreatePRInput{
 		OrganizationID: actor.OrganizationID,
