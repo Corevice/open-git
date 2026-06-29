@@ -67,7 +67,7 @@ describe("RunList", () => {
   });
 
   it("disables Previous button on page 1", () => {
-    render(<RunList {...defaultProps} page={1} />);
+    render(<RunList {...defaultProps} page={1} totalCount={60} />);
 
     expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Next" })).not.toBeDisabled();

@@ -291,3 +291,142 @@ func TestCheckDatetimeFields(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckIntegerID(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		passed bool
+	}{
+		{name: "integer id passes", body: `{"id":42}`, passed: true},
+		{name: "string id fails", body: `{"id":"abc"}`, passed: false},
+		{name: "missing id fails", body: `{}`, passed: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := runCheck(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tt.body))
+			}, compat.CheckIntegerID(), "")
+
+			if result.Passed != tt.passed {
+				t.Fatalf("Passed=%v, want %v (diff=%q)", result.Passed, tt.passed, result.Diff)
+			}
+		})
+	}
+}
+
+func TestCheckRequiredFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		fields []string
+		passed bool
+	}{
+		{
+			name:   "all fields present passes",
+			body:   `{"login":"octocat","id":1}`,
+			fields: []string{"login", "id"},
+			passed: true,
+		},
+		{
+			name:   "missing login fails",
+			body:   `{"id":1}`,
+			fields: []string{"login", "id"},
+			passed: false,
+		},
+		{
+			name:   "null field fails",
+			body:   `{"login":null,"id":1}`,
+			fields: []string{"login", "id"},
+			passed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := runCheck(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tt.body))
+			}, compat.CheckRequiredFields(tt.fields...), "")
+
+			if result.Passed != tt.passed {
+				t.Fatalf("Passed=%v, want %v (diff=%q)", result.Passed, tt.passed, result.Diff)
+			}
+		})
+	}
+}
+
+func TestCheckHTTPSURLField(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		field  string
+		passed bool
+	}{
+		{
+			name:   "https clone_url passes",
+			body:   `{"clone_url":"https://github.com/octocat/hello-world.git"}`,
+			field:  "clone_url",
+			passed: true,
+		},
+		{
+			name:   "http clone_url fails",
+			body:   `{"clone_url":"http://github.com/octocat/hello-world.git"}`,
+			field:  "clone_url",
+			passed: false,
+		},
+		{
+			name:   "missing field fails",
+			body:   `{}`,
+			field:  "clone_url",
+			passed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := runCheck(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tt.body))
+			}, compat.CheckHTTPSURLField(tt.field), "")
+
+			if result.Passed != tt.passed {
+				t.Fatalf("Passed=%v, want %v (diff=%q)", result.Passed, tt.passed, result.Diff)
+			}
+		})
+	}
+}
+
+func TestCheckDocumentationURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		passed bool
+	}{
+		{
+			name:   "documentation_url present passes",
+			body:   `{"message":"Not Found","documentation_url":"https://docs.github.com/rest"}`,
+			passed: true,
+		},
+		{
+			name:   "missing documentation_url fails",
+			body:   `{"message":"Not Found"}`,
+			passed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := runCheck(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(tt.body))
+			}, compat.CheckDocumentationURL(), "")
+
+			if result.Passed != tt.passed {
+				t.Fatalf("Passed=%v, want %v (diff=%q)", result.Passed, tt.passed, result.Diff)
+			}
+		})
+	}
+}

@@ -199,6 +199,63 @@ describe("sshKeys", () => {
   });
 });
 
+describe("orgs", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("create calls POST /api/v3/orgs with correct body", async () => {
+    const org = {
+      id: 1,
+      login: "acme",
+      name: "ACME",
+      type: "Organization",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => org,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+    const result = await client.orgs.create({ login: "acme", name: "ACME" });
+
+    expect(result).toEqual(org);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/orgs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ login: "acme", name: "ACME" }),
+      }),
+    );
+  });
+
+  it("delete calls DELETE /api/v3/orgs/acme", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: {
+        get: () => null,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+
+    await expect(client.orgs.delete("acme")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/orgs/acme",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+});
+
 describe("users", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -269,6 +326,85 @@ describe("users", () => {
           Authorization: "Bearer test-bearer-token",
         },
         body: JSON.stringify({ name: "Bob" }),
+      }),
+    );
+  });
+});
+
+describe("repos", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("createForUser({name:'hello', private:false}) calls POST /api/v3/user/repos", async () => {
+    const repo = {
+      id: 1,
+      name: "hello",
+      owner: "alice",
+      visibility: "public",
+      defaultBranch: "main",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => repo,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+
+    const result = await client.repos.createForUser({
+      name: "hello",
+      private: false,
+    });
+
+    expect(result).toEqual(repo);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/user/repos",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "hello", private: false }),
+      }),
+    );
+  });
+
+  it("createForOrg('acme', {name:'proj', private:true}) calls POST /api/v3/orgs/acme/repos", async () => {
+    const repo = {
+      id: 2,
+      name: "proj",
+      owner: "acme",
+      visibility: "private",
+      defaultBranch: "main",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => repo,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+
+    const result = await client.repos.createForOrg("acme", {
+      name: "proj",
+      private: true,
+    });
+
+    expect(result).toEqual(repo);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/orgs/acme/repos",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "proj", private: true }),
       }),
     );
   });

@@ -1,3 +1,11 @@
+global:
+  databaseType: internal
+  storageClass: ""
+
+config:
+  appEnv: production
+  logLevel: info
+
 replicaCount: 1
 
 image:
@@ -10,6 +18,20 @@ image:
     tag: latest
     pullPolicy: IfNotPresent
 
+imagePullSecrets: []
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+persistence:
+  repositories:
+    size: 50Gi
+    accessMode: ReadWriteOnce
+    retainOnDelete: true
+
 db:
   type: sqlite  # sqlite or postgres
   sqlite:
@@ -21,7 +43,17 @@ db:
     user: opengit
     password: ""
 
+externalDatabase:
+  host: ""
+  port: 5432
+  database: opengit
+  existingSecret: ""
+
+postgresql:
+  enabled: true
+
 redis:
+  enabled: true
   addr: redis:6379
 
 minio:
@@ -31,12 +63,39 @@ minio:
   secretKey: minioadmin
   bucket: open-git
 
+ssh:
+  enabled: true
+  serviceType: LoadBalancer
+
+secrets:
+  existingSecret: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+
+networkPolicy:
+  enabled: false
+
+serviceMonitor:
+  enabled: false
+
 ingress:
   enabled: false
   host: ""
   tls: false
   className: ""
   annotations: {}
+  traefikCRD: false        # set true to use IngressRoute CRD instead of Ingress
+  certResolver: "le"       # Traefik cert resolver name
+  ssh:
+    enabled: false         # create IngressRouteTCP for SSH Git access
+    entrypoint: "ssh"      # Traefik entrypoint name for SSH
 
 worker:
   replicaCount: 1

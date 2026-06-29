@@ -1,11 +1,19 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
+
+import {
+  apiClient as defaultApiClient,
+  createRepoApiClient,
+} from "@/lib/api-client";
 
 export interface TreeEntry {
   name: string;
   path: string;
   type: "dir" | "file";
+  sha?: string;
+  size?: number;
   commit_message?: string;
   committed_at?: string;
 }
@@ -14,8 +22,8 @@ interface FileTreeProps {
   entries: TreeEntry[];
   owner: string;
   repo: string;
-  branch: string;
-  currentPath: string;
+  treeRef: string;
+  apiClient?: Pick<ReturnType<typeof createRepoApiClient>, "getContents">;
 }
 
 function formatRelativeTime(dateStr?: string): string {
@@ -36,28 +44,59 @@ function formatRelativeTime(dateStr?: string): string {
   return `${years} year${years === 1 ? "" : "s"} ago`;
 }
 
-function entryHref(
+function blobHref(
   entry: TreeEntry,
   owner: string,
   repo: string,
-  branch: string,
+  treeRef: string,
 ): string {
-  if (entry.type === "dir") {
-    return `/${owner}/${repo}/tree/${branch}/${entry.path}`;
-  }
-  return `/${owner}/${repo}/blob/${branch}/${entry.path}`;
+  return `/${owner}/${repo}/blob/${treeRef}/${entry.path}`;
 }
 
 export default function FileTree({
   entries,
   owner,
   repo,
-  branch,
+  treeRef,
+  apiClient = defaultApiClient,
 }: FileTreeProps) {
+  const [expandedDirs, setExpandedDirs] = useState<Record<string, TreeEntry[]>>(
+    {},
+  );
+  const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set());
+
   const sorted = [...entries].sort((a, b) => {
     if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
+
+  async function handleDirClick(entry: TreeEntry) {
+    if (expandedDirs[entry.path]) {
+      setExpandedDirs((prev) => {
+        const next = { ...prev };
+        delete next[entry.path];
+        return next;
+      });
+      return;
+    }
+
+    setLoadingDirs((prev) => new Set(prev).add(entry.path));
+    try {
+      const children = (await apiClient.getContents(
+        owner,
+        repo,
+        entry.path,
+        treeRef,
+      )) as TreeEntry[];
+      setExpandedDirs((prev) => ({ ...prev, [entry.path]: children }));
+    } finally {
+      setLoadingDirs((prev) => {
+        const next = new Set(prev);
+        next.delete(entry.path);
+        return next;
+      });
+    }
+  }
 
   if (sorted.length === 0) {
     return (
@@ -69,21 +108,48 @@ export default function FileTree({
     <ul className="list-none p-0 m-0">
       {sorted.map((entry) => (
         <li key={entry.path}>
-          <Link
-            href={entryHref(entry, owner, repo, branch)}
-            className="flex items-center px-4 py-2.5 border-b border-[#eaeef2] last:border-b-0 text-[#24292f] no-underline gap-3 text-sm hover:bg-[#f6f8fa]"
-          >
-            <span className="w-4 text-[#57606a]">
-              {entry.type === "dir" ? "📁" : "📄"}
-            </span>
-            <span className="flex-1 font-medium">{entry.name}</span>
-            <span className="text-[#57606a] text-[13px] flex-[2] overflow-hidden text-ellipsis whitespace-nowrap">
-              {entry.commit_message ?? ""}
-            </span>
-            <span className="text-[#57606a] text-[13px] shrink-0">
-              {formatRelativeTime(entry.committed_at)}
-            </span>
-          </Link>
+          {entry.type === "dir" ? (
+            <button
+              type="button"
+              onClick={() => void handleDirClick(entry)}
+              className="flex w-full items-center px-4 py-2.5 border-b border-[#eaeef2] last:border-b-0 text-[#24292f] gap-3 text-sm hover:bg-[#f6f8fa] bg-transparent cursor-pointer text-left"
+            >
+              <span className="w-4 text-[#57606a]">📁</span>
+              <span className="flex-1 font-medium">{entry.name}</span>
+              <span className="text-[#57606a] text-[13px] flex-[2] overflow-hidden text-ellipsis whitespace-nowrap">
+                {entry.commit_message ?? ""}
+              </span>
+              <span className="text-[#57606a] text-[13px] shrink-0">
+                {formatRelativeTime(entry.committed_at)}
+              </span>
+            </button>
+          ) : (
+            <Link
+              href={blobHref(entry, owner, repo, treeRef)}
+              className="flex items-center px-4 py-2.5 border-b border-[#eaeef2] last:border-b-0 text-[#24292f] no-underline gap-3 text-sm hover:bg-[#f6f8fa]"
+            >
+              <span className="w-4 text-[#57606a]">📄</span>
+              <span className="flex-1 font-medium">{entry.name}</span>
+              <span className="text-[#57606a] text-[13px] flex-[2] overflow-hidden text-ellipsis whitespace-nowrap">
+                {entry.commit_message ?? ""}
+              </span>
+              <span className="text-[#57606a] text-[13px] shrink-0">
+                {formatRelativeTime(entry.committed_at)}
+              </span>
+            </Link>
+          )}
+          {entry.type === "dir" && loadingDirs.has(entry.path) && (
+            <span className="animate-spin">…</span>
+          )}
+          {entry.type === "dir" && expandedDirs[entry.path] && (
+            <FileTree
+              entries={expandedDirs[entry.path]}
+              owner={owner}
+              repo={repo}
+              treeRef={treeRef}
+              apiClient={apiClient}
+            />
+          )}
         </li>
       ))}
     </ul>

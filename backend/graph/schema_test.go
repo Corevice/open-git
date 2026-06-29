@@ -32,6 +32,11 @@ func TestExecutableSchemaBuilds(t *testing.T) {
 
 	prType := schema.Types["PullRequest"]
 	require.NotNil(t, prType)
-	require.Contains(t, prType.Fields, "mergeableState")
-	require.NotContains(t, prType.Fields, "mergeable")
+
+	fieldNames := make([]string, len(prType.Fields))
+	for i, field := range prType.Fields {
+		fieldNames[i] = field.Name
+	}
+	require.Contains(t, fieldNames, "mergeableState")
+	require.NotContains(t, fieldNames, "mergeable")
 }
