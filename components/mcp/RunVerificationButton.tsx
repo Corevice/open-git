@@ -92,7 +92,7 @@ export function RunVerificationButton({ onComplete }: RunVerificationButtonProps
             required
           />
         </div>
-        <Button type="submit" disabled={isRunning || !repository.trim()}>
+        <Button type="submit" disabled={isRunning}>
           {isRunning && (
             <div className="animate-spin h-4 w-4 rounded-full border-2 border-primary border-t-transparent" />
           )}
