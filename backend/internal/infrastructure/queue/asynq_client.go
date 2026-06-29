@@ -11,6 +11,7 @@ import (
 const (
 	TypeWebhookDeliver  = "webhook:deliver"
 	TypeMCPVerification = "mcp:verification"
+	TypeArtifactCleanup = "artifact:cleanup"
 	TypeDispatchJob     = "actions:dispatch_job"
 	TypeCancelJob       = "actions:cancel_job"
 )
@@ -69,6 +70,11 @@ func EnqueueWebhookDelivery(ctx context.Context, client *asynq.Client, payload W
 	}
 	task := asynq.NewTask(TypeWebhookDeliver, data)
 	return client.EnqueueContext(ctx, task, asynq.MaxRetry(5))
+}
+
+func EnqueueArtifactCleanup(ctx context.Context, client *asynq.Client) (*asynq.TaskInfo, error) {
+	task := asynq.NewTask(TypeArtifactCleanup, nil)
+	return client.EnqueueContext(ctx, task, asynq.Queue("default"))
 }
 
 func EnqueueDispatchJob(ctx context.Context, client *asynq.Client, payload DispatchJobPayload) (*asynq.TaskInfo, error) {
