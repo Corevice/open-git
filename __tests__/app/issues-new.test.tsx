@@ -95,6 +95,7 @@ describe("NewIssuePage", () => {
           ok: true,
           status: 201,
           json: async () => ({ number: 42 }),
+          text: async () => JSON.stringify({ number: 42 }),
         }));
       }
 

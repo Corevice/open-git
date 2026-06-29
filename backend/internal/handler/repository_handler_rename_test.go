@@ -196,6 +196,55 @@ func TestUpdateRepositoryRenameInvalidName(t *testing.T) {
 	}
 }
 
+func TestCreateRepositoryDuplicateName(t *testing.T) {
+	existing := seedRenameRepo(renameTestOwnerID, renameTestOwnerLogin, "my-repo")
+	repos := &renameMockRepositoryRepo{
+		byOwnerName: map[uuid.UUID]map[string]*entity.Repository{
+			renameTestOwnerID: {"my-repo": existing},
+		},
+	}
+	e := newRenameTestEcho(t, repos, listTestUserID)
+
+	body, err := json.Marshal(map[string]string{"name": "my-repo"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/user/repos", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["message"] != "Validation Failed" {
+		t.Fatalf("message = %v, want Validation Failed", resp["message"])
+	}
+	errors, ok := resp["errors"].([]any)
+	if !ok || len(errors) == 0 {
+		t.Fatalf("errors = %v, want non-empty array", resp["errors"])
+	}
+	first, ok := errors[0].(map[string]any)
+	if !ok {
+		t.Fatalf("errors[0] = %v, want object", errors[0])
+	}
+	if first["code"] != "already_exists" {
+		t.Fatalf("errors[0].code = %v, want already_exists", first["code"])
+	}
+	if first["resource"] != "Repository" {
+		t.Fatalf("errors[0].resource = %v, want Repository", first["resource"])
+	}
+	if first["field"] != "name" {
+		t.Fatalf("errors[0].field = %v, want name", first["field"])
+	}
+}
+
 func TestUpdateRepositoryDefaultBranchOK(t *testing.T) {
 	repo := seedRenameRepo(renameTestOwnerID, "alice", "myrepo")
 	repos := &renameMockRepositoryRepo{

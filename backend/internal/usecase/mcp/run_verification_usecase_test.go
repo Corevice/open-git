@@ -2,6 +2,7 @@ package mcp_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -129,7 +130,7 @@ func (m *mockAuditRepo) List(context.Context, uuid.UUID, string, int, int) ([]*e
 	return nil, 0, nil
 }
 
-func (m *mockAuditRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID, string, string, uuid.UUID, []byte) error {
+func (m *mockAuditRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID, string, string, uuid.UUID, json.RawMessage) error {
 	return nil
 }
 
