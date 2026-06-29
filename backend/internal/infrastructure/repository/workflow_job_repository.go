@@ -247,56 +247,6 @@ func (r *sqlxWorkflowJobRepository) ListQueued(ctx context.Context, orgID uuid.U
 	return scanWorkflowJobRows(rows)
 }
 
-func (r *sqlxWorkflowJobRepository) CreateBatch(ctx context.Context, jobs []*entity.WorkflowJob) error {
-	for _, job := range jobs {
-		if err := r.Create(ctx, job); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *sqlxWorkflowJobRepository) ResetQueuedByRunID(ctx context.Context, runID uuid.UUID) error {
-	const query = `
-		UPDATE workflow_jobs
-		SET status = 'queued', conclusion = '', started_at = NULL, finished_at = NULL
-		WHERE workflow_run_id = ? AND status IN ('queued', 'failed', 'completed')
-	`
-	q := r.db.Rebind(query)
-	_, err := r.db.ExecContext(ctx, q, runID)
-	return dbErrors.MapDBError(err)
-}
-
-func (r *sqlxWorkflowJobRepository) CancelInProgressByRunID(ctx context.Context, orgID, runID uuid.UUID) error {
-	const query = `
-		UPDATE workflow_jobs
-		SET status = 'cancelled'
-		WHERE organization_id = ? AND workflow_run_id = ? AND status = 'in_progress'
-	`
-	q := r.db.Rebind(query)
-	_, err := r.db.ExecContext(ctx, q, orgID, runID)
-	return dbErrors.MapDBError(err)
-}
-
-func (r *sqlxWorkflowJobRepository) ListByRunID(ctx context.Context, orgID, runID uuid.UUID) ([]*entity.WorkflowJob, error) {
-	const query = `
-		SELECT id, workflow_run_id, organization_id, repository_id, name, status, conclusion,
-			assigned_runner_id, runs_on, acquire_lock_version, started_at, finished_at,
-			timeout_minutes, created_at
-		FROM workflow_jobs
-		WHERE organization_id = ? AND workflow_run_id = ?
-		ORDER BY created_at ASC
-	`
-	q := r.db.Rebind(query)
-	rows, err := r.db.QueryxContext(ctx, q, orgID, runID)
-	if err != nil {
-		return nil, dbErrors.MapDBError(err)
-	}
-	defer rows.Close()
-
-	return scanWorkflowJobRows(rows)
-}
-
 func workflowJobRunID(job *entity.WorkflowJob) uuid.UUID {
 	if job.WorkflowRunID != nil && *job.WorkflowRunID != uuid.Nil {
 		return *job.WorkflowRunID
