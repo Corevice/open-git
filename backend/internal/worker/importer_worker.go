@@ -37,6 +37,11 @@ const (
 
 	rateLimitThreshold = 10
 
+	// maxRateLimitWait bounds how long the worker will block inline on a
+	// rate-limit reset, protecting against absurd/malicious upstream reset
+	// headers. Beyond this, the caller re-fetches and re-evaluates.
+	maxRateLimitWait = 30 * time.Second
+
 	defaultPageSize = 100
 
 	importerHTTPTimeout = 30 * time.Second
@@ -981,6 +986,12 @@ func (w *ImporterWorker) handleRateLimit(ctx context.Context, resp *http.Respons
 	}
 
 	wait := time.Until(time.Unix(resetTs, 0))
+	// Bound the inline wait: the reset header is untrusted upstream input, and
+	// an absurd or malicious value (far-future timestamp) must not block the
+	// worker indefinitely. Cap it; the caller re-fetches and re-evaluates.
+	if wait > maxRateLimitWait {
+		wait = maxRateLimitWait
+	}
 	if wait > 0 {
 		w.logger.Info("rate limit reached, sleeping", "job_id", jobID.String(), "wait_seconds", wait.Seconds())
 		timer := time.NewTimer(wait)

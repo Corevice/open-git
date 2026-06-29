@@ -49,20 +49,6 @@ type patchUserRequest struct {
 	Email     string `json:"email"`
 }
 
-type githubErrorBody struct {
-	Message          string `json:"message"`
-	DocumentationURL string `json:"documentation_url,omitempty"`
-}
-
-func RespondGitHubOK(c echo.Context, data any) error {
-	c.Response().Header().Set("X-GitHub-Media-Type", "github.v3")
-	return c.JSON(http.StatusOK, data)
-}
-
-func RespondGitHubError(c echo.Context, status int, message string, _ any) error {
-	return c.JSON(status, githubErrorBody{Message: message})
-}
-
 func (h *UserHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.MiddlewareFunc) {
 	g.GET("/user", h.GetCurrentUser, authMiddleware)
 	g.PATCH("/user", h.UpdateCurrentUser, authMiddleware)
