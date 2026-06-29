@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
+	"github.com/open-git/backend/internal/domain/entity"
 )
 
 type ListArtifactsInput struct {
@@ -24,7 +25,7 @@ func NewListArtifactsUsecase(runRepo WorkflowRunRepository, artifactRepo Artifac
 	}
 }
 
-func (uc *ListArtifactsUsecase) Execute(ctx context.Context, input ListArtifactsInput) ([]*WorkflowArtifact, error) {
+func (uc *ListArtifactsUsecase) Execute(ctx context.Context, input ListArtifactsInput) ([]*entity.WorkflowArtifact, error) {
 	run, err := uc.runRepo.GetByID(ctx, input.OrganizationID, input.RunID)
 	if err != nil {
 		return nil, err
@@ -32,9 +33,6 @@ func (uc *ListArtifactsUsecase) Execute(ctx context.Context, input ListArtifacts
 	if run == nil {
 		return nil, domain.ErrNotFound
 	}
-	if run.OrganizationID != input.OrganizationID {
-		return nil, domain.ErrNotFound
-	}
 
-	return uc.artifactRepo.ListByRunID(ctx, input.RunID, input.OrganizationID)
+	return uc.artifactRepo.ListByRunID(ctx, input.OrganizationID, input.RunID)
 }

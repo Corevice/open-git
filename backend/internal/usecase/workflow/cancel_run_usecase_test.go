@@ -58,18 +58,40 @@ func TestCancelRunUsecase_ErrNotFoundWhenRunNil(t *testing.T) {
 	}
 }
 
-func TestCancelRunUsecase_ErrConflictWhenCompleted(t *testing.T) {
+func TestCancelRunUsecase_ErrNotFoundWhenOrgMismatch(t *testing.T) {
 	runID := uuid.New()
 	repo := &mockCancelRunRepo{
 		run: &entity.WorkflowRun{
-			ID:     runID,
-			Status: "completed",
+			ID:             runID,
+			OrganizationID: uuid.New(),
+			Status:         "in_progress",
 		},
 	}
 	uc := NewCancelRunUsecase(repo)
 
 	err := uc.Execute(context.Background(), CancelRunInput{
 		OrganizationID: uuid.New(),
+		RunID:          runID,
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestCancelRunUsecase_ErrConflictWhenCompleted(t *testing.T) {
+	runID := uuid.New()
+	orgID := uuid.New()
+	repo := &mockCancelRunRepo{
+		run: &entity.WorkflowRun{
+			ID:             runID,
+			OrganizationID: orgID,
+			Status:         "completed",
+		},
+	}
+	uc := NewCancelRunUsecase(repo)
+
+	err := uc.Execute(context.Background(), CancelRunInput{
+		OrganizationID: orgID,
 		RunID:          runID,
 	})
 	if !errors.Is(err, domain.ErrConflict) {
@@ -79,16 +101,18 @@ func TestCancelRunUsecase_ErrConflictWhenCompleted(t *testing.T) {
 
 func TestCancelRunUsecase_SuccessUpdatesStatus(t *testing.T) {
 	runID := uuid.New()
+	orgID := uuid.New()
 	repo := &mockCancelRunRepo{
 		run: &entity.WorkflowRun{
-			ID:     runID,
-			Status: "in_progress",
+			ID:             runID,
+			OrganizationID: orgID,
+			Status:         "in_progress",
 		},
 	}
 	uc := NewCancelRunUsecase(repo)
 
 	err := uc.Execute(context.Background(), CancelRunInput{
-		OrganizationID: uuid.New(),
+		OrganizationID: orgID,
 		RunID:          runID,
 	})
 	if err != nil {

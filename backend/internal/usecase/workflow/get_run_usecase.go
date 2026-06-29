@@ -41,9 +41,6 @@ func (uc *GetWorkflowRunUsecase) Execute(ctx context.Context, input GetWorkflowR
 	if run == nil {
 		return nil, domain.ErrNotFound
 	}
-	if run.OrganizationID != input.OrganizationID {
-		return nil, domain.ErrNotFound
-	}
 
 	jobs, err := uc.jobRepo.ListByRunID(ctx, input.OrganizationID, input.RunID)
 	if err != nil {

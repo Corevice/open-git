@@ -37,18 +37,33 @@ func (m *mockRerunRunRepo) Create(_ context.Context, run *entity.WorkflowRun) er
 	return nil
 }
 
+func TestRerunRunUsecase_ErrNotFoundWhenRunNil(t *testing.T) {
+	repo := &mockRerunRunRepo{run: nil}
+	uc := NewRerunRunUsecase(repo)
+
+	_, err := uc.Execute(context.Background(), RerunRunInput{
+		OrganizationID: uuid.New(),
+		RunID:          uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
 func TestRerunRunUsecase_ErrConflictWhenQueued(t *testing.T) {
 	runID := uuid.New()
+	orgID := uuid.New()
 	repo := &mockRerunRunRepo{
 		run: &entity.WorkflowRun{
-			ID:     runID,
-			Status: "queued",
+			ID:             runID,
+			OrganizationID: orgID,
+			Status:         "queued",
 		},
 	}
 	uc := NewRerunRunUsecase(repo)
 
 	_, err := uc.Execute(context.Background(), RerunRunInput{
-		OrganizationID: uuid.New(),
+		OrganizationID: orgID,
 		RunID:          runID,
 	})
 	if !errors.Is(err, domain.ErrConflict) {

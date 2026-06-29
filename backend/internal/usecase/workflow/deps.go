@@ -31,15 +31,6 @@ type WorkflowJobRepository interface {
 	ListByRunID(ctx context.Context, orgID, runID uuid.UUID) ([]*entity.WorkflowJob, error)
 }
 
-type WorkflowArtifact struct {
-	ID             uuid.UUID
-	OrganizationID uuid.UUID
-	RunID          uuid.UUID
-	Name           string
-	SizeInBytes    int64
-	Expired        bool
-}
-
 type ArtifactRepository interface {
-	ListByRunID(ctx context.Context, runID, orgID uuid.UUID) ([]*WorkflowArtifact, error)
+	ListByRunID(ctx context.Context, orgID, runID uuid.UUID) ([]*entity.WorkflowArtifact, error)
 }

@@ -65,6 +65,14 @@ func (uc *ListWorkflowRunsUsecase) Execute(ctx context.Context, input ListWorkfl
 		runs = []*entity.WorkflowRun{}
 	}
 
+	filtered := make([]*entity.WorkflowRun, 0, len(runs))
+	for _, run := range runs {
+		if run.OrganizationID == input.OrganizationID {
+			filtered = append(filtered, run)
+		}
+	}
+	runs = filtered
+
 	return &ListWorkflowRunsOutput{
 		Runs:    runs,
 		Total:   total,

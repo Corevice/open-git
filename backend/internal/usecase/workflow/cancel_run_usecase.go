@@ -29,11 +29,14 @@ func (uc *CancelRunUsecase) Execute(ctx context.Context, input CancelRunInput) e
 	if run == nil {
 		return domain.ErrNotFound
 	}
+	if run.OrganizationID != input.OrganizationID {
+		return domain.ErrNotFound
+	}
 
 	if run.Status != "queued" && run.Status != "in_progress" {
 		return domain.ErrConflict
 	}
 
 	now := time.Now().UTC()
-	return uc.runRepo.UpdateStatus(ctx, input.RunID, "completed", "cancelled", &now)
+	return uc.runRepo.UpdateStatus(ctx, run.ID, "completed", "cancelled", &now)
 }
