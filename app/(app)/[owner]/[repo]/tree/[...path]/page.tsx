@@ -1,26 +1,20 @@
+"use client";
+
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { use, useMemo, useState } from "react";
+
 import { TreeBranchSelector } from "@/components/repo/BranchSelector";
 import FileTree, { type TreeEntry } from "@/components/repo/FileTree";
+import { RepoPageSkeleton } from "@/components/repo/RepoPageSkeleton";
+import { decodeBase64Content, decodePathSegments } from "@/lib/api-client";
 import {
-  apiClient,
-  decodeBase64Content,
-  decodePathSegments,
-  isApiError,
-} from "@/lib/api-client";
+  type RepoMetadata,
+  useRepoBranches,
+  useRepoContents,
+  useRepoMetadata,
+} from "@/lib/hooks/useRepoContents";
 import { renderMarkdown } from "@/lib/markdown";
-
-interface RepoMetadata {
-  name: string;
-  description: string | null;
-  private: boolean;
-  visibility?: string;
-  default_branch: string;
-  stargazers_count: number;
-  watchers_count: number;
-  forks_count: number;
-  owner: { login: string };
-}
 
 interface ContentItem {
   name: string;
@@ -29,10 +23,6 @@ interface ContentItem {
   sha: string;
   content?: string | null;
   encoding?: string;
-}
-
-interface BranchItem {
-  name: string;
 }
 
 function visibilityLabel(repo: RepoMetadata): string {
@@ -58,69 +48,48 @@ function mapContents(items: ContentItem[]): TreeEntry[] {
   }));
 }
 
-async function fetchReadme(
-  owner: string,
-  repo: string,
-  branch: string,
-  dirPath: string,
-): Promise<string | null> {
-  if (dirPath) return null;
-  try {
-    const data = await apiClient.getContents<ContentItem>(
-      owner,
-      repo,
-      "README.md",
-      branch,
-    );
-    if (!data.content || data.encoding !== "base64") return null;
-    return decodeBase64Content(data.content);
-  } catch (err) {
-    if (isApiError(err) && err.status === 404) return null;
-    throw err;
-  }
-}
-
-export default async function RepoTreePage({
+export default function RepoTreePage({
   params,
 }: {
   params: Promise<{ owner: string; repo: string; path: string[] }>;
 }) {
-  const { owner, repo, path: rawPathSegments } = await params;
+  const { owner, repo, path: rawPathSegments } = use(params);
   const pathSegments = decodePathSegments(rawPathSegments ?? []);
-  if (!pathSegments.length) notFound();
+  const hasValidPath = pathSegments.length > 0;
+  const initialBranch = pathSegments[0] ?? "";
+  const currentPath = hasValidPath ? pathSegments.slice(1).join("/") : "";
 
-  const branch = pathSegments[0];
-  const currentPath = pathSegments.slice(1).join("/");
+  const [currentRef, setCurrentRef] = useState(initialBranch);
 
-  let metadata: RepoMetadata;
-  try {
-    metadata = await apiClient.getRepo<RepoMetadata>(owner, repo);
-  } catch (err) {
-    if (isApiError(err) && err.status === 404) notFound();
-    throw err;
-  }
+  const {
+    data: metadata,
+    error: metadataError,
+    isNotFound: metadataNotFound,
+  } = useRepoMetadata(owner, repo);
+  const { branches } = useRepoBranches(owner, repo, initialBranch);
+  const {
+    data: contentsRaw,
+    isLoading,
+    error: contentsError,
+    isNotFound: contentsNotFound,
+  } = useRepoContents(owner, repo, currentPath, currentRef);
+  const { data: readmeRaw } = useRepoContents(
+    owner,
+    repo,
+    currentPath ? null : "README.md",
+    currentRef,
+  );
 
-  let contentsRaw: ContentItem[] | ContentItem | null = null;
-  try {
-    contentsRaw = await apiClient.getContents<ContentItem[] | ContentItem>(
-      owner,
-      repo,
-      currentPath,
-      branch,
-    );
-  } catch (err) {
-    if (!isApiError(err) || err.status !== 404) throw err;
-  }
+  const readmeHtml = useMemo(() => {
+    if (currentPath || !readmeRaw || Array.isArray(readmeRaw)) return null;
+    if (!readmeRaw.content || readmeRaw.encoding !== "base64") return null;
+    return renderMarkdown(decodeBase64Content(readmeRaw.content));
+  }, [currentPath, readmeRaw]);
 
-  let branchesRaw: BranchItem[];
-  try {
-    branchesRaw = await apiClient.getBranches<BranchItem[]>(owner, repo);
-  } catch {
-    branchesRaw = [{ name: branch }];
-  }
-
-  const branches = branchesRaw.length > 0 ? branchesRaw : [{ name: branch }];
-  const readmeRaw = await fetchReadme(owner, repo, branch, currentPath);
+  if (!hasValidPath) notFound();
+  if (metadataNotFound || contentsNotFound) notFound();
+  if (metadataError) throw metadataError;
+  if (contentsError) throw contentsError;
 
   const contents: ContentItem[] = Array.isArray(contentsRaw)
     ? contentsRaw
@@ -128,7 +97,6 @@ export default async function RepoTreePage({
       ? [contentsRaw]
       : [];
   const entries = mapContents(contents);
-  const readmeHtml = readmeRaw ? renderMarkdown(readmeRaw) : null;
   const pathParts = currentPath ? currentPath.split("/") : [];
 
   return (
@@ -147,30 +115,43 @@ export default async function RepoTreePage({
       <div className="bg-white border-b border-[#d0d7de] py-4 sticky top-16 z-10">
         <div className="max-w-[1280px] mx-auto px-6">
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-xl m-0 flex items-center gap-2 flex-wrap">
-              📁{" "}
-              <Link href={`/${owner}`} className="text-[#0969da] no-underline hover:underline">
-                {owner}
-              </Link>
-              <span>/</span>
-              <Link href={`/${owner}/${repo}`} className="text-[#0969da] no-underline hover:underline">
-                <strong>{repo}</strong>
-              </Link>
-              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${visibilityBadgeClass(metadata)}`}>
-                {visibilityLabel(metadata)}
-              </span>
-            </h1>
-            <div className="flex gap-2 ml-auto">
-              <span className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-white inline-flex items-center gap-1.5">
-                👁 {metadata.watchers_count}
-              </span>
-              <span className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-white inline-flex items-center gap-1.5">
-                🍴 {metadata.forks_count}
-              </span>
-              <span className="px-3 py-1.5 text-sm bg-[color:var(--primary)] text-white rounded-md inline-flex items-center gap-1.5">
-                ⭐ {metadata.stargazers_count}
-              </span>
-            </div>
+            {metadata ? (
+              <>
+                <h1 className="text-xl m-0 flex items-center gap-2 flex-wrap">
+                  📁{" "}
+                  <Link href={`/${owner}`} className="text-[#0969da] no-underline hover:underline">
+                    {owner}
+                  </Link>
+                  <span>/</span>
+                  <Link href={`/${owner}/${repo}`} className="text-[#0969da] no-underline hover:underline">
+                    <strong>{repo}</strong>
+                  </Link>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${visibilityBadgeClass(metadata)}`}>
+                    {visibilityLabel(metadata)}
+                  </span>
+                </h1>
+                <div className="flex gap-2 ml-auto">
+                  <span className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-white inline-flex items-center gap-1.5">
+                    👁 {metadata.watchers_count}
+                  </span>
+                  <span className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-white inline-flex items-center gap-1.5">
+                    🍴 {metadata.forks_count}
+                  </span>
+                  <span className="px-3 py-1.5 text-sm bg-[color:var(--primary)] text-white rounded-md inline-flex items-center gap-1.5">
+                    ⭐ {metadata.stargazers_count}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center gap-3 flex-wrap w-full">
+                <RepoPageSkeleton className="h-8 w-1/3" />
+                <div className="flex gap-2 ml-auto">
+                  <RepoPageSkeleton className="h-9 w-16" />
+                  <RepoPageSkeleton className="h-9 w-16" />
+                  <RepoPageSkeleton className="h-9 w-16" />
+                </div>
+              </div>
+            )}
           </div>
 
           <nav className="flex gap-1 mt-4">
@@ -204,7 +185,8 @@ export default async function RepoTreePage({
               repo={repo}
               currentPath={currentPath}
               branches={branches}
-              currentBranch={branch}
+              currentBranch={currentRef}
+              onRefChange={setCurrentRef}
             />
 
             <nav className="flex items-center gap-1 text-sm flex-wrap min-w-0">
@@ -213,10 +195,10 @@ export default async function RepoTreePage({
               </Link>
               <span className="text-[#57606a]">/</span>
               <Link
-                href={`/${owner}/${repo}/tree/${encodeURIComponent(branch)}`}
+                href={`/${owner}/${repo}/tree/${encodeURIComponent(currentRef)}`}
                 className="text-[#0969da] hover:underline no-underline font-mono"
               >
-                {branch}
+                {currentRef}
               </Link>
               {pathParts.map((part, i) => {
                 const sub = pathParts.slice(0, i + 1).join("/");
@@ -228,7 +210,7 @@ export default async function RepoTreePage({
                       <span className="font-mono text-[#24292f]">{part}</span>
                     ) : (
                       <Link
-                        href={`/${owner}/${repo}/tree/${encodeURIComponent(branch)}/${sub
+                        href={`/${owner}/${repo}/tree/${encodeURIComponent(currentRef)}/${sub
                           .split("/")
                           .map(encodeURIComponent)
                           .join("/")}`}
@@ -243,13 +225,20 @@ export default async function RepoTreePage({
             </nav>
           </div>
 
-          <FileTree
-            entries={entries}
-            owner={owner}
-            repo={repo}
-            branch={branch}
-            currentPath={currentPath}
-          />
+          {isLoading ? (
+            <div className="p-4 space-y-3">
+              <RepoPageSkeleton className="h-5 w-full" />
+              <RepoPageSkeleton className="h-5 w-full" />
+              <RepoPageSkeleton className="h-5 w-full" />
+            </div>
+          ) : (
+            <FileTree
+              entries={entries}
+              owner={owner}
+              repo={repo}
+              treeRef={currentRef}
+            />
+          )}
         </div>
 
         {readmeHtml && (
