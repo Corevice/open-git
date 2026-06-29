@@ -163,6 +163,154 @@ func TestForceRejectProtectedBranch(t *testing.T) {
 	})
 }
 
+func TestIsForcePushFallsBackToFalseOnMissingObjects(t *testing.T) {
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "alice", "demo.git")
+	if err := infragit.InitBare(repoPath); err != nil {
+		t.Fatalf("init bare repo: %v", err)
+	}
+	if err := seedMainBranch(t, repoPath); err != nil {
+		t.Fatalf("seed main branch: %v", err)
+	}
+
+	repo, err := gogit.PlainOpen(repoPath)
+	if err != nil {
+		t.Fatalf("open repo: %v", err)
+	}
+	mainRef, err := repo.Reference(plumbing.HEAD, true)
+	if err != nil {
+		t.Fatalf("head ref: %v", err)
+	}
+	existing := mainRef.Hash()
+	missing := plumbing.NewHash("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+
+	t.Run("missing newHash returns non-force with error", func(t *testing.T) {
+		forced, err := handler.IsForcePushForTest(repo, existing, missing)
+		if err == nil {
+			t.Fatal("expected error for missing new commit, got nil")
+		}
+		if forced {
+			t.Fatalf("forced = true, want false on missing object")
+		}
+	})
+
+	t.Run("missing oldHash returns non-force with error", func(t *testing.T) {
+		forced, err := handler.IsForcePushForTest(repo, missing, existing)
+		if err == nil {
+			t.Fatal("expected error for missing old commit, got nil")
+		}
+		if forced {
+			t.Fatalf("forced = true, want false on missing object")
+		}
+	})
+
+	t.Run("zero hash on either side is never force", func(t *testing.T) {
+		forced, err := handler.IsForcePushForTest(repo, plumbing.ZeroHash, existing)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if forced {
+			t.Fatal("forced = true, want false when oldHash is zero (ref creation)")
+		}
+		forced, err = handler.IsForcePushForTest(repo, existing, plumbing.ZeroHash)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if forced {
+			t.Fatal("forced = true, want false when newHash is zero (ref deletion)")
+		}
+	})
+
+	t.Run("fast-forward is non-force", func(t *testing.T) {
+		child := createCommit(t, repo, "follow-up", existing)
+		forced, err := handler.IsForcePushForTest(repo, existing, child)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if forced {
+			t.Fatal("forced = true, want false for fast-forward update")
+		}
+	})
+
+	t.Run("unrelated history is force", func(t *testing.T) {
+		unrelated := createCommit(t, repo, "unrelated", plumbing.ZeroHash)
+		forced, err := handler.IsForcePushForTest(repo, existing, unrelated)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !forced {
+			t.Fatal("forced = false, want true for non-fast-forward update")
+		}
+	})
+}
+
+func TestReceivePackAllowsPushWithUnwrittenNewObject(t *testing.T) {
+	// Regression: rejectProtectedForcePush runs before the packfile in the
+	// receive-pack body is processed, so the new commit object may not yet
+	// exist in the bare repo. The protection check must not reject such a
+	// push as a force-push.
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "alice", "demo.git")
+	if err := infragit.InitBare(repoPath); err != nil {
+		t.Fatalf("init bare repo: %v", err)
+	}
+	if err := seedMainBranch(t, repoPath); err != nil {
+		t.Fatalf("seed main branch: %v", err)
+	}
+
+	repo, err := gogit.PlainOpen(repoPath)
+	if err != nil {
+		t.Fatalf("open repo: %v", err)
+	}
+	mainRef, err := repo.Reference(plumbing.HEAD, true)
+	if err != nil {
+		t.Fatalf("head ref: %v", err)
+	}
+	oldHash := mainRef.Hash()
+	// A hash that has no corresponding object in the repo, simulating the new
+	// commit carried inside a packfile that hasn't been processed yet.
+	newHash := plumbing.NewHash("cafebabecafebabecafebabecafebabecafebabe")
+
+	repoID := uuid.New()
+	orgID := uuid.New()
+	h := handler.NewGitHTTPHandler(
+		root,
+		&stubResolver{repo: &handler.ResolvedGitRepository{
+			ID:             repoID,
+			OrganizationID: orgID,
+			OwnerID:        42,
+			DiskPath:       repoPath,
+		}},
+		&stubMembership{write: true},
+		&stubProtection{protected: map[string]bool{"main": true}},
+		nil,
+		nil,
+	)
+
+	body := encodeReceivePackRequest(t, oldHash, newHash)
+
+	e := echo.New()
+	h.RegisterRoutes(e)
+
+	req := httptest.NewRequest(http.MethodPost, "/alice/demo.git/git-receive-pack", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/:owner/:repo.git/git-receive-pack")
+	c.SetParamNames("owner", "repo")
+	c.SetParamValues("alice", "demo")
+	middleware.SetAuthContext(c, 42, []string{"repo"})
+
+	err = h.ReceivePack(c)
+	// Downstream ServeReceivePack may still fail because the request body
+	// carries no real packfile in this test — what matters is that the
+	// failure is NOT the 422 force-push rejection from the protection check.
+	if err != nil {
+		if he, ok := err.(*echo.HTTPError); ok && he.Code == http.StatusUnprocessableEntity {
+			t.Fatalf("got 422 force-push rejection for push with unwritten new object: %v", err)
+		}
+	}
+}
+
 func seedMainBranch(t *testing.T, repoPath string) error {
 	t.Helper()
 	repo, err := gogit.PlainOpen(repoPath)
