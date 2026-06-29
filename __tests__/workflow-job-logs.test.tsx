@@ -216,7 +216,7 @@ describe("workflow job logs page", () => {
 
     expect(await screen.findByText("colored line")).toBeInTheDocument();
     expect(
-      screen.queryByText(new RegExp(String.fromCharCode(27))),
+      screen.queryByText((content) => content.includes("\x1b")),
     ).not.toBeInTheDocument();
   });
 
@@ -233,7 +233,7 @@ describe("workflow job logs page", () => {
 
     expect(await screen.findByText("streamed green")).toBeInTheDocument();
     expect(
-      screen.queryByText(new RegExp(String.fromCharCode(27))),
+      screen.queryByText((content) => content.includes("\x1b")),
     ).not.toBeInTheDocument();
   });
 
