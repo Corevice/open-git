@@ -44,6 +44,13 @@ func newOrgHandlerEcho(t *testing.T, orgs *mockOrgRepo, auth echo.MiddlewareFunc
 	h := handler.NewOrgHandler(
 		orgUC.NewGetOrgUsecase(orgs),
 		orgUC.NewListUserOrgsUsecase(orgs),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
 	)
 
 	g := e.Group("")

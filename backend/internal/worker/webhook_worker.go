@@ -5,26 +5,43 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+
+	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/open-git/backend/internal/domain/repository"
+	"github.com/open-git/backend/internal/infrastructure/queue"
 )
 
 const (
-	MaxWebhookRetries     = 5
-	httpDeliveryTimeout   = 5 * time.Second
-	signatureHeader       = "X-Hub-Signature-256"
-	eventHeader           = "X-GitHub-Event"
-	deliveryStatusSuccess = "success"
-	deliveryStatusFailed  = "failed"
+	MaxWebhookRetries        = 5
+	httpDeliveryTimeout      = 10 * time.Second
+	maxResponseBodyBytes     = 64 * 1024
+	signatureHeader          = "X-Hub-Signature-256"
+	eventHeader              = "X-GitHub-Event"
+	deliveryHeader           = "X-GitHub-Delivery"
+	hookIDHeader             = "X-GitHub-Hook-ID"
+	userAgentHeader          = "User-Agent"
+	userAgentValue           = "OpenGit-Hookshot/1.0"
+	deliveryStatusSuccess    = "success"
+	deliveryStatusFailed     = "failed"
+	deliveryStatusSSRFBlocked = "ssrf_blocked"
 )
 
+var lookupHost = net.LookupHost
+
+// WebhookDeliveryPayload is the legacy enqueue payload shape used by callers
+// that build webhook:deliver tasks directly. New code should use
+// queue.WebhookDeliveryPayload instead.
 type WebhookDeliveryPayload struct {
 	WebhookID string `json:"webhook_id"`
 	URL       string `json:"url"`
@@ -33,43 +50,203 @@ type WebhookDeliveryPayload struct {
 	Body      []byte `json:"body"`
 }
 
+type WebhookSecretDecrypter func(encrypted []byte) (string, error)
+
 type WebhookWorker struct {
-	httpClient *http.Client
-	db         *sql.DB
+	httpClient    *http.Client
+	deliveryRepo  repository.IWebhookDeliveryRepository
+	webhookRepo   repository.IWebhookRepository
+	decryptSecret WebhookSecretDecrypter
 }
 
-func NewWebhookWorker(db *sql.DB) *WebhookWorker {
+func NewWebhookWorker(
+	deliveryRepo repository.IWebhookDeliveryRepository,
+	webhookRepo repository.IWebhookRepository,
+) *WebhookWorker {
 	return &WebhookWorker{
-		httpClient: &http.Client{Timeout: httpDeliveryTimeout},
-		db:         db,
+		httpClient:    &http.Client{Timeout: httpDeliveryTimeout},
+		deliveryRepo:  deliveryRepo,
+		webhookRepo:   webhookRepo,
+		decryptSecret: identityWebhookSecretDecrypter,
 	}
 }
 
+func (w *WebhookWorker) WithSecretDecrypter(d WebhookSecretDecrypter) *WebhookWorker {
+	w.decryptSecret = d
+	return w
+}
+
 func (w *WebhookWorker) HandleWebhookDeliver(ctx context.Context, task *asynq.Task) error {
-	var payload WebhookDeliveryPayload
+	var payload queue.WebhookDeliveryPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return fmt.Errorf("unmarshal webhook payload: %w", err)
 	}
 
-	signature := computeSignature(payload.Secret, payload.Body)
+	deliveryID, err := uuid.Parse(payload.DeliveryID)
+	if err != nil {
+		return fmt.Errorf("parse delivery_id: %w", err)
+	}
+	orgID, err := uuid.Parse(payload.OrganizationID)
+	if err != nil {
+		return fmt.Errorf("parse organization_id: %w", err)
+	}
+	hookID, err := uuid.Parse(payload.HookID)
+	if err != nil {
+		return fmt.Errorf("parse hook_id: %w", err)
+	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, payload.URL, bytes.NewReader(payload.Body))
+	webhook, err := w.webhookRepo.GetByID(ctx, hookID, orgID)
+	if err != nil {
+		return fmt.Errorf("get webhook: %w", err)
+	}
+
+	parsedURL, err := url.Parse(webhook.URL)
+	if err != nil {
+		return fmt.Errorf("parse webhook url: %w", err)
+	}
+
+	host := parsedURL.Hostname()
+	if host == "" {
+		return fmt.Errorf("webhook url missing host")
+	}
+
+	addrs, err := lookupHost(host)
+	if err != nil {
+		if recordErr := w.recordBlockedDelivery(ctx, deliveryID, hookID, orgID, payload, deliveryStatusFailed, nil, nil); recordErr != nil {
+			// Best-effort audit; DNS failures must not retry.
+		}
+		return nil
+	}
+	for _, addr := range addrs {
+		if isPrivateIP(net.ParseIP(addr)) {
+			if recordErr := w.recordBlockedDelivery(ctx, deliveryID, hookID, orgID, payload, deliveryStatusSSRFBlocked, nil, nil); recordErr != nil {
+				// Best-effort audit; SSRF blocks must not retry.
+			}
+			return nil
+		}
+	}
+
+	secret, err := w.decryptSecret(webhook.SecretEncrypted)
+	if err != nil {
+		return fmt.Errorf("decrypt webhook secret: %w", err)
+	}
+
+	contentType := resolveContentType(payload.ContentType)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhook.URL, bytes.NewReader(payload.Body))
 	if err != nil {
 		return fmt.Errorf("build webhook request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(signatureHeader, signature)
-	if payload.Event != "" {
-		req.Header.Set(eventHeader, payload.Event)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set(eventHeader, payload.Event)
+	req.Header.Set(deliveryHeader, payload.DeliveryID)
+	req.Header.Set(hookIDHeader, payload.HookID)
+	req.Header.Set(userAgentHeader, userAgentValue)
+	if secret != "" {
+		req.Header.Set(signatureHeader, computeSignature(secret, payload.Body))
 	}
 
-	statusCode, deliveryErr := w.send(req)
-	w.persistDeliveryStatus(ctx, payload.WebhookID, statusCode, deliveryErr)
-
-	if deliveryErr == nil {
-		return nil
+	requestHeaders := req.Header.Clone()
+	if err := w.deliveryRepo.Create(ctx, &entity.WebhookDelivery{
+		ID:             deliveryID,
+		WebhookID:      hookID,
+		OrganizationID: orgID,
+		Event:          payload.Event,
+		Status:         entity.StatusPending,
+		RequestHeaders: requestHeaders,
+		RequestBody:    string(payload.Body),
+		Attempt:        payload.Attempt,
+		CreatedAt:      time.Now().UTC(),
+	}); err != nil {
+		return fmt.Errorf("create delivery record: %w", err)
 	}
 
+	start := time.Now()
+	resp, sendErr := w.httpClient.Do(req)
+	durationMs := int(time.Since(start).Milliseconds())
+	deliveredAt := time.Now().UTC()
+
+	if sendErr != nil {
+		if err := w.updateDeliveryResult(ctx, deliveryID, deliveryStatusFailed, nil, nil, nil, &durationMs, deliveredAt); err != nil {
+			return fmt.Errorf("update failed delivery: %w", err)
+		}
+		return w.deliveryRetryError(ctx, sendErr)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	responseBodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	if readErr != nil {
+		if err := w.updateDeliveryResult(ctx, deliveryID, deliveryStatusFailed, nil, nil, nil, &durationMs, deliveredAt); err != nil {
+			return fmt.Errorf("update delivery after read failure: %w", err)
+		}
+		return w.deliveryRetryError(ctx, readErr)
+	}
+	responseBody := string(responseBodyBytes)
+	statusCode := resp.StatusCode
+	responseHeaders := resp.Header.Clone()
+
+	status := deliveryStatusSuccess
+	if statusCode < 200 || statusCode >= 300 {
+		status = deliveryStatusFailed
+	}
+
+	if err := w.updateDeliveryResult(ctx, deliveryID, status, &statusCode, responseHeaders, &responseBody, &durationMs, deliveredAt); err != nil {
+		return fmt.Errorf("update delivery result: %w", err)
+	}
+
+	if status == deliveryStatusFailed {
+		return w.deliveryRetryError(ctx, fmt.Errorf("non-2xx response: %d", statusCode))
+	}
+	return nil
+}
+
+func (w *WebhookWorker) recordBlockedDelivery(
+	ctx context.Context,
+	deliveryID, hookID, orgID uuid.UUID,
+	payload queue.WebhookDeliveryPayload,
+	status string,
+	statusCode *int,
+	durationMs *int,
+) error {
+	return w.deliveryRepo.Create(ctx, &entity.WebhookDelivery{
+		ID:             deliveryID,
+		WebhookID:      hookID,
+		OrganizationID: orgID,
+		Event:          payload.Event,
+		Status:         status,
+		StatusCode:     statusCode,
+		RequestBody:    string(payload.Body),
+		DurationMs:     durationMs,
+		Attempt:        payload.Attempt,
+		CreatedAt:      time.Now().UTC(),
+	})
+}
+
+func (w *WebhookWorker) updateDeliveryResult(
+	ctx context.Context,
+	deliveryID uuid.UUID,
+	status string,
+	statusCode *int,
+	responseHeaders map[string][]string,
+	responseBody *string,
+	durationMs *int,
+	deliveredAt time.Time,
+) error {
+	return w.deliveryRepo.UpdateStatus(
+		ctx,
+		deliveryID,
+		status,
+		statusCode,
+		responseHeaders,
+		responseBody,
+		durationMs,
+		deliveredAt,
+	)
+}
+
+func (w *WebhookWorker) deliveryRetryError(ctx context.Context, deliveryErr error) error {
 	retried, _ := asynq.GetRetryCount(ctx)
 	if retried < MaxWebhookRetries-1 {
 		return fmt.Errorf("webhook delivery failed (attempt %d): %w", retried+1, deliveryErr)
@@ -77,43 +254,57 @@ func (w *WebhookWorker) HandleWebhookDeliver(ctx context.Context, task *asynq.Ta
 	return fmt.Errorf("webhook delivery exhausted retries: %w: %w", deliveryErr, asynq.SkipRetry)
 }
 
-func (w *WebhookWorker) send(req *http.Request) (int, error) {
-	resp, err := w.httpClient.Do(req)
-	if err != nil {
-		return 0, err
+func resolveContentType(contentType string) string {
+	switch contentType {
+	case "json":
+		return "application/json"
+	case "form":
+		return "application/x-www-form-urlencoded"
+	default:
+		if contentType != "" {
+			return contentType
+		}
+		return "application/json"
 	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp.StatusCode, fmt.Errorf("non-2xx response: %d", resp.StatusCode)
-	}
-	return resp.StatusCode, nil
 }
 
-func (w *WebhookWorker) persistDeliveryStatus(ctx context.Context, webhookID string, statusCode int, deliveryErr error) {
-	if w.db == nil || webhookID == "" {
-		return
+func isPrivateIP(ip net.IP) bool {
+	if ip == nil {
+		return false
 	}
-	status := deliveryStatusSuccess
-	if deliveryErr != nil {
-		status = deliveryStatusFailed
+	if ip4 := ip.To4(); ip4 != nil {
+		switch {
+		case ip4[0] == 127:
+			return true
+		case ip4[0] == 10:
+			return true
+		case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
+			return true
+		case ip4[0] == 192 && ip4[1] == 168:
+			return true
+		case ip4[0] == 169 && ip4[1] == 254:
+			return true
+		default:
+			return false
+		}
 	}
-	if statusCode != 0 {
-		status = fmt.Sprintf("%s:%d", status, statusCode)
+	if len(ip) == net.IPv6len && ip.To4() == nil {
+		if ip.IsLoopback() {
+			return true
+		}
+		if ip[0]&0xfe == 0xfc {
+			return true
+		}
 	}
-	_, _ = w.db.ExecContext(
-		ctx,
-		`UPDATE webhooks SET last_delivery_status = $1, last_delivery_at = $2 WHERE id = $3`,
-		status,
-		time.Now().UTC(),
-		webhookID,
-	)
+	return false
 }
 
 func computeSignature(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func identityWebhookSecretDecrypter(encrypted []byte) (string, error) {
+	return string(encrypted), nil
 }

@@ -1,4 +1,10 @@
 import type {
+  AccessTokenMeta,
+  CreateTokenResult,
+  OAuthApp,
+  OAuthAppCreateInput,
+  OAuthAppWithSecret,
+  OAuthAuthorizationInfo,
   OrgMember,
   OrgProfile,
   Repository,
@@ -18,6 +24,10 @@ export type CreateRepoData = {
 export type UpdateRepoData = Partial<
   Pick<CreateRepoData, "name" | "description" | "private">
 >;
+
+export type AccessTokenListItem = AccessTokenMeta & {
+  revoked_at: string | null;
+};
 
 export const API_TOKEN_KEY = "open-git-auth-token";
 
@@ -165,4 +175,109 @@ export class ApiClient {
     deleteRepo: (owner: string, name: string) =>
       this.del(`/api/v3/repos/${owner}/${name}`),
   };
+
+  tokens = {
+    list: () => this.get<AccessTokenListItem[]>("/api/v3/user/tokens"),
+    create: (data: { note: string; scopes: string[]; expires_at?: string }) =>
+      this.post<CreateTokenResult>("/api/v3/user/tokens", data),
+    revoke: (id: number) => this.del(`/api/v3/user/tokens/${id}`),
+  };
+
+  oauthApps = {
+    list: () => this.get<OAuthApp[]>("/api/v3/user/oauth-apps"),
+    create: (input: OAuthAppCreateInput) =>
+      this.post<OAuthAppWithSecret>("/api/v3/oauth-apps", input),
+    get: (id: string) => this.get<OAuthApp>(`/api/v3/oauth-apps/${id}`),
+    update: (id: string, body: Partial<OAuthAppCreateInput>) =>
+      this.patch<OAuthApp>(`/api/v3/oauth-apps/${id}`, body),
+    regenerateSecret: (id: string) =>
+      this.post<{ client_secret: string }>(`/api/v3/oauth-apps/${id}/secret`),
+    delete: (id: string) => this.del(`/api/v3/oauth-apps/${id}`),
+  };
+
+  userAuthorizations = {
+    list: () =>
+      this.get<OAuthAuthorizationInfo[]>(
+        "/api/v3/user/installations/authorizations",
+      ),
+    revoke: (appId: string) =>
+      this.del(`/api/v3/user/authorizations/${appId}`),
+  };
+}
+
+function createAuthenticatedClient(): ApiClient {
+  const baseURL =
+    process.env.NEXT_PUBLIC_API_BASE_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    "http://localhost:8080";
+  const client = new ApiClient(baseURL);
+  if (typeof window !== "undefined") {
+    const storedToken = localStorage.getItem(API_TOKEN_KEY);
+    if (storedToken) {
+      client.setToken(storedToken);
+    }
+  }
+  return client;
+}
+
+export function listTokens(): Promise<AccessTokenListItem[]> {
+  return createAuthenticatedClient().tokens.list();
+}
+
+export function createToken(data: {
+  note: string;
+  scopes: string[];
+  expires_at?: string;
+}): Promise<CreateTokenResult> {
+  return createAuthenticatedClient().tokens.create(data);
+}
+
+export function revokeToken(id: number): Promise<void> {
+  return createAuthenticatedClient().tokens.revoke(id);
+}
+
+type ApiUserSummary = { login: string; avatar_url: string };
+
+function getApiBaseUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_API_BASE_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    "http://localhost:8080"
+  );
+}
+
+async function fetchWithToken<T>(token: string, path: string): Promise<T> {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    let message = response.statusText;
+    try {
+      const errorBody = (await response.json()) as { message?: string };
+      message = errorBody.message ?? message;
+    } catch {
+      // ignore JSON parse errors
+    }
+    throw new ApiError(response.status, message);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+export function getOrgs(
+  token: string,
+): Promise<{ login: string; avatar_url: string }[]> {
+  return fetchWithToken<{ login: string; avatar_url: string }[]>(
+    token,
+    "/api/v3/user/orgs",
+  );
+}
+
+export function getCurrentUser(token: string): Promise<ApiUserSummary> {
+  return fetchWithToken<ApiUserSummary>(token, "/api/v3/user");
 }

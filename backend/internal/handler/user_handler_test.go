@@ -48,6 +48,7 @@ func newUserHandlerEcho(t *testing.T, users *mockUserRepo, auth echo.MiddlewareF
 	h := handler.NewUserHandler(
 		userUC.NewGetCurrentUserUsecase(users),
 		userUC.NewGetUserByLoginUsecase(users),
+		userUC.NewUpdateUserUsecase(nil),
 	)
 
 	g := e.Group("")
@@ -103,6 +104,14 @@ func TestGetCurrentUserOK(t *testing.T) {
 	}
 	if resp["type"] != "User" {
 		t.Fatalf("type = %v, want User", resp["type"])
+	}
+	nodeID, ok := resp["node_id"].(string)
+	if !ok || nodeID == "" {
+		t.Fatalf("node_id = %v, want non-empty string", resp["node_id"])
+	}
+	htmlURL, ok := resp["html_url"].(string)
+	if !ok || htmlURL == "" {
+		t.Fatalf("html_url = %v, want non-empty string", resp["html_url"])
 	}
 }
 
