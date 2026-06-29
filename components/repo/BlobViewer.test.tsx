@@ -59,7 +59,7 @@ describe("BlobViewer", () => {
   it("renders correct number of line rows", () => {
     const { container } = render(
       <BlobViewer
-        content="line1\nline2\nline3"
+        content={"line1\nline2\nline3"}
         filename="sample.txt"
         binary={false}
         truncated={false}

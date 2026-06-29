@@ -2,30 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { apiClient } from "@/lib/api-client";
+import { ApiClient, ApiError } from "@/lib/api";
+import type { OrgProfile } from "@/lib/api-types";
 import { useAuth } from "@/lib/auth";
-import { ApiError } from "@/lib/api";
-import { repoNameSchema } from "@/lib/validations";
-
-type CreateRepoResponse = {
-  owner: string;
-  name: string;
-};
 
 type FieldErrors = Record<string, string[]>;
-
-const newRepoFormSchema = z.object({
-  name: repoNameSchema,
-  description: z.string().optional(),
-  visibility: z.enum(["public", "private"]),
-});
-
-type NewRepoFormValues = z.infer<typeof newRepoFormSchema>;
 
 function isApiError(err: unknown): err is ApiError {
   return err instanceof ApiError;
@@ -39,31 +22,107 @@ function getFieldErrors(err: unknown): FieldErrors {
   return fieldErrors ?? {};
 }
 
+const GITIGNORE_OPTIONS = [
+  { value: "", label: "なし" },
+  { value: "Node", label: "Node" },
+  { value: "Python", label: "Python" },
+  { value: "Go", label: "Go" },
+] as const;
+
+const LICENSE_OPTIONS = [
+  { value: "", label: "なし" },
+  { value: "mit", label: "MIT" },
+  { value: "apache-2.0", label: "Apache-2.0" },
+  { value: "gpl-3.0", label: "GPL-3.0" },
+] as const;
+
 export default function NewRepoPage() {
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, token } = useAuth();
+  const [userLogin, setUserLogin] = useState<string>("");
+  const [orgs, setOrgs] = useState<OrgProfile[]>([]);
+  const [selectedOwner, setSelectedOwner] = useState("");
+  const [repoName, setRepoName] = useState("");
+  const [description, setDescription] = useState("");
+  const [visibility, setVisibility] = useState<"public" | "private">("public");
+  const [autoInit, setAutoInit] = useState(false);
+  const [gitignoreTemplate, setGitignoreTemplate] = useState("");
+  const [licenseTemplate, setLicenseTemplate] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
-  const { register, handleSubmit, formState, watch, setValue } = useForm<NewRepoFormValues>({
-    resolver: zodResolver(newRepoFormSchema),
-    defaultValues: { name: "", description: "", visibility: "public" },
-  });
+  const apiClient = useMemo(
+    () =>
+      new ApiClient(
+        process.env.NEXT_PUBLIC_API_BASE_URL ??
+          process.env.NEXT_PUBLIC_API_URL ??
+          "http://localhost:8080",
+      ),
+    [],
+  );
 
-  const visibility = watch("visibility");
+  useEffect(() => {
+    if (token) {
+      apiClient.setToken(token);
+    }
+  }, [apiClient, token]);
 
-  const onSubmit = handleSubmit(async (values) => {
-    if (!isAuthenticated || formState.isSubmitting) return;
+  useEffect(() => {
+    if (!isAuthenticated || !token) {
+      return;
+    }
 
+    let cancelled = false;
+
+    async function loadOwners() {
+      try {
+        const [user, userOrgs] = await Promise.all([
+          apiClient.users.getCurrent(),
+          apiClient.get<OrgProfile[]>("/api/v3/user/orgs"),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setUserLogin(user.login);
+        setOrgs(userOrgs);
+        setSelectedOwner((prev) => prev || user.login);
+      } catch {
+        if (!cancelled) {
+          setError("オーナー情報の取得に失敗しました。");
+        }
+      }
+    }
+
+    void loadOwners();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, isAuthenticated, token]);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!repoName.trim() || submitting || !selectedOwner) return;
+
+    setSubmitting(true);
     setError(null);
     setFieldErrors({});
 
+    const body = {
+      name: repoName.trim(),
+      description: description.trim() || undefined,
+      private: visibility === "private",
+      auto_init: autoInit,
+      ...(gitignoreTemplate ? { gitignore_template: gitignoreTemplate } : {}),
+      ...(licenseTemplate ? { license_template: licenseTemplate } : {}),
+    };
+
     try {
-      const created = (await apiClient.createRepo(
-        values.name.trim(),
-        values.visibility,
-        values.description?.trim() || undefined,
-      )) as CreateRepoResponse;
+      const created =
+        selectedOwner === userLogin
+          ? await apiClient.repos.createForUser(body)
+          : await apiClient.repos.createForOrg(selectedOwner, body);
       router.push(`/${created.owner}/${created.name}`);
     } catch (err) {
       if (isApiError(err) && err.status === 422) {
@@ -76,10 +135,12 @@ export default function NewRepoPage() {
       } else {
         setError("ネットワークエラーが発生しました。");
       }
+    } finally {
+      setSubmitting(false);
     }
-  });
+  };
 
-  const nameError = formState.errors.name?.message ?? fieldErrors.name?.[0];
+  const nameError = fieldErrors.name?.[0];
   const visibilityError = fieldErrors.visibility?.[0];
   const descriptionError = fieldErrors.description?.[0];
 
@@ -109,7 +170,30 @@ export default function NewRepoPage() {
           </p>
         )}
 
-        <form onSubmit={onSubmit}>
+        <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label htmlFor="owner" className="mb-1.5 block text-sm font-semibold">
+              オーナー <span className="text-[#cf222e]">*</span>
+            </label>
+            <select
+              id="owner"
+              value={selectedOwner}
+              onChange={(e) => setSelectedOwner(e.target.value)}
+              className="w-full rounded-md border border-[#d1d9e0] px-3 py-2 text-sm"
+              required
+              disabled={!userLogin}
+            >
+              {userLogin && (
+                <option value={userLogin}>{userLogin} (ユーザー)</option>
+              )}
+              {orgs.map((org) => (
+                <option key={org.login} value={org.login}>
+                  {org.login} (組織)
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="mb-4">
             <label htmlFor="repo-name" className="mb-1.5 block text-sm font-semibold">
               リポジトリ名 <span className="text-[#cf222e]">*</span>
@@ -117,11 +201,14 @@ export default function NewRepoPage() {
             <input
               id="repo-name"
               type="text"
-              {...register("name")}
+              value={repoName}
+              onChange={(e) => setRepoName(e.target.value)}
               placeholder="hello-world"
               className={`w-full rounded-md border px-3 py-2 text-sm ${
                 nameError ? "border-[#cf222e]" : "border-[#d1d9e0]"
               }`}
+              required
+              pattern="[a-zA-Z0-9._-]{1,100}"
               aria-invalid={nameError ? true : undefined}
               aria-describedby={nameError ? "repo-name-error" : undefined}
             />
@@ -138,7 +225,8 @@ export default function NewRepoPage() {
             </label>
             <textarea
               id="description"
-              {...register("description")}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
               placeholder="このリポジトリの簡単な説明"
               rows={3}
               className={`w-full rounded-md border px-3 py-2 text-sm ${
@@ -165,7 +253,7 @@ export default function NewRepoPage() {
                 type="radio"
                 name="visibility"
                 checked={visibility === "public"}
-                onChange={() => setValue("visibility", "public")}
+                onChange={() => setVisibility("public")}
                 className="mt-1"
               />
               <div>
@@ -178,7 +266,7 @@ export default function NewRepoPage() {
                 type="radio"
                 name="visibility"
                 checked={visibility === "private"}
-                onChange={() => setValue("visibility", "private")}
+                onChange={() => setVisibility("private")}
                 className="mt-1"
               />
               <div>
@@ -189,6 +277,54 @@ export default function NewRepoPage() {
             {visibilityError && (
               <p className="mt-1.5 text-[13px] text-[#cf222e]">{visibilityError}</p>
             )}
+          </div>
+
+          <hr className="my-6 border-t border-[#d1d9e0]" />
+
+          <div className="mb-4">
+            <label className="mb-1.5 block text-sm font-semibold">初期化オプション</label>
+            <label className="mb-3 flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={autoInit}
+                onChange={(e) => setAutoInit(e.target.checked)}
+              />
+              <span className="text-sm">README でこのリポジトリを初期化する</span>
+            </label>
+            <div className="mb-3">
+              <label htmlFor="gitignore-template" className="mb-1.5 block text-sm">
+                .gitignore テンプレート
+              </label>
+              <select
+                id="gitignore-template"
+                value={gitignoreTemplate}
+                onChange={(e) => setGitignoreTemplate(e.target.value)}
+                className="w-full rounded-md border border-[#d1d9e0] px-3 py-2 text-sm"
+              >
+                {GITIGNORE_OPTIONS.map((opt) => (
+                  <option key={opt.value || "none"} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="license-template" className="mb-1.5 block text-sm">
+                ライセンス
+              </label>
+              <select
+                id="license-template"
+                value={licenseTemplate}
+                onChange={(e) => setLicenseTemplate(e.target.value)}
+                className="w-full rounded-md border border-[#d1d9e0] px-3 py-2 text-sm"
+              >
+                {LICENSE_OPTIONS.map((opt) => (
+                  <option key={opt.value || "none"} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {error && (
@@ -206,16 +342,21 @@ export default function NewRepoPage() {
             </Link>
             <button
               type="submit"
-              disabled={formState.isSubmitting || !isAuthenticated}
+              disabled={
+                !repoName.trim() ||
+                submitting ||
+                !isAuthenticated ||
+                !selectedOwner
+              }
               className="inline-flex items-center gap-2 rounded-md bg-[#1f883d] px-4 py-2 text-sm font-medium text-white hover:bg-[#1a7f37] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {formState.isSubmitting && (
+              {submitting && (
                 <span
                   className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
                   aria-hidden="true"
                 />
               )}
-              {formState.isSubmitting ? "作成中…" : "リポジトリを作成"}
+              {submitting ? "作成中…" : "リポジトリを作成"}
             </button>
           </div>
         </form>

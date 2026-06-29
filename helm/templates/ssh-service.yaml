@@ -1,0 +1,22 @@
+{{- if .Values.ssh.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "open-git.fullname" . }}-ssh
+  labels:
+    {{- include "open-git.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  type: {{ .Values.ssh.serviceType }}
+  ports:
+    - name: ssh
+      port: 22
+      targetPort: 22
+      protocol: TCP
+      {{- if and (eq .Values.ssh.serviceType "NodePort") .Values.ssh.nodePort }}
+      nodePort: {{ .Values.ssh.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "open-git.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+{{- end }}

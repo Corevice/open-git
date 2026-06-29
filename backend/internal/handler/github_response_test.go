@@ -29,14 +29,14 @@ func TestRespondGitHubError401(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(body) != 1 {
-		t.Fatalf("body keys = %d, want 1", len(body))
+	if len(body) != 2 {
+		t.Fatalf("body keys = %d, want 2", len(body))
 	}
 	if _, ok := body["message"]; !ok {
 		t.Fatalf("missing message key in %s", rec.Body.String())
 	}
-	if _, ok := body["documentation_url"]; ok {
-		t.Fatalf("unexpected documentation_url key in %s", rec.Body.String())
+	if _, ok := body["documentation_url"]; !ok {
+		t.Fatalf("missing documentation_url key in %s", rec.Body.String())
 	}
 	if _, ok := body["errors"]; ok {
 		t.Fatalf("unexpected errors key in %s", rec.Body.String())
@@ -48,6 +48,14 @@ func TestRespondGitHubError401(t *testing.T) {
 	}
 	if message != "Bad credentials" {
 		t.Fatalf("message = %q, want %q", message, "Bad credentials")
+	}
+
+	var docURL string
+	if err := json.Unmarshal(body["documentation_url"], &docURL); err != nil {
+		t.Fatalf("unmarshal documentation_url: %v", err)
+	}
+	if docURL != "https://docs.github.com/rest" {
+		t.Fatalf("documentation_url = %q, want %q", docURL, "https://docs.github.com/rest")
 	}
 }
 

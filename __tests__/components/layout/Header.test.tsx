@@ -19,6 +19,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { getCurrentUser, getOrgs } from "@/lib/api";
+import { BRANDING } from "@/lib/branding";
 import { Header } from "@/components/layout/Header";
 
 describe("Header", () => {
@@ -50,6 +51,12 @@ describe("Header", () => {
 
     expect(screen.getByRole("link", { name: "Sign in" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "User menu" })).not.toBeInTheDocument();
+  });
+
+  it("shows the branded app name in the DOM", () => {
+    render(<Header />);
+
+    expect(screen.getAllByText(BRANDING.appName).length).toBeGreaterThan(0);
   });
 
   it("renders avatar initials and org switcher when authenticated", async () => {

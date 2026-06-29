@@ -1,51 +1,26 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+
 import CommentForm from "@/components/issue/CommentForm";
 import MergePanel from "@/components/pr/MergePanel";
-import { ApiError } from "@/lib/api";
-import type { PullRequest } from "@/lib/api-types";
+import ReviewPanel from "@/components/pr/ReviewPanel";
+import DiffViewer from "@/components/repo/DiffViewer";
+import {
+  ApiError,
+  getPullRequest,
+  getPullRequestFiles,
+  listPullRequestCommits,
+  listReviewComments,
+  listReviews,
+  mergePullRequest,
+  type CommitListItem,
+} from "@/lib/api";
+import type { PullRequest as MergePanelPullRequest } from "@/lib/api-types";
 import { renderMarkdown } from "@/lib/markdown";
-
-type User = { login: string };
-type ReviewComment = {
-  id: number;
-  body: string;
-  user: User;
-  created_at: string;
-  path?: string;
-  line?: number;
-};
-type Commit = {
-  sha: string;
-  commit: {
-    message: string;
-    author: { name: string; date: string };
-  };
-};
-type FileDiff = {
-  filename: string;
-  patch?: string;
-  additions: number;
-  deletions: number;
-  status?: string;
-};
-type PRDetail = {
-  id: number;
-  number: number;
-  title: string;
-  body: string;
-  state: string;
-  draft?: boolean;
-  merged_at?: string | null;
-  mergeable_state?: string;
-  user: User;
-  created_at: string;
-  head: { ref: string };
-  base: { ref: string };
-  commits?: number;
-};
+import type { PullRequest, PullRequestFile, Review, ReviewComment } from "@/types/pull-request";
 
 type Props = {
   params: Promise<{ owner: string; repo: string; number: string }>;
@@ -64,24 +39,29 @@ function formatAge(dateStr: string): string {
   return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
-function toPullRequest(pr: PRDetail): PullRequest {
+function authorLogin(pr: PullRequest): string {
+  return pr.user?.login ?? pr.author_id ?? "unknown";
+}
+
+function toMergePanelPullRequest(pr: PullRequest): MergePanelPullRequest {
   const hasConflicts =
+    pr.mergeable === false ||
     pr.mergeable_state === "dirty" ||
-    pr.mergeable_state === "conflicting" ||
-    pr.state === "conflict" ||
-    pr.state === "conflicts";
+    pr.mergeable_state === "conflicting";
+
+  const parsedId = Number(pr.id);
 
   return {
-    id: pr.id,
+    id: !Number.isNaN(parsedId) ? parsedId : pr.number,
     number: pr.number,
-    headRef: pr.head.ref,
-    baseRef: pr.base.ref,
+    headRef: pr.head_ref,
+    baseRef: pr.base_ref,
     state: hasConflicts ? "conflicts" : pr.merged_at ? "merged" : pr.state,
-    mergedAt: pr.merged_at ?? null,
+    mergedAt: pr.merged_at,
   };
 }
 
-function prStateBadge(pr: PRDetail): { label: string; className: string } {
+function prStateBadge(pr: PullRequest): { label: string; className: string } {
   if (pr.merged_at) {
     return { label: "Merged", className: "bg-[#8250df] text-white" };
   }
@@ -89,10 +69,9 @@ function prStateBadge(pr: PRDetail): { label: string; className: string } {
     return { label: "Draft", className: "bg-[#eaeef2] text-[#57606a]" };
   }
   if (
+    pr.mergeable === false ||
     pr.mergeable_state === "dirty" ||
-    pr.mergeable_state === "conflicting" ||
-    pr.state === "conflict" ||
-    pr.state === "conflicts"
+    pr.mergeable_state === "conflicting"
   ) {
     return { label: "Conflicts", className: "bg-[#ffebe9] text-[#cf222e]" };
   }
@@ -102,71 +81,24 @@ function prStateBadge(pr: PRDetail): { label: string; className: string } {
   return { label: "Closed", className: "bg-[#8250df] text-white" };
 }
 
-function DiffViewer({ file }: { file: FileDiff }) {
-  const lines = file.patch?.split("\n") ?? [];
+function reviewAuthor(review: Review): string {
+  return review.reviewer?.login ?? "unknown";
+}
 
-  return (
-    <div className="border border-[#d0d7de] rounded-lg mb-4 overflow-hidden">
-      <div className="bg-[#f6f8fa] px-4 py-2.5 border-b border-[#d0d7de] font-mono text-[13px] flex justify-between">
-        <span>{file.filename}</span>
-        <span>
-          <span className="text-[#1a7f37]">+{file.additions}</span>{" "}
-          <span className="text-[#cf222e]">-{file.deletions}</span>
-        </span>
-      </div>
-      {lines.length === 0 ? (
-        <div className="px-4 py-3 text-sm text-[#656d76]">Binary file or no diff available.</div>
-      ) : (
-        <table className="w-full border-collapse font-mono text-xs">
-          <tbody>
-            {lines.map((line, i) => {
-              if (line.startsWith("@@")) {
-                return (
-                  <tr key={i} className="bg-[#ddf4ff] text-[#57606a]">
-                    <td colSpan={2} className="px-2.5 py-1">
-                      {line}
-                    </td>
-                  </tr>
-                );
-              }
-              if (line.startsWith("+") && !line.startsWith("+++")) {
-                return (
-                  <tr key={i} className="bg-[#dafbe1]">
-                    <td className="w-10 text-right text-[#6e7781] bg-[#ccffd8] px-2.5 select-none" />
-                    <td className="px-2.5">{line}</td>
-                  </tr>
-                );
-              }
-              if (line.startsWith("-") && !line.startsWith("---")) {
-                return (
-                  <tr key={i} className="bg-[#ffebe9]">
-                    <td className="w-10 text-right text-[#6e7781] bg-[#ffd7d5] px-2.5 select-none" />
-                    <td className="px-2.5">{line}</td>
-                  </tr>
-                );
-              }
-              return (
-                <tr key={i}>
-                  <td className="w-10 text-right text-[#6e7781] bg-[#f6f8fa] px-2.5 select-none" />
-                  <td className="px-2.5">{line || " "}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
+function commentAuthor(comment: ReviewComment): string {
+  return comment.author?.login ?? "unknown";
 }
 
 export default function PullRequestDetailPage({ params }: Props) {
+  const router = useRouter();
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
   const [number, setNumber] = useState("");
-  const [pr, setPr] = useState<PRDetail | null>(null);
-  const [commits, setCommits] = useState<Commit[]>([]);
+  const [pr, setPr] = useState<PullRequest | null>(null);
+  const [reviews, setReviews] = useState<Review[]>([]);
   const [reviewComments, setReviewComments] = useState<ReviewComment[]>([]);
-  const [files, setFiles] = useState<FileDiff[]>([]);
+  const [files, setFiles] = useState<PullRequestFile[]>([]);
+  const [commits, setCommits] = useState<CommitListItem[]>([]);
   const [tab, setTab] = useState<Tab>("conversation");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -184,48 +116,45 @@ export default function PullRequestDetailPage({ params }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const [prRes, commitsRes, commentsRes, filesRes] = await Promise.all([
-        fetch(`/repos/${owner}/${repo}/pulls/${number}`),
-        fetch(`/repos/${owner}/${repo}/pulls/${number}/commits`),
-        fetch(`/repos/${owner}/${repo}/pulls/${number}/comments`),
-        fetch(`/repos/${owner}/${repo}/pulls/${number}/files`),
+      const prNumber = parseInt(number, 10);
+      const [prData, reviewsData, commentsData, filesData] = await Promise.all([
+        getPullRequest(owner, repo, prNumber),
+        listReviews(owner, repo, prNumber).catch(() => [] as Review[]),
+        listReviewComments(owner, repo, prNumber).catch(() => [] as ReviewComment[]),
+        getPullRequestFiles(owner, repo, prNumber).catch(() => [] as PullRequestFile[]),
       ]);
 
-      if (!prRes.ok) throw new Error("Pull request not found");
-
-      setPr((await prRes.json()) as PRDetail);
-      if (commitsRes.ok) setCommits((await commitsRes.json()) as Commit[]);
-      if (commentsRes.ok) setReviewComments((await commentsRes.json()) as ReviewComment[]);
-      if (filesRes.ok) setFiles((await filesRes.json()) as FileDiff[]);
+      setPr(prData);
+      setReviews(reviewsData);
+      setReviewComments(commentsData);
+      setFiles(filesData);
+      if (prData.head_sha) {
+        listPullRequestCommits(owner, repo, prData.head_sha, 1, 100)
+          .then(setCommits)
+          .catch(() => setCommits([]));
+      } else {
+        setCommits([]);
+      }
     } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        router.push(`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`);
+        return;
+      }
       setError(e instanceof Error ? e.message : "Failed to load pull request");
     } finally {
       setLoading(false);
     }
-  }, [owner, repo, number]);
+  }, [owner, repo, number, router]);
 
   useEffect(() => {
     loadPullRequest();
   }, [loadPullRequest]);
 
   const handleMerge = async (method: string) => {
-    const res = await fetch(`/repos/${owner}/${repo}/pulls/${number}/merge`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ merge_method: method }),
+    const prNumber = parseInt(number, 10);
+    await mergePullRequest(owner, repo, prNumber, {
+      merge_method: method as "merge" | "squash" | "rebase",
     });
-
-    if (!res.ok) {
-      let message = res.statusText;
-      try {
-        const body = (await res.json()) as { message?: string };
-        message = body.message ?? message;
-      } catch {
-        // ignore JSON parse errors
-      }
-      throw new ApiError(res.status, message);
-    }
-
     await loadPullRequest();
   };
 
@@ -251,6 +180,7 @@ export default function PullRequestDetailPage({ params }: Props) {
   }
 
   const badge = prStateBadge(pr);
+  const conversationCount = reviewComments.length + reviews.length + 1;
 
   return (
     <div className="min-h-screen bg-[#f6f8fa] text-[#1f2328]">
@@ -273,10 +203,9 @@ export default function PullRequestDetailPage({ params }: Props) {
               {badge.label}
             </span>
             <span>
-              <strong>{pr.user.login}</strong> wants to merge{" "}
-              <strong>{commits.length || pr.commits || 0} commits</strong> into{" "}
-              <code className="bg-[#f6f8fa] px-1.5 py-0.5 rounded text-xs">{pr.base.ref}</code> from{" "}
-              <code className="bg-[#f6f8fa] px-1.5 py-0.5 rounded text-xs">{pr.head.ref}</code>
+              <strong>{authorLogin(pr)}</strong> wants to merge changes into{" "}
+              <code className="bg-[#f6f8fa] px-1.5 py-0.5 rounded text-xs">{pr.base_ref}</code> from{" "}
+              <code className="bg-[#f6f8fa] px-1.5 py-0.5 rounded text-xs">{pr.head_ref}</code>
             </span>
             <span>· opened {formatAge(pr.created_at)}</span>
           </div>
@@ -285,7 +214,7 @@ export default function PullRequestDetailPage({ params }: Props) {
         <div className="flex gap-0 bg-white border border-b-0 border-[#d0d7de] rounded-t-lg px-4">
           {(
             [
-              { id: "conversation" as const, label: "Conversation", count: reviewComments.length + 1 },
+              { id: "conversation" as const, label: "Conversation", count: conversationCount },
               { id: "commits" as const, label: "Commits", count: commits.length },
               { id: "files" as const, label: "Files Changed", count: files.length },
             ] as const
@@ -312,9 +241,9 @@ export default function PullRequestDetailPage({ params }: Props) {
               <div className="bg-white border border-[#d0d7de] rounded-md p-4 mb-4">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0969da] to-[#8250df] text-white text-xs font-semibold inline-flex items-center justify-center">
-                    {pr.user.login.slice(0, 2).toUpperCase()}
+                    {authorLogin(pr).slice(0, 2).toUpperCase()}
                   </span>
-                  <span className="font-semibold text-sm">{pr.user.login}</span>
+                  <span className="font-semibold text-sm">{authorLogin(pr)}</span>
                   <span className="text-xs text-[#656d76]">commented {formatAge(pr.created_at)}</span>
                 </div>
                 <div
@@ -323,16 +252,39 @@ export default function PullRequestDetailPage({ params }: Props) {
                 />
               </div>
 
+              {reviews.map((review) => (
+                <div key={review.id} className="bg-white border border-[#d0d7de] rounded-md p-4 mb-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0969da] to-[#8250df] text-white text-xs font-semibold inline-flex items-center justify-center">
+                      {reviewAuthor(review).slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="font-semibold text-sm">{reviewAuthor(review)}</span>
+                    <span className="text-xs text-[#656d76]">
+                      {review.state.toLowerCase().replace("_", " ")}
+                      {review.submitted_at ? ` ${formatAge(review.submitted_at)}` : ""}
+                    </span>
+                  </div>
+                  {review.body ? (
+                    <div
+                      className="prose prose-sm max-w-none pl-10"
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(review.body) }}
+                    />
+                  ) : null}
+                </div>
+              ))}
+
               {reviewComments.map((comment) => (
                 <div key={comment.id} className="bg-white border border-[#d0d7de] rounded-md p-4 mb-4">
                   <div className="flex items-center gap-2 mb-3">
                     <span className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0969da] to-[#8250df] text-white text-xs font-semibold inline-flex items-center justify-center">
-                      {comment.user.login.slice(0, 2).toUpperCase()}
+                      {commentAuthor(comment).slice(0, 2).toUpperCase()}
                     </span>
-                    <span className="font-semibold text-sm">{comment.user.login}</span>
+                    <span className="font-semibold text-sm">{commentAuthor(comment)}</span>
                     <span className="text-xs text-[#656d76]">
                       reviewed {formatAge(comment.created_at)}
-                      {comment.path ? ` on ${comment.path}${comment.line ? `:${comment.line}` : ""}` : ""}
+                      {comment.path
+                        ? ` on ${comment.path}${comment.line ? `:${comment.line}` : ""}`
+                        : ""}
                     </span>
                   </div>
                   <div
@@ -349,7 +301,14 @@ export default function PullRequestDetailPage({ params }: Props) {
                 onSubmitted={loadPullRequest}
               />
 
-              <MergePanel pr={toPullRequest(pr)} onMerge={handleMerge} />
+              <ReviewPanel
+                owner={owner}
+                repo={repo}
+                prNumber={pr.number}
+                onSubmitted={loadPullRequest}
+              />
+
+              <MergePanel pr={toMergePanelPullRequest(pr)} onMerge={handleMerge} />
             </>
           )}
 
@@ -359,16 +318,22 @@ export default function PullRequestDetailPage({ params }: Props) {
                 <p className="text-[#656d76] py-4">No commits found.</p>
               ) : (
                 commits.map((commit) => (
-                  <div key={commit.sha} className="py-3 flex items-start gap-3">
-                    <span className="text-[#8250df] mt-0.5">●</span>
-                    <div>
-                      <p className="font-semibold text-sm">
+                  <div key={commit.sha} className="py-4 flex items-start gap-3">
+                    <span className="w-8 h-8 rounded-full bg-[#eaeef2] text-[#57606a] text-xs font-semibold inline-flex items-center justify-center shrink-0">
+                      {(commit.author?.login ?? commit.commit.author.name).slice(0, 2).toUpperCase()}
+                    </span>
+                    <div className="min-w-0">
+                      <Link
+                        href={`/${owner}/${repo}/commit/${commit.sha}`}
+                        className="text-sm font-semibold text-[#0969da] hover:underline"
+                      >
                         {commit.commit.message.split("\n")[0]}
-                      </p>
-                      <p className="text-xs text-[#656d76] mt-1">
-                        {commit.commit.author.name} committed {formatAge(commit.commit.author.date)} ·{" "}
+                      </Link>
+                      <div className="text-xs text-[#656d76] mt-1">
+                        {commit.author?.login ?? commit.commit.author.name} committed{" "}
+                        {formatAge(commit.commit.author.date)} ·{" "}
                         <code className="bg-[#f6f8fa] px-1 rounded">{commit.sha.slice(0, 7)}</code>
-                      </p>
+                      </div>
                     </div>
                   </div>
                 ))
@@ -381,7 +346,15 @@ export default function PullRequestDetailPage({ params }: Props) {
               {files.length === 0 ? (
                 <p className="text-[#656d76] py-4">No file changes found.</p>
               ) : (
-                files.map((file) => <DiffViewer key={file.filename} file={file} />)
+                files.map((file) => (
+                  <DiffViewer
+                    key={file.filename}
+                    filename={file.filename}
+                    patch={file.patch ?? undefined}
+                    additions={file.additions}
+                    deletions={file.deletions}
+                  />
+                ))
               )}
             </div>
           )}
