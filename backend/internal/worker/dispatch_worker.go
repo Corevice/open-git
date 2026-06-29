@@ -16,7 +16,7 @@ import (
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/infrastructure/queue"
 	"github.com/open-git/backend/internal/infrastructure/runner"
-	actionsuc "github.com/open-git/backend/internal/usecase/actions"
+	"github.com/open-git/backend/internal/usecase/actions"
 )
 
 type DispatchWorker struct {
@@ -70,7 +70,7 @@ func (w *DispatchWorker) HandleDispatchJob(ctx context.Context, task *asynq.Task
 		}
 	}
 
-	if actionsuc.UsesActAdapter(labels) {
+	if actions.UsesActAdapter(labels) {
 		actPayload := runner.ActJobPayload{
 			JobID:          job.ID.String(),
 			WorkflowYAML:   nil,

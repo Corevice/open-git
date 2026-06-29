@@ -1,9 +1,9 @@
-package actionsuc_test
+package actions_test
 
 import (
 	"testing"
 
-	actionsuc "github.com/open-git/backend/internal/usecase/actions"
+	"github.com/open-git/backend/internal/usecase/actions"
 )
 
 func TestMatchLabels(t *testing.T) {
@@ -65,7 +65,7 @@ func TestMatchLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := actionsuc.MatchLabels(tt.requested, tt.available)
+			got := actions.MatchLabels(tt.requested, tt.available)
 			if got != tt.want {
 				t.Fatalf("MatchLabels(%v, %v) = %v, want %v", tt.requested, tt.available, got, tt.want)
 			}
@@ -89,7 +89,7 @@ func TestIsGitHubHosted(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.label, func(t *testing.T) {
-			got := actionsuc.IsGitHubHosted(tt.label)
+			got := actions.IsGitHubHosted(tt.label)
 			if got != tt.want {
 				t.Fatalf("IsGitHubHosted(%q) = %v, want %v", tt.label, got, tt.want)
 			}
@@ -112,7 +112,7 @@ func TestUsesActAdapter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := actionsuc.UsesActAdapter(tt.labels)
+			got := actions.UsesActAdapter(tt.labels)
 			if got != tt.want {
 				t.Fatalf("UsesActAdapter(%v) = %v, want %v", tt.labels, got, tt.want)
 			}

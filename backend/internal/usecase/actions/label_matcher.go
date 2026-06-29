@@ -1,4 +1,4 @@
-package actionsuc
+package actions
 
 func MatchLabels(requested []string, available []string) bool {
 	if len(requested) == 0 {
