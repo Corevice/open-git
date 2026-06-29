@@ -2,6 +2,10 @@ global:
   databaseType: internal
   storageClass: ""
 
+config:
+  appEnv: production
+  logLevel: info
+
 replicaCount: 1
 
 image:
@@ -22,33 +26,17 @@ autoscaling:
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
 
-# Persistence for Git repositories.
-#
-# Migration guide (upgrade from persistence.repositories.* nested schema):
-#   - Old installs used persistence.repositories.{size,accessMode,retainOnDelete}.
-#   - Use the flat keys below; templates still accept repositories.* as a fallback.
-#   - Default size is 50Gi.
-#   - Set retainOnDelete: true (default) to annotate PVCs with helm.sh/resource-policy: keep
-#     so data survives helm uninstall. Verify existing PVC reclaim policy in your cluster
-#     before upgrading — shrinking size on an existing PVC is not supported by Kubernetes.
-#
-# Secret migration guide (upgrade from legacy -db / -minio Secrets):
-#   1. Ensure install/upgrade passes all required --set secrets.* values (or use
-#      secrets.existingSecret pointing at a pre-created Secret with keys:
-#      jwt-secret, db-password, minio-access-key, minio-secret-key).
-#   2. Run `helm upgrade` — Helm renders the unified -secrets Secret and updated
-#      backend Deployment in the same release; Kubernetes creates the Secret before
-#      rolling out pods that reference it.
-#   3. Legacy -db / -minio Secrets use the same key names as the unified Secret where
-#      applicable (minio-access-key, minio-secret-key). Set legacySecrets: true only
-#      while worker pods still reference the legacy Secret names; then set false.
 persistence:
-  enabled: true
-  reposSize: "50Gi"
-  reposPath: "/data/repos"
-  accessMode: ReadWriteOnce
-  storageClass: ""
-  retainOnDelete: true
+  repositories:
+    enabled: true
+    mountPath: /data/repositories
+    size: 50Gi
+    accessMode: ReadWriteOnce
+    retainOnDelete: true
+
+config:
+  appEnv: production
+  logLevel: info
 
 db:
   type: sqlite  # sqlite or postgres
@@ -85,18 +73,15 @@ ssh:
   enabled: true
   serviceType: LoadBalancer
 
-# Secrets must be supplied at install time via --set / --set-file / -f (never commit real
-# values in this file — they would remain in Git history). Prefer secrets.existingSecret
-# or an external secret manager for production. Note: --set secrets.* values are stored
-# in Helm release metadata (helm get values / helm history); use existingSecret to avoid that.
-# Example: --set secrets.jwtSecret=... --set secrets.minioAccessKey=... --set secrets.minioRootPassword=...
-# Set existingSecret to skip chart-managed Secret creation and reference an external Secret
-# (must contain keys: jwt-secret, db-password, minio-access-key, minio-secret-key).
 secrets:
   existingSecret: ""
-  # Deprecated: legacy -db / -minio Secrets for backward compatibility with worker pods.
-  # Enable only while worker deployments still reference the legacy Secret names.
-  legacySecrets: false
+  # Provide via --set / --set-file / -f at install time (never commit real values):
+  #   secrets.jwtSecret, secrets.dbPassword (postgres), secrets.minioRootPassword, secrets.minioAccessKey
+  # --set values are stored in Helm release metadata; prefer existingSecret for production.
+  # legacySecrets creates the -db / -minio Secrets that the backend/worker/migration
+  # Deployments reference by name. Keep true unless those workloads are rewired to the
+  # unified -secrets Secret.
+  legacySecrets: true
 
 serviceAccount:
   create: true

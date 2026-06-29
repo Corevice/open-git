@@ -1,30 +1,22 @@
-{{- if .Values.persistence.enabled }}
-{{- $size := .Values.persistence.reposSize | default .Values.persistence.repositories.size | default "50Gi" | toString | trimAll " " }}
-{{- if eq $size "" }}
-{{- fail "persistence storage size must not be empty — set persistence.reposSize (e.g. 50Gi)" }}
-{{- end }}
-{{- if not (regexMatch "^[0-9]+(\\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)?$" $size) }}
-{{- fail (printf "Invalid persistence storage size %q — use a Kubernetes quantity (e.g. 50Gi, 100Mi)" $size) }}
-{{- end }}
-{{- $retain := or .Values.persistence.retainOnDelete .Values.persistence.repositories.retainOnDelete }}
+{{- if (.Values.persistence.repositories.enabled | default true) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "open-git.fullname" . }}-repos
+  name: {{ include "open-git.fullname" . }}-repositories
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "open-git.labels" . | nindent 4 }}
-  {{- if $retain }}
+  {{- if (.Values.persistence.repositories.retainOnDelete | default true) }}
   annotations:
-    helm.sh/resource-policy: keep
+    "helm.sh/resource-policy": keep
   {{- end }}
 spec:
   accessModes:
-    - {{ .Values.persistence.accessMode | default .Values.persistence.repositories.accessMode | default "ReadWriteOnce" }}
+    - {{ .Values.persistence.repositories.accessMode | default "ReadWriteOnce" | quote }}
   resources:
     requests:
-      storage: {{ $size | quote }}
-  {{- $storageClass := .Values.persistence.storageClass | default .Values.global.storageClass }}
-  {{- with $storageClass }}
+      storage: {{ .Values.persistence.repositories.size | default "50Gi" | quote }}
+  {{- with .Values.global.storageClass }}
   storageClassName: {{ . | quote }}
   {{- end }}
 {{- end }}

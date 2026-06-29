@@ -1,0 +1,5 @@
+export default {
+  index: '概要',
+  traefik: 'Traefik 設定',
+  database: 'データベース',
+}

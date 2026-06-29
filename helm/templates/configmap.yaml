@@ -1,14 +1,23 @@
+{{- define "open-git.repositoriesMountPath" -}}
+{{- $path := .Values.persistence.repositories.mountPath | default "/data/repositories" -}}
+{{- if or (not (hasPrefix "/" $path)) (contains ".." $path) (contains "\n" $path) -}}
+{{- fail (printf "invalid persistence.repositories.mountPath %q: must be an absolute path without .. or newlines" $path) -}}
+{{- end -}}
+{{- $path -}}
+{{- end -}}
+{{- $appEnv := .Values.config.appEnv | default "production" -}}
+{{- if regexMatch "[\r\n]" $appEnv }}{{- fail "config.appEnv must not contain newlines" -}}{{- end -}}
+{{- $logLevel := .Values.config.logLevel | default "info" -}}
+{{- if regexMatch "[\r\n]" $logLevel }}{{- fail "config.logLevel must not contain newlines" -}}{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "open-git.fullname" . }}
+  name: {{ include "open-git.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "open-git.labels" . | nindent 4 }}
 data:
-  DB_TYPE: {{ .Values.db.type | quote }}
-  REDIS_ADDR: {{ .Values.redis.addr | quote }}
-  PORT: {{ .Values.service.backend.port | default 8080 | toString | quote }}
-  GIT_STORAGE_PATH: {{ .Values.persistence.reposPath | default "/data/repos" | quote }}
-  {{- if .Values.minio.enabled }}
-  MINIO_ENDPOINT: {{ .Values.minio.endpoint | quote }}
-  {{- end }}
+  # Non-secret environment configuration only. Do not store credentials or API keys here; use Secrets instead.
+  APP_ENV: {{ $appEnv | quote }}
+  GIT_REPOS_PATH: {{ include "open-git.repositoriesMountPath" . | quote }}
+  LOG_LEVEL: {{ $logLevel | quote }}

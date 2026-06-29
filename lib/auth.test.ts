@@ -5,7 +5,7 @@ import { createElement, type ReactNode } from "react";
 import { AUTH_TOKEN_KEY, AuthProvider, useAuth } from "./auth";
 
 function wrapper({ children }: { children: ReactNode }) {
-  return createElement(AuthProvider, { children });
+  return createElement(AuthProvider, null, children);
 }
 
 describe("auth", () => {

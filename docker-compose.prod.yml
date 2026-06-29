@@ -1,0 +1,180 @@
+services:
+  traefik-init:
+    image: busybox:latest
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required}
+      ACME_FILE: /letsencrypt/acme.json
+    entrypoint: ["sh", "/scripts/init-acme.sh"]
+    volumes:
+      - open-git-letsencrypt:/letsencrypt
+      - ./scripts/init-acme.sh:/scripts/init-acme.sh:ro
+
+  traefik:
+    image: traefik:v3.3.6
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.file.directory=/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.ssh.address=:22"
+      - "--certificatesresolvers.le.acme.email=${ACME_EMAIL:?ACME_EMAIL is required}"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.le.acme.tlschallenge=true"
+      - "--api.dashboard=false"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "22:22"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "open-git-letsencrypt:/letsencrypt"
+      - "./traefik/dynamic:/traefik/dynamic:ro"
+    networks:
+      - proxy
+    depends_on:
+      traefik-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      GRAFANA_BASE_URL: ${GRAFANA_BASE_URL:-http://localhost:3001}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - open-git-git-storage:/data/repositories
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app.rule=Host(`${DOMAIN}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.app.entrypoints=websecure"
+      - "traefik.http.routers.app.tls.certresolver=le"
+      - "traefik.http.routers.app.priority=100"
+      - "traefik.http.services.app.loadbalancer.server.port=8080"
+      - "traefik.http.services.app.loadbalancer.healthcheck.path=/healthz"
+      - "traefik.http.services.app.loadbalancer.healthcheck.interval=30s"
+      - "traefik.http.routers.app.middlewares=sec-headers@file,ratelimit-auth@file"
+    networks:
+      - proxy
+      - internal
+    restart: unless-stopped
+
+  git-ssh:
+    image: alpine/socat:1.0.5.0-r0
+    command: TCP-LISTEN:2222,fork,reuseaddr TCP:app:2222
+    depends_on:
+      app:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.ssh.rule=ClientIP(`10.0.0.0/8`) || ClientIP(`172.16.0.0/12`) || ClientIP(`192.168.0.0/16`) || ClientIP(`127.0.0.1/32`)"
+      - "traefik.tcp.routers.ssh.entrypoints=ssh"
+      - "traefik.tcp.routers.ssh.middlewares=ssh-ipwhitelist@file"
+      - "traefik.tcp.services.ssh.loadbalancer.server.port=2222"
+    networks:
+      - proxy
+      - internal
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: https://${DOMAIN:?DOMAIN is required}
+    depends_on:
+      - app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=le"
+      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      - "traefik.http.routers.frontend.middlewares=sec-headers@file,compress@file"
+    networks:
+      - proxy
+      - internal
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - open-git-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: >
+      sh -c 'redis-server --requirepass "$$REDIS_PASSWORD"'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - open-git-redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+    volumes:
+      - open-git-minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - internal
+    restart: unless-stopped
+
+networks:
+  proxy:
+  internal:
+
+volumes:
+  open-git-letsencrypt:
+  open-git-postgres:
+  open-git-redis:
+  open-git-minio:
+  open-git-git-storage:
