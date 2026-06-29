@@ -1,43 +1,34 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mockGetAppMeta = vi.fn();
+
+vi.mock("@/lib/api", () => ({
+  getAppMeta: (...args: unknown[]) => mockGetAppMeta(...args),
+}));
 
 import AboutPage from "@/app/about/page";
 
 describe("AboutPage", () => {
   beforeEach(() => {
+    mockGetAppMeta.mockReset();
     vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://localhost:8080");
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.endsWith("/api/v1/version")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              data: {
-                version: "1.0.0",
-                commit: "abc1234",
-                buildDate: "2025-01-01T00:00:00Z",
-              },
-            }),
-          };
-        }
-        return {
-          ok: false,
-          status: 404,
-          json: async () => ({}),
-        };
-      }),
-    );
+    mockGetAppMeta.mockResolvedValue({
+      app_name: "OpenGit",
+      version: "1.0.0",
+      git_commit: "abc1234",
+      build_date: "2025-01-01T00:00:00Z",
+      license: "Apache-2.0",
+      source_url: "https://example.org/repo",
+    });
   });
 
   it("renders project name and includes a link", async () => {
-    const page = await AboutPage();
-    render(page);
+    render(<AboutPage />);
 
-    expect(screen.getByText("OpenGit")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("OpenGit")).toBeInTheDocument();
+    });
     expect(document.querySelector("a")).not.toBeNull();
   });
 });
