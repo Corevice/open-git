@@ -215,7 +215,9 @@ describe("workflow job logs page", () => {
     render(<JobLogsPageContent />);
 
     expect(await screen.findByText("colored line")).toBeInTheDocument();
-    expect(screen.queryByText((content) => content.includes("\x1b"))).not.toBeInTheDocument();
+    expect(
+      screen.queryByText((content) => content.includes("\x1b")),
+    ).not.toBeInTheDocument();
   });
 
   it("strips ANSI escape sequences from SSE-appended lines", async () => {
@@ -230,7 +232,9 @@ describe("workflow job logs page", () => {
     });
 
     expect(await screen.findByText("streamed green")).toBeInTheDocument();
-    expect(screen.queryByText((content) => content.includes("\x1b"))).not.toBeInTheDocument();
+    expect(
+      screen.queryByText((content) => content.includes("\x1b")),
+    ).not.toBeInTheDocument();
   });
 
   it("renders HTML-like log strings as plain text without creating DOM elements", async () => {
