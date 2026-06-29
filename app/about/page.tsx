@@ -1,71 +1,82 @@
-import Link from "next/link";
+"use client";
 
+import Link from "next/link";
+import { useEffect, useState } from "react";
+
+import { getAppMeta } from "@/lib/api";
+import type { AppMeta } from "@/lib/api-types";
 import { BRANDING } from "@/lib/branding";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  "";
+export default function AboutPage() {
+  const [meta, setMeta] = useState<AppMeta | null>(null);
+  const [loading, setLoading] = useState(true);
 
-interface VersionData {
-  version: string;
-  commit: string;
-  buildDate: string;
-}
+  useEffect(() => {
+    let cancelled = false;
 
-async function fetchVersion(): Promise<VersionData | null> {
-  try {
-    const response = await fetch(`${API_BASE}/api/v1/version`, {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
+    getAppMeta(process.env.NEXT_PUBLIC_API_BASE_URL ?? "")
+      .then((data) => {
+        if (!cancelled) {
+          setMeta(data);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
 
-    if (!response.ok) {
-      return null;
-    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-    const body = (await response.json()) as { data?: VersionData };
-    return body.data ?? null;
-  } catch {
-    return null;
-  }
-}
-
-export default async function AboutPage() {
-  const version = await fetchVersion();
+  const version = loading ? "dev" : (meta?.version ?? "dev");
+  const commit = meta?.git_commit ?? "unknown";
+  const buildDate = meta?.build_date ?? "unknown";
+  const licenseName = meta?.license ?? BRANDING.licenseName;
+  const sourceUrl = meta?.source_url ?? BRANDING.sourceUrl;
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-12">
-      <h1 className="mb-8 text-3xl font-bold">{BRANDING.appName}</h1>
+      <h1 className="mb-6 text-3xl font-bold">{BRANDING.appName}</h1>
+
+      {loading ? <p className="mb-4 text-muted-foreground">Loading...</p> : null}
 
       <dl className="space-y-4">
         <div>
-          <dt className="text-sm font-medium text-gray-500">Version</dt>
-          <dd className="mt-1 text-base">{version?.version ?? "unknown"}</dd>
+          <dt className="text-sm font-medium text-muted-foreground">Version</dt>
+          <dd>{version}</dd>
         </div>
         <div>
-          <dt className="text-sm font-medium text-gray-500">Commit</dt>
-          <dd className="mt-1 font-mono text-sm">{version?.commit ?? "unknown"}</dd>
+          <dt className="text-sm font-medium text-muted-foreground">Commit</dt>
+          <dd className="font-mono text-sm">{commit}</dd>
         </div>
         <div>
-          <dt className="text-sm font-medium text-gray-500">Build Date</dt>
-          <dd className="mt-1 text-base">{version?.buildDate ?? "unknown"}</dd>
+          <dt className="text-sm font-medium text-muted-foreground">
+            Build Date
+          </dt>
+          <dd>{buildDate}</dd>
         </div>
         <div>
-          <dt className="text-sm font-medium text-gray-500">License</dt>
-          <dd className="mt-1 text-base">{BRANDING.licenseName}</dd>
+          <dt className="text-sm font-medium text-muted-foreground">License</dt>
+          <dd>
+            <Link href="/licenses" className="text-primary underline">
+              {licenseName}
+            </Link>
+          </dd>
         </div>
         <div>
-          <dt className="text-sm font-medium text-gray-500">Source</dt>
-          <dd className="mt-1">
-            <Link
-              href={BRANDING.sourceUrl}
-              className="text-blue-600 hover:underline"
+          <dt className="text-sm font-medium text-muted-foreground">Source</dt>
+          <dd>
+            <a
+              href={sourceUrl}
               target="_blank"
               rel="noopener noreferrer"
+              className="text-primary underline"
             >
-              {BRANDING.sourceUrl}
-            </Link>
+              {sourceUrl}
+            </a>
           </dd>
         </div>
       </dl>

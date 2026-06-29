@@ -1,5 +1,7 @@
 import type {
   AccessTokenMeta,
+  AppLicenses,
+  AppMeta,
   CreateTokenResult,
   OAuthApp,
   OAuthAppCreateInput,
@@ -651,4 +653,18 @@ export function getOrgs(
 
 export function getCurrentUser(token: string): Promise<ApiUserSummary> {
   return fetchWithToken<ApiUserSummary>(token, "/api/v3/user");
+}
+
+export async function getAppMeta(baseURL: string): Promise<AppMeta> {
+  const response = await fetch(`${baseURL}/api/meta`);
+  return response.json() as Promise<AppMeta>;
+}
+
+export async function getAppLicenses(baseURL: string): Promise<AppLicenses> {
+  try {
+    const response = await fetch(`${baseURL}/api/licenses`);
+    return (await response.json()) as AppLicenses;
+  } catch {
+    return { app_license: "", third_party: [] };
+  }
 }
