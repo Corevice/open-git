@@ -21,6 +21,10 @@ type Config struct {
 	JWTSecret         string
 	RedisAddr         string
 	MinioEndpoint     string
+	MinioAccessKey    string
+	MinioSecretKey    string
+	MinioUseTLS       bool
+	MinioBucket       string
 	GitDataRoot       string
 	SSHPort           string
 	SSHEnabled        bool
@@ -69,6 +73,10 @@ func Load() Config {
 		JWTSecret:         os.Getenv("JWT_SECRET"),
 		RedisAddr:         os.Getenv("REDIS_ADDR"),
 		MinioEndpoint:     os.Getenv("MINIO_ENDPOINT"),
+		MinioAccessKey:    getenv("MINIO_ACCESS_KEY", "minioadmin"),
+		MinioSecretKey:    getenv("MINIO_SECRET_KEY", "minioadmin"),
+		MinioUseTLS:       getenvBool("MINIO_USE_TLS", false),
+		MinioBucket:       getenv("MINIO_BUCKET", "artifacts"),
 		GitDataRoot:       getenv("GIT_DATA_ROOT", "./data/git"),
 		SSHPort:           sshPort,
 		SSHEnabled:        getenvBool("SSH_ENABLED", true),
