@@ -9,15 +9,25 @@ http:
         frameDeny: true
         contentTypeNosniff: true
         browserXssFilter: true
-        referrerPolicy: "no-referrer-when-downgrade"
+        referrerPolicy: "strict-origin-when-cross-origin"
         customResponseHeaders:
           X-Powered-By: ""
     ratelimit-auth:
       rateLimit:
         average: 10
         burst: 20
-        period: 1m
+        period: 60s
     compress:
       compress:
         excludedContentTypes:
           - text/event-stream
+
+tcp:
+  middlewares:
+    ssh-ipwhitelist:
+      ipWhiteList:
+        sourceRange:
+          - "127.0.0.1/32"
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+          - "192.168.0.0/16"
