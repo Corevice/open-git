@@ -26,6 +26,7 @@ import (
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	appmiddleware "github.com/open-git/backend/internal/middleware"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
+	prusecase "github.com/open-git/backend/internal/usecase/pr"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
 )
 
@@ -730,54 +731,704 @@ func (r *repositoryResolver) PullRequests(ctx context.Context, obj *model.Reposi
 	return buildPullRequestConnection(prs, obj, first, after, total)
 }
 
+func derefStr(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func mutationActorID(ctx context.Context) (uuid.UUID, error) {
+	viewer, ok := ViewerFromContext(ctx)
+	if !ok || viewer == nil {
+		return uuid.Nil, domain.ErrUnauthorized
+	}
+	return viewer.ID, nil
+}
+
+func loadRepositoryByID(ctx context.Context, r *Resolver, repoID uuid.UUID) (*entity.Repository, error) {
+	loaders := LoadersFromContext(ctx)
+	if loaders != nil {
+		repo, err := loaders.RepositoryByID.Load(ctx, repoID)
+		if err != nil {
+			return nil, err
+		}
+		if repo == nil {
+			return nil, apperror.ErrNotFound
+		}
+		return repo, nil
+	}
+	return nil, apperror.ErrNotFound
+}
+
+func loadLabelByID(ctx context.Context, r *Resolver, labelID uuid.UUID) (*entity.Label, error) {
+	loaders := LoadersFromContext(ctx)
+	if loaders != nil {
+		label, err := loaders.LabelByID.Load(ctx, labelID)
+		if err != nil {
+			return nil, err
+		}
+		if label == nil {
+			return nil, apperror.ErrNotFound
+		}
+		return label, nil
+	}
+	return nil, apperror.ErrNotFound
+}
+
+func issueStateString(state model.IssueState) string {
+	switch state {
+	case model.IssueStateClosed:
+		return "closed"
+	default:
+		return "open"
+	}
+}
+
+func mergeMethodString(method *model.PullRequestMergeMethod) string {
+	if method == nil {
+		return "merge"
+	}
+	switch *method {
+	case model.PullRequestMergeMethodSquash:
+		return "squash"
+	case model.PullRequestMergeMethodRebase:
+		return "rebase"
+	default:
+		return "merge"
+	}
+}
+
+type labelableTarget struct {
+	repositoryID   uuid.UUID
+	organizationID uuid.UUID
+	issueNumber    int
+	isIssue        bool
+	issue          *entity.Issue
+	pullRequest    *entity.PullRequest
+}
+
+func (r *mutationResolver) resolveLabelable(ctx context.Context, globalID string) (*labelableTarget, error) {
+	typeName, id, err := globalid.Decode(globalID)
+	if err != nil {
+		return nil, err
+	}
+
+	switch typeName {
+	case globalid.TypeIssue:
+		if r.IssueRepo == nil {
+			return nil, apperror.ErrNotFound
+		}
+		issue, err := r.IssueRepo.GetByID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if issue == nil || issue.State == "deleted" {
+			return nil, apperror.ErrNotFound
+		}
+		return &labelableTarget{
+			repositoryID:   issue.RepositoryID,
+			organizationID: issue.OrganizationID,
+			issueNumber:    issue.Number,
+			isIssue:        true,
+			issue:          issue,
+		}, nil
+	case globalid.TypePullRequest:
+		if r.PullRequestRepo == nil {
+			return nil, apperror.ErrNotFound
+		}
+		pr, err := r.PullRequestRepo.GetByID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if pr == nil {
+			return nil, apperror.ErrNotFound
+		}
+		return &labelableTarget{
+			repositoryID:   pr.RepositoryID,
+			organizationID: pr.OrganizationID,
+			issueNumber:    pr.Number,
+			isIssue:        false,
+			pullRequest:    pr,
+		}, nil
+	default:
+		return nil, apperror.ErrNotFound
+	}
+}
+
+func (r *mutationResolver) refreshLabelable(ctx context.Context, target *labelableTarget) (model.Labelable, error) {
+	if target.isIssue {
+		if r.IssueRepo == nil {
+			return mapIssue(target.issue), nil
+		}
+		issue, err := r.IssueRepo.GetByID(ctx, target.issue.ID)
+		if err != nil {
+			return nil, err
+		}
+		if issue == nil {
+			return nil, apperror.ErrNotFound
+		}
+		return mapIssue(issue), nil
+	}
+	if r.PullRequestRepo == nil {
+		return mapPullRequest(target.pullRequest), nil
+	}
+	pr, err := r.PullRequestRepo.GetByID(ctx, target.pullRequest.ID)
+	if err != nil {
+		return nil, err
+	}
+	if pr == nil {
+		return nil, apperror.ErrNotFound
+	}
+	return mapPullRequest(pr), nil
+}
+
 // CreateIssue is the resolver for the createIssue field.
 func (r *mutationResolver) CreateIssue(ctx context.Context, input model.CreateIssueInput) (*model.CreateIssuePayload, error) {
-	return nil, fmt.Errorf("not implemented: CreateIssue - createIssue")
+	if err := RequireScope(ctx, ScopeRepo); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(input.Title) == "" {
+		return nil, apperror.ErrValidation
+	}
+
+	_, repoID, err := globalid.Decode(input.RepositoryID)
+	if err != nil {
+		return nil, err
+	}
+
+	repo, err := loadRepositoryByID(ctx, r.Resolver, repoID)
+	if err != nil {
+		return nil, err
+	}
+
+	actorID, err := mutationActorID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if r.CreateIssueUC == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	issue, err := r.CreateIssueUC.Execute(ctx, issueusecase.CreateIssueInput{
+		OrganizationID: repo.OrganizationID,
+		RepositoryID:   repoID,
+		ActorID:        actorID,
+		Title:          input.Title,
+		Body:           derefStr(input.Body),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.CreateIssuePayload{
+		Issue:            mapIssue(issue),
+		ClientMutationID: input.ClientMutationID,
+	}, nil
 }
 
 // UpdateIssue is the resolver for the updateIssue field.
 func (r *mutationResolver) UpdateIssue(ctx context.Context, input model.UpdateIssueInput) (*model.UpdateIssuePayload, error) {
-	return nil, fmt.Errorf("not implemented: UpdateIssue - updateIssue")
+	if err := RequireScope(ctx, ScopeRepo); err != nil {
+		return nil, err
+	}
+
+	_, issueID, err := globalid.Decode(input.ID)
+	if err != nil {
+		return nil, err
+	}
+	if r.IssueRepo == nil || r.UpdateIssueUC == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	issue, err := r.IssueRepo.GetByID(ctx, issueID)
+	if err != nil {
+		return nil, err
+	}
+	if issue == nil || issue.State == "deleted" {
+		return nil, apperror.ErrNotFound
+	}
+
+	actorID, err := mutationActorID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	updateInput := issueusecase.UpdateIssueInput{
+		OrganizationID: issue.OrganizationID,
+		RepositoryID:   issue.RepositoryID,
+		IssueNumber:    issue.Number,
+		ActorID:        actorID,
+	}
+	if input.Title != nil {
+		updateInput.Title = input.Title
+	}
+	if input.Body != nil {
+		updateInput.Body = input.Body
+	}
+	if input.State != nil {
+		state := issueStateString(*input.State)
+		updateInput.State = &state
+	}
+	if input.LabelIds != nil {
+		names := make([]string, 0, len(input.LabelIds))
+		for _, labelGlobalID := range input.LabelIds {
+			_, labelID, decodeErr := globalid.Decode(labelGlobalID)
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+			label, loadErr := loadLabelByID(ctx, r.Resolver, labelID)
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			if label.RepositoryID != issue.RepositoryID {
+				return nil, apperror.ErrNotFound
+			}
+			names = append(names, label.Name)
+		}
+		updateInput.LabelNames = names
+	}
+
+	updated, err := r.UpdateIssueUC.Execute(ctx, updateInput)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.UpdateIssuePayload{
+		Issue:            mapIssue(updated),
+		ClientMutationID: input.ClientMutationID,
+	}, nil
 }
 
 // CloseIssue is the resolver for the closeIssue field.
 func (r *mutationResolver) CloseIssue(ctx context.Context, input model.CloseIssueInput) (*model.CloseIssuePayload, error) {
-	return nil, fmt.Errorf("not implemented: CloseIssue - closeIssue")
+	if err := RequireScope(ctx, ScopeRepo); err != nil {
+		return nil, err
+	}
+
+	_, issueID, err := globalid.Decode(input.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	if r.IssueRepo == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	issue, err := r.IssueRepo.GetByID(ctx, issueID)
+	if err != nil {
+		return nil, err
+	}
+	if issue == nil || issue.State == "deleted" {
+		return nil, apperror.ErrNotFound
+	}
+
+	if issue.State == "closed" {
+		return &model.CloseIssuePayload{
+			Issue:            mapIssue(issue),
+			ClientMutationID: input.ClientMutationID,
+		}, nil
+	}
+
+	if r.UpdateIssueUC == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	actorID, err := mutationActorID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	closed := "closed"
+	updated, err := r.UpdateIssueUC.Execute(ctx, issueusecase.UpdateIssueInput{
+		OrganizationID: issue.OrganizationID,
+		RepositoryID: issue.RepositoryID,
+		IssueNumber:    issue.Number,
+		ActorID:        actorID,
+		State:          &closed,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.CloseIssuePayload{
+		Issue:            mapIssue(updated),
+		ClientMutationID: input.ClientMutationID,
+	}, nil
 }
 
 // ReopenIssue is the resolver for the reopenIssue field.
 func (r *mutationResolver) ReopenIssue(ctx context.Context, input model.ReopenIssueInput) (*model.ReopenIssuePayload, error) {
-	return nil, fmt.Errorf("not implemented: ReopenIssue - reopenIssue")
+	if err := RequireScope(ctx, ScopeRepo); err != nil {
+		return nil, err
+	}
+
+	_, issueID, err := globalid.Decode(input.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	if r.IssueRepo == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	issue, err := r.IssueRepo.GetByID(ctx, issueID)
+	if err != nil {
+		return nil, err
+	}
+	if issue == nil || issue.State == "deleted" {
+		return nil, apperror.ErrNotFound
+	}
+
+	if issue.State == "open" {
+		return &model.ReopenIssuePayload{
+			Issue:            mapIssue(issue),
+			ClientMutationID: input.ClientMutationID,
+		}, nil
+	}
+
+	if r.UpdateIssueUC == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	actorID, err := mutationActorID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	open := "open"
+	updated, err := r.UpdateIssueUC.Execute(ctx, issueusecase.UpdateIssueInput{
+		OrganizationID: issue.OrganizationID,
+		RepositoryID:   issue.RepositoryID,
+		IssueNumber:    issue.Number,
+		ActorID:        actorID,
+		State:          &open,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.ReopenIssuePayload{
+		Issue:            mapIssue(updated),
+		ClientMutationID: input.ClientMutationID,
+	}, nil
 }
 
 // AddComment is the resolver for the addComment field.
 func (r *mutationResolver) AddComment(ctx context.Context, input model.AddCommentInput) (*model.AddCommentPayload, error) {
-	return nil, fmt.Errorf("not implemented: AddComment - addComment")
+	if err := RequireScope(ctx, ScopeRepo); err != nil {
+		return nil, err
+	}
+
+	typeName, subjectID, err := globalid.Decode(input.SubjectID)
+	if err != nil {
+		return nil, err
+	}
+
+	actorID, err := mutationActorID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	switch typeName {
+	case globalid.TypeIssue:
+		if r.IssueRepo == nil || r.CreateCommentUC == nil {
+			return nil, apperror.ErrNotFound
+		}
+		issue, err := r.IssueRepo.GetByID(ctx, subjectID)
+		if err != nil {
+			return nil, err
+		}
+		if issue == nil || issue.State == "deleted" {
+			return nil, apperror.ErrNotFound
+		}
+
+		comment, err := r.CreateCommentUC.Execute(ctx, issueusecase.CreateCommentInput{
+			OrganizationID: issue.OrganizationID,
+			RepositoryID:   issue.RepositoryID,
+			IssueNumber:    issue.Number,
+			ActorID:        actorID,
+			Body:           input.Body,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		node := mapEntityComment(comment)
+		cursor := relay.EncodeCursor(comment.ID, comment.CreatedAt)
+		return &model.AddCommentPayload{
+			CommentEdge:      &model.IssueCommentEdge{Cursor: cursor, Node: node},
+			Comment:          node,
+			Subject:          mapIssue(issue),
+			ClientMutationID: input.ClientMutationID,
+		}, nil
+	case globalid.TypePullRequest:
+		if r.PullRequestRepo == nil || r.CreateCommentUC == nil {
+			return nil, apperror.ErrNotFound
+		}
+		pr, err := r.PullRequestRepo.GetByID(ctx, subjectID)
+		if err != nil {
+			return nil, err
+		}
+		if pr == nil {
+			return nil, apperror.ErrNotFound
+		}
+
+		comment, err := r.CreateCommentUC.Execute(ctx, issueusecase.CreateCommentInput{
+			OrganizationID: pr.OrganizationID,
+			RepositoryID:   pr.RepositoryID,
+			IssueNumber:    pr.Number,
+			ActorID:        actorID,
+			Body:           input.Body,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		node := mapEntityComment(comment)
+		cursor := relay.EncodeCursor(comment.ID, comment.CreatedAt)
+		return &model.AddCommentPayload{
+			CommentEdge:      &model.IssueCommentEdge{Cursor: cursor, Node: node},
+			Comment:          node,
+			Subject:          mapPullRequest(pr),
+			ClientMutationID: input.ClientMutationID,
+		}, nil
+	default:
+		return nil, apperror.ErrNotFound
+	}
 }
 
 // CreatePullRequest is the resolver for the createPullRequest field.
 func (r *mutationResolver) CreatePullRequest(ctx context.Context, input model.CreatePullRequestInput) (*model.CreatePullRequestPayload, error) {
-	return nil, fmt.Errorf("not implemented: CreatePullRequest - createPullRequest")
+	if err := RequireScope(ctx, ScopeRepo); err != nil {
+		return nil, err
+	}
+
+	_, repoID, err := globalid.Decode(input.RepositoryID)
+	if err != nil {
+		return nil, err
+	}
+
+	repo, err := loadRepositoryByID(ctx, r.Resolver, repoID)
+	if err != nil {
+		return nil, err
+	}
+
+	actorID, err := mutationActorID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if r.CreatePRUC == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	pr, err := r.CreatePRUC.Execute(ctx, prusecase.CreatePRInput{
+		OrganizationID: repo.OrganizationID,
+		RepositoryID:   repoID,
+		GitPath:        repo.GitPath,
+		ActorID:        actorID,
+		Title:          input.Title,
+		Body:           derefStr(input.Body),
+		HeadRef:        input.HeadRefName,
+		BaseRef:        input.BaseRefName,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.CreatePullRequestPayload{
+		PullRequest:      mapPullRequest(pr),
+		ClientMutationID: input.ClientMutationID,
+	}, nil
 }
 
 // MergePullRequest is the resolver for the mergePullRequest field.
 func (r *mutationResolver) MergePullRequest(ctx context.Context, input model.MergePullRequestInput) (*model.MergePullRequestPayload, error) {
-	return nil, fmt.Errorf("not implemented: MergePullRequest - mergePullRequest")
+	if err := RequireScope(ctx, ScopeRepo); err != nil {
+		return nil, err
+	}
+
+	_, prID, err := globalid.Decode(input.PullRequestID)
+	if err != nil {
+		return nil, err
+	}
+	if r.PullRequestRepo == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	pr, err := r.PullRequestRepo.GetByID(ctx, prID)
+	if err != nil {
+		return nil, err
+	}
+	if pr == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	mergeable := mapMergeableState(pr.MergeableState)
+	if mergeable != model.MergeableStateMergeable {
+		return nil, apperror.ErrValidation
+	}
+
+	repo, err := loadRepositoryByID(ctx, r.Resolver, pr.RepositoryID)
+	if err != nil {
+		return nil, err
+	}
+
+	actorID, err := mutationActorID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if r.MergePRUC == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	merged, err := r.MergePRUC.Execute(ctx, prusecase.MergePRInput{
+		OrganizationID: pr.OrganizationID,
+		RepositoryID:   pr.RepositoryID,
+		GitPath:        repo.GitPath,
+		ActorID:        actorID,
+		Number:         pr.Number,
+		MergeMethod:    mergeMethodString(input.MergeMethod),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.MergePullRequestPayload{
+		PullRequest:      mapPullRequest(merged),
+		ClientMutationID: input.ClientMutationID,
+	}, nil
 }
 
 // ClosePullRequest is the resolver for the closePullRequest field.
 func (r *mutationResolver) ClosePullRequest(ctx context.Context, input model.ClosePullRequestInput) (*model.ClosePullRequestPayload, error) {
-	return nil, fmt.Errorf("not implemented: ClosePullRequest - closePullRequest")
+	if err := RequireScope(ctx, ScopeRepo); err != nil {
+		return nil, err
+	}
+
+	_, prID, err := globalid.Decode(input.PullRequestID)
+	if err != nil {
+		return nil, err
+	}
+	if r.PullRequestRepo == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	pr, err := r.PullRequestRepo.GetByID(ctx, prID)
+	if err != nil {
+		return nil, err
+	}
+	if pr == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	if pr.State == entity.PullRequestStateClosed || pr.State == entity.PullRequestStateMerged {
+		return &model.ClosePullRequestPayload{
+			PullRequest:      mapPullRequest(pr),
+			ClientMutationID: input.ClientMutationID,
+		}, nil
+	}
+
+	pr.State = entity.PullRequestStateClosed
+	if err := r.PullRequestRepo.Update(ctx, pr); err != nil {
+		return nil, err
+	}
+
+	return &model.ClosePullRequestPayload{
+		PullRequest:      mapPullRequest(pr),
+		ClientMutationID: input.ClientMutationID,
+	}, nil
 }
 
 // AddLabelsToLabelable is the resolver for the addLabelsToLabelable field.
 func (r *mutationResolver) AddLabelsToLabelable(ctx context.Context, input model.AddLabelsToLabelableInput) (*model.AddLabelsToLabelablePayload, error) {
-	return nil, fmt.Errorf("not implemented: AddLabelsToLabelable - addLabelsToLabelable")
+	if err := RequireScope(ctx, ScopeRepo); err != nil {
+		return nil, err
+	}
+	if r.LabelRepo == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	target, err := r.resolveLabelable(ctx, input.LabelableID)
+	if err != nil {
+		return nil, err
+	}
+	if !target.isIssue {
+		return nil, apperror.ErrNotFound
+	}
+
+	for _, labelGlobalID := range input.LabelIds {
+		_, labelID, decodeErr := globalid.Decode(labelGlobalID)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		label, loadErr := loadLabelByID(ctx, r.Resolver, labelID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if label.RepositoryID != target.repositoryID {
+			return nil, apperror.ErrNotFound
+		}
+		if err := r.LabelRepo.AddToIssue(ctx, target.repositoryID, target.issueNumber, labelID); err != nil {
+			return nil, err
+		}
+	}
+
+	labelable, err := r.refreshLabelable(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.AddLabelsToLabelablePayload{
+		Labelable:        labelable,
+		ClientMutationID: input.ClientMutationID,
+	}, nil
 }
 
 // RemoveLabelsFromLabelable is the resolver for the removeLabelsFromLabelable field.
 func (r *mutationResolver) RemoveLabelsFromLabelable(ctx context.Context, input model.RemoveLabelsFromLabelableInput) (*model.RemoveLabelsFromLabelablePayload, error) {
-	return nil, fmt.Errorf("not implemented: RemoveLabelsFromLabelable - removeLabelsFromLabelable")
+	if err := RequireScope(ctx, ScopeRepo); err != nil {
+		return nil, err
+	}
+	if r.LabelRepo == nil {
+		return nil, apperror.ErrNotFound
+	}
+
+	target, err := r.resolveLabelable(ctx, input.LabelableID)
+	if err != nil {
+		return nil, err
+	}
+	if !target.isIssue {
+		return nil, apperror.ErrNotFound
+	}
+
+	for _, labelGlobalID := range input.LabelIds {
+		_, labelID, decodeErr := globalid.Decode(labelGlobalID)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		label, loadErr := loadLabelByID(ctx, r.Resolver, labelID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if label.RepositoryID != target.repositoryID {
+			return nil, apperror.ErrNotFound
+		}
+		if err := r.LabelRepo.RemoveFromIssue(ctx, target.repositoryID, target.issueNumber, labelID); err != nil {
+			return nil, err
+		}
+	}
+
+	labelable, err := r.refreshLabelable(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.RemoveLabelsFromLabelablePayload{
+		Labelable:        labelable,
+		ClientMutationID: input.ClientMutationID,
+	}, nil
 }
 
 // Viewer is the resolver for the viewer field.
