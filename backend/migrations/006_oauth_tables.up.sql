@@ -1,7 +1,6 @@
 ALTER TABLE oauth_apps ADD COLUMN name TEXT NOT NULL DEFAULT '';
 ALTER TABLE oauth_apps ADD COLUMN homepage_url TEXT NOT NULL DEFAULT '';
-ALTER TABLE oauth_apps ADD COLUMN owner_type TEXT NOT NULL DEFAULT 'user';
-ALTER TABLE oauth_apps ADD COLUMN owner_user_id TEXT REFERENCES users(id);
+ALTER TABLE oauth_apps ADD COLUMN owner_type TEXT NOT NULL DEFAULT 'user' CHECK (owner_type IN ('user', 'organization'));
 ALTER TABLE oauth_apps ADD COLUMN organization_id TEXT REFERENCES organizations(id);
 ALTER TABLE oauth_apps ADD COLUMN updated_at TIMESTAMP;
 

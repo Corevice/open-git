@@ -95,3 +95,33 @@ func TestOAuthAccessTokenRepository_RevokeByUserAndApp(t *testing.T) {
 		t.Fatalf("expected nil after revoke, got %+v", got)
 	}
 }
+
+func TestOAuthAccessTokenRepository_RevokeAllByAppID(t *testing.T) {
+	db := newUserTestDB(t)
+	user := seedAccessTokenUser(t, db)
+	userID := userIDFromUUID(user.ID)
+	app := seedOAuthApp(t, db, userID, "token-revoke-all-app")
+	repo := repository.NewOAuthAccessTokenRepository(db)
+
+	token := &domain.OAuthAccessToken{
+		TokenHash:  "oauth-token-revoke-all",
+		OAuthAppID: app.ID,
+		UserID:     userID,
+		Scopes:     []string{"repo"},
+	}
+	if err := repo.Create(context.Background(), token); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := repo.RevokeAllByAppID(context.Background(), app.ID, userID); err != nil {
+		t.Fatalf("RevokeAllByAppID: %v", err)
+	}
+
+	got, err := repo.FindByTokenHash(context.Background(), "oauth-token-revoke-all")
+	if err != nil {
+		t.Fatalf("FindByTokenHash: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil after revoke all, got %+v", got)
+	}
+}

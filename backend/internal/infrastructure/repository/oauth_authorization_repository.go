@@ -62,7 +62,20 @@ func (r *sqlxOAuthAuthorizationRepository) Upsert(ctx context.Context, auth *dom
 		"created_at":     auth.CreatedAt,
 		"updated_at":     auth.UpdatedAt,
 	})
-	return dbErrors.MapDBError(err)
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+
+	stored, err := r.GetByUserAndApp(ctx, auth.UserID, auth.OAuthAppID)
+	if err != nil {
+		return err
+	}
+	if stored != nil {
+		auth.ID = stored.ID
+		auth.CreatedAt = stored.CreatedAt
+		auth.UpdatedAt = stored.UpdatedAt
+	}
+	return nil
 }
 
 func (r *sqlxOAuthAuthorizationRepository) GetByUserAndApp(ctx context.Context, userID int64, appID string) (*domain.OAuthAuthorization, error) {

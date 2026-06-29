@@ -69,14 +69,20 @@ func (r *sqlxOAuthAuthorizationCodeRepository) Create(ctx context.Context, code 
 func (r *sqlxOAuthAuthorizationCodeRepository) ConsumeByCodeHash(ctx context.Context, codeHash string) (*domain.OAuthAuthorizationCode, error) {
 	now := time.Now().UTC()
 
+	tx, err := r.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, dbErrors.MapDBError(err)
+	}
+	defer tx.Rollback()
+
 	updateQuery := `
 		UPDATE oauth_authorization_codes
 		SET consumed_at = ?
 		WHERE code_hash = ? AND consumed_at IS NULL AND expires_at > ?
 	`
-	updateQuery = r.DB.Rebind(updateQuery)
+	updateQuery = tx.Rebind(updateQuery)
 
-	result, err := r.DB.ExecContext(ctx, updateQuery, now, codeHash, now)
+	result, err := tx.ExecContext(ctx, updateQuery, now, codeHash, now)
 	if err != nil {
 		return nil, dbErrors.MapDBError(err)
 	}
@@ -90,14 +96,18 @@ func (r *sqlxOAuthAuthorizationCodeRepository) ConsumeByCodeHash(ctx context.Con
 	}
 
 	selectQuery := `SELECT ` + oauthAuthorizationCodeSelectColumns + ` FROM oauth_authorization_codes WHERE code_hash = ?`
-	selectQuery = r.DB.Rebind(selectQuery)
+	selectQuery = tx.Rebind(selectQuery)
 
-	row := r.DB.QueryRowxContext(ctx, selectQuery, codeHash)
+	row := tx.QueryRowxContext(ctx, selectQuery, codeHash)
 	code, err := scanOAuthAuthorizationCode(row, r.DriverName())
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
+		return nil, dbErrors.MapDBError(err)
+	}
+
+	if err := tx.Commit(); err != nil {
 		return nil, dbErrors.MapDBError(err)
 	}
 	return code, nil

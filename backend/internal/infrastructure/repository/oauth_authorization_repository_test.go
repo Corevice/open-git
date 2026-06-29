@@ -64,6 +64,9 @@ func TestOAuthAuthorizationRepository_Upsert_Update(t *testing.T) {
 	if got == nil || len(got.GrantedScopes) != 2 {
 		t.Fatalf("unexpected scopes after update: %+v", got)
 	}
+	if got.ID != auth.ID {
+		t.Fatalf("Upsert changed authorization ID: got %q, want %q", got.ID, auth.ID)
+	}
 }
 
 func TestOAuthAuthorizationRepository_GetByUserAndApp(t *testing.T) {

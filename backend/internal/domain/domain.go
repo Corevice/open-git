@@ -59,6 +59,7 @@ type OAuthApp struct {
 	OwnerType        string
 	OwnerUserID      int64
 	OrganizationID   int64
+	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
 

@@ -51,7 +51,7 @@ type IOAuthAppRepository interface {
 	ListByOwnerUser(ctx context.Context, userID int64, page, perPage int) ([]*domain.OAuthApp, error)
 	ListByOrganization(ctx context.Context, orgID int64, page, perPage int) ([]*domain.OAuthApp, error)
 	Update(ctx context.Context, app *domain.OAuthApp) error
-	Delete(ctx context.Context, id string) error
+	Delete(ctx context.Context, id string, ownerUserID int64) error
 	UpdateSecretHash(ctx context.Context, id, hash string) error
 }
 
@@ -64,7 +64,7 @@ type IOAuthAccessTokenRepository interface {
 	Create(ctx context.Context, token *domain.OAuthAccessToken) error
 	FindByTokenHash(ctx context.Context, hash string) (*domain.OAuthAccessToken, error)
 	RevokeByUserAndApp(ctx context.Context, userID int64, appID string) error
-	RevokeAllByAppID(ctx context.Context, appID string) error
+	RevokeAllByAppID(ctx context.Context, appID string, ownerUserID int64) error
 }
 
 type IOAuthAuthorizationRepository interface {

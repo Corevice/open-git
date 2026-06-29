@@ -42,6 +42,9 @@ func TestOAuthAppRepository_Create(t *testing.T) {
 	if got.ClientID != "client-create" || got.Name != "Test App" {
 		t.Fatalf("unexpected app: %+v", got)
 	}
+	if got.CreatedAt.IsZero() {
+		t.Fatal("expected CreatedAt to be populated")
+	}
 }
 
 func TestOAuthAppRepository_GetByClientID(t *testing.T) {
@@ -165,7 +168,7 @@ func TestOAuthAppRepository_Delete(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := repo.Delete(context.Background(), app.ID); err != nil {
+	if err := repo.Delete(context.Background(), app.ID, userID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 

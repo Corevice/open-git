@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/open-git/backend/internal/domain"
 	dbErrors "github.com/open-git/backend/internal/infrastructure/database"
+	appmiddleware "github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
@@ -94,16 +95,23 @@ func (r *sqlxOAuthAccessTokenRepository) RevokeByUserAndApp(ctx context.Context,
 	return dbErrors.MapDBError(err)
 }
 
-func (r *sqlxOAuthAccessTokenRepository) RevokeAllByAppID(ctx context.Context, appID string) error {
+func (r *sqlxOAuthAccessTokenRepository) RevokeAllByAppID(ctx context.Context, appID string, ownerUserID int64) error {
 	now := time.Now().UTC()
+	ownerID := appmiddleware.Int64ToUUID(ownerUserID).String()
 	query := `
 		UPDATE oauth_access_tokens
 		SET revoked_at = ?
-		WHERE oauth_app_id = ? AND revoked_at IS NULL
+		WHERE oauth_app_id = ?
+		  AND revoked_at IS NULL
+		  AND EXISTS (
+			SELECT 1 FROM oauth_apps
+			WHERE oauth_apps.id = oauth_access_tokens.oauth_app_id
+			  AND oauth_apps.owner_id = ?
+		  )
 	`
 	query = r.DB.Rebind(query)
 
-	_, err := r.DB.ExecContext(ctx, query, now, appID)
+	_, err := r.DB.ExecContext(ctx, query, now, appID, ownerID)
 	return dbErrors.MapDBError(err)
 }
 
