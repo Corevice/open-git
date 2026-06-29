@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import { createRepoApiClient } from "@/lib/api-client";
+import {
+  apiClient as defaultApiClient,
+  createRepoApiClient,
+} from "@/lib/api-client";
 
 export interface TreeEntry {
   name: string;
@@ -20,7 +23,7 @@ interface FileTreeProps {
   owner: string;
   repo: string;
   treeRef: string;
-  apiClient: Pick<ReturnType<typeof createRepoApiClient>, "getContents">;
+  apiClient?: Pick<ReturnType<typeof createRepoApiClient>, "getContents">;
 }
 
 function formatRelativeTime(dateStr?: string): string {
@@ -55,7 +58,7 @@ export default function FileTree({
   owner,
   repo,
   treeRef,
-  apiClient,
+  apiClient = defaultApiClient,
 }: FileTreeProps) {
   const [expandedDirs, setExpandedDirs] = useState<Record<string, TreeEntry[]>>(
     {},
