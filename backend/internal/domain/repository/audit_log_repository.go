@@ -19,6 +19,6 @@ type AuditLogListOpts struct {
 }
 
 type AuditLogRepository interface {
-	IAuditLogRepository
+	IAuditLogFullRepository
 	ListByOrg(ctx context.Context, opts AuditLogListOpts) ([]*entity.AuditLog, int64, error)
 }
