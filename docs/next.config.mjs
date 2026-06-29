@@ -8,8 +8,9 @@ const withNextra = nextra({
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export',
-  // Static export (required so the Pagefind postbuild can index `out/`) is not
-  // compatible with the default next/image optimization loader.
+  // Static export to `out/` (so the Pagefind postbuild and the docs CI
+  // workflow can index it) is not compatible with the default next/image
+  // optimization loader.
   images: {
     unoptimized: true,
   },
