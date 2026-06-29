@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -137,6 +136,7 @@ func TestHandleDispatchJob_GitHubHostedRoutesToActAdapter(t *testing.T) {
 			jobID: {
 				ID:             jobID,
 				OrganizationID: orgID,
+				Name:           "build",
 				RunsOn:         []string{"ubuntu-latest"},
 			},
 		},
@@ -144,7 +144,7 @@ func TestHandleDispatchJob_GitHubHostedRoutesToActAdapter(t *testing.T) {
 	runnerRepo := &mockRunnerRepo{}
 	actAdapter := &mockRunnerAdapter{}
 
-	worker := NewDispatchWorker(nil, runnerRepo, jobRepo, actAdapter, nil)
+	worker := NewDispatchWorker(runnerRepo, jobRepo, actAdapter, nil)
 
 	payload, err := json.Marshal(queue.DispatchJobPayload{
 		JobID:          jobID.String(),
@@ -165,6 +165,9 @@ func TestHandleDispatchJob_GitHubHostedRoutesToActAdapter(t *testing.T) {
 	}
 	if actAdapter.executeCalls[0].JobID != jobID.String() {
 		t.Fatalf("expected act payload job id %q, got %q", jobID, actAdapter.executeCalls[0].JobID)
+	}
+	if len(actAdapter.executeCalls[0].WorkflowYAML) == 0 {
+		t.Fatal("expected act payload workflow YAML to be populated")
 	}
 	if runnerRepo.findAvailableCalls != 0 {
 		t.Fatalf("expected FindAvailable not to be called, got %d calls", runnerRepo.findAvailableCalls)
@@ -198,7 +201,7 @@ func TestHandleDispatchJob_SelfHostedCallsFindAvailable(t *testing.T) {
 	}
 	actAdapter := &mockRunnerAdapter{}
 
-	worker := NewDispatchWorker(nil, runnerRepo, jobRepo, actAdapter, nil)
+	worker := NewDispatchWorker(runnerRepo, jobRepo, actAdapter, nil)
 
 	payload, err := json.Marshal(queue.DispatchJobPayload{
 		JobID:          jobID.String(),
@@ -244,7 +247,7 @@ func TestHandleDispatchJob_NoAvailableRunnerLeavesQueued(t *testing.T) {
 	}
 	actAdapter := &mockRunnerAdapter{}
 
-	worker := NewDispatchWorker(nil, runnerRepo, jobRepo, actAdapter, nil)
+	worker := NewDispatchWorker(runnerRepo, jobRepo, actAdapter, nil)
 
 	payload, err := json.Marshal(queue.DispatchJobPayload{
 		JobID:          jobID.String(),
@@ -268,12 +271,13 @@ func TestHandleDispatchJob_NoAvailableRunnerLeavesQueued(t *testing.T) {
 	}
 }
 
-func TestHandleCancelJob_CallsJobRepoCancel(t *testing.T) {
+func TestHandleCancelJob_CallsJobRepoCancelAndActAdapterCancel(t *testing.T) {
 	ctx := context.Background()
 	jobID := uuid.New()
 
 	jobRepo := &mockWorkflowJobRepo{}
-	worker := NewDispatchWorker((*sql.DB)(nil), &mockRunnerRepo{}, jobRepo, &mockRunnerAdapter{}, nil)
+	actAdapter := &mockRunnerAdapter{}
+	worker := NewDispatchWorker(&mockRunnerRepo{}, jobRepo, actAdapter, nil)
 
 	payload, err := json.Marshal(queue.CancelJobPayload{JobID: jobID.String()})
 	if err != nil {
@@ -291,6 +295,12 @@ func TestHandleCancelJob_CallsJobRepoCancel(t *testing.T) {
 	if jobRepo.cancelJobID != jobID {
 		t.Fatalf("expected cancel job id %q, got %q", jobID, jobRepo.cancelJobID)
 	}
+	if len(actAdapter.cancelCalls) != 1 {
+		t.Fatalf("expected act adapter Cancel once, got %d", len(actAdapter.cancelCalls))
+	}
+	if actAdapter.cancelCalls[0] != jobID.String() {
+		t.Fatalf("expected act cancel job id %q, got %q", jobID, actAdapter.cancelCalls[0])
+	}
 }
 
 func TestHandleDispatchJob_ActAdapterFailureCompletesWithFailure(t *testing.T) {
@@ -303,13 +313,14 @@ func TestHandleDispatchJob_ActAdapterFailureCompletesWithFailure(t *testing.T) {
 			jobID: {
 				ID:             jobID,
 				OrganizationID: orgID,
+				Name:           "build",
 				RunsOn:         []string{"ubuntu-latest"},
 			},
 		},
 	}
 	actAdapter := &mockRunnerAdapter{executeErr: errors.New("act failed")}
 
-	worker := NewDispatchWorker(nil, &mockRunnerRepo{}, jobRepo, actAdapter, nil)
+	worker := NewDispatchWorker(&mockRunnerRepo{}, jobRepo, actAdapter, nil)
 
 	payload, err := json.Marshal(queue.DispatchJobPayload{
 		JobID:          jobID.String(),
@@ -319,13 +330,49 @@ func TestHandleDispatchJob_ActAdapterFailureCompletesWithFailure(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 	task := asynq.NewTask(queue.TypeDispatchJob, payload)
-	if err := worker.HandleDispatchJob(ctx, task); err != nil {
-		t.Fatalf("HandleDispatchJob returned error: %v", err)
+	err = worker.HandleDispatchJob(ctx, task)
+	if err == nil {
+		t.Fatal("expected HandleDispatchJob to return act adapter error")
 	}
 	if jobRepo.completeCalls != 1 {
 		t.Fatalf("expected Complete to be called once, got %d", jobRepo.completeCalls)
 	}
 	if jobRepo.completeConclusion != entity.WorkflowJobConclusionFailure {
 		t.Fatalf("expected failure conclusion, got %q", jobRepo.completeConclusion)
+	}
+}
+
+func TestHandleDispatchJob_OrganizationMismatch(t *testing.T) {
+	ctx := context.Background()
+	jobID := uuid.New()
+	orgID := uuid.New()
+	otherOrgID := uuid.New()
+
+	jobRepo := &mockWorkflowJobRepo{
+		jobs: map[uuid.UUID]*entity.WorkflowJob{
+			jobID: {
+				ID:             jobID,
+				OrganizationID: orgID,
+				Name:           "build",
+				RunsOn:         []string{"ubuntu-latest"},
+			},
+		},
+	}
+	actAdapter := &mockRunnerAdapter{}
+	worker := NewDispatchWorker(&mockRunnerRepo{}, jobRepo, actAdapter, nil)
+
+	payload, err := json.Marshal(queue.DispatchJobPayload{
+		JobID:          jobID.String(),
+		OrganizationID: otherOrgID.String(),
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	task := asynq.NewTask(queue.TypeDispatchJob, payload)
+	if err := worker.HandleDispatchJob(ctx, task); err == nil {
+		t.Fatal("expected organization mismatch error")
+	}
+	if len(actAdapter.executeCalls) != 0 {
+		t.Fatalf("expected act adapter not to be called, got %d calls", len(actAdapter.executeCalls))
 	}
 }

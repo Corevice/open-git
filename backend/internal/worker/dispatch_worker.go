@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +19,6 @@ import (
 )
 
 type DispatchWorker struct {
-	db          *sql.DB
 	runnerRepo  domainrepo.IRunnerRepository
 	jobRepo     domainrepo.IWorkflowJobRepository
 	actAdapter  runner.RunnerAdapter
@@ -28,14 +26,12 @@ type DispatchWorker struct {
 }
 
 func NewDispatchWorker(
-	db *sql.DB,
 	runnerRepo domainrepo.IRunnerRepository,
 	jobRepo domainrepo.IWorkflowJobRepository,
 	actAdapter runner.RunnerAdapter,
 	asynqClient *asynq.Client,
 ) *DispatchWorker {
 	return &DispatchWorker{
-		db:          db,
 		runnerRepo:  runnerRepo,
 		jobRepo:     jobRepo,
 		actAdapter:  actAdapter,
@@ -62,9 +58,12 @@ func (w *DispatchWorker) HandleDispatchJob(ctx context.Context, task *asynq.Task
 	if err != nil {
 		return fmt.Errorf("get job: %w", err)
 	}
+	if job.OrganizationID != orgID {
+		return fmt.Errorf("job organization mismatch")
+	}
 
-	labels := job.RunsOn
-	if payload.RunsOn != "" {
+	labels := append([]string(nil), job.RunsOn...)
+	if len(labels) == 0 && payload.RunsOn != "" {
 		if err := json.Unmarshal([]byte(payload.RunsOn), &labels); err != nil {
 			return fmt.Errorf("parse runs_on: %w", err)
 		}
@@ -73,15 +72,19 @@ func (w *DispatchWorker) HandleDispatchJob(ctx context.Context, task *asynq.Task
 	if actions.UsesActAdapter(labels) {
 		actPayload := runner.ActJobPayload{
 			JobID:          job.ID.String(),
-			WorkflowYAML:   nil,
+			WorkflowYAML:   runner.BuildActWorkflowYAML(job, nil),
 			TimeoutMinutes: job.TimeoutMinutes,
 		}
 		conclusion := entity.WorkflowJobConclusionSuccess
-		if execErr := w.actAdapter.Execute(ctx, actPayload); execErr != nil {
+		execErr := w.actAdapter.Execute(ctx, actPayload)
+		if execErr != nil {
 			conclusion = entity.WorkflowJobConclusionFailure
 		}
 		if err := w.jobRepo.Complete(ctx, jobID, conclusion, time.Now().UTC()); err != nil {
 			return fmt.Errorf("complete job: %w", err)
+		}
+		if execErr != nil {
+			return fmt.Errorf("act adapter execute: %w", execErr)
 		}
 		return nil
 	}
@@ -116,6 +119,10 @@ func (w *DispatchWorker) HandleCancelJob(ctx context.Context, task *asynq.Task) 
 	jobID, err := uuid.Parse(payload.JobID)
 	if err != nil {
 		return fmt.Errorf("parse job_id: %w", err)
+	}
+
+	if err := w.actAdapter.Cancel(ctx, payload.JobID); err != nil {
+		return fmt.Errorf("cancel act adapter job: %w", err)
 	}
 
 	if err := w.jobRepo.Cancel(ctx, jobID); err != nil {
