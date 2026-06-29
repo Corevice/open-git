@@ -58,6 +58,14 @@ func (m *tokenAuditMockAuditRepo) Create(_ context.Context, log *entity.AuditLog
 	return nil
 }
 
+func (m *tokenAuditMockAuditRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
+func (m *tokenAuditMockAuditRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID, string, string, uuid.UUID, json.RawMessage) error {
+	return nil
+}
+
 var _ domainrepo.IAuditLogRepository = (*tokenAuditMockAuditRepo)(nil)
 
 type tokenAuditMockUserLookup struct {
