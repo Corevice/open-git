@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import CommentForm from "@/components/issue/CommentForm";
 import MergePanel from "@/components/pr/MergePanel";
+import ReviewPanel from "@/components/pr/ReviewPanel";
 import DiffViewer from "@/components/repo/DiffViewer";
 import {
   ApiError,
@@ -297,6 +298,13 @@ export default function PullRequestDetailPage({ params }: Props) {
                 owner={owner}
                 repo={repo}
                 issueNumber={pr.number}
+                onSubmitted={loadPullRequest}
+              />
+
+              <ReviewPanel
+                owner={owner}
+                repo={repo}
+                prNumber={pr.number}
                 onSubmitted={loadPullRequest}
               />
 
