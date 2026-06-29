@@ -25,7 +25,7 @@ describe("CommitRow", () => {
       sha: "abcdef1234567",
       commit: {
         message:
-          "A very long commit message that exceeds seventy-two characters in total",
+          "A very long commit message that exceeds seventy-two characters in total length for sure",
         author: {
           name: "Alice",
           date: new Date().toISOString(),

@@ -198,11 +198,9 @@ async function request<T>(
   });
 
   if (!response.ok) {
-    let message = response.statusText;
     let errorBody: unknown;
     try {
       errorBody = await response.json();
-      message = (errorBody as { message?: string }).message ?? message;
     } catch {
       // ignore JSON parse errors
     }
@@ -261,15 +259,14 @@ async function fetchAllSecrets<T>(basePath: string): Promise<T[]> {
 
     secrets.push(...data.secrets);
 
-    if (
-      typeof data.total_count === "number" &&
-      data.total_count >= 0 &&
-      secrets.length >= data.total_count
-    ) {
-      break;
-    }
-
-    if (data.secrets.length < SECRETS_PAGE_SIZE) {
+    if (typeof data.total_count === "number" && data.total_count >= 0) {
+      // When the server reports a total, keep paginating until it is reached,
+      // even if an individual page came back shorter than the page size.
+      if (secrets.length >= data.total_count) {
+        break;
+      }
+    } else if (data.secrets.length < SECRETS_PAGE_SIZE) {
+      // Without a reported total, a short page means we reached the end.
       break;
     }
 
@@ -279,7 +276,7 @@ async function fetchAllSecrets<T>(basePath: string): Promise<T[]> {
   return secrets;
 }
 
-export function listRepoSecrets(
+export async function listRepoSecrets(
   owner: string,
   repo: string,
 ): Promise<ActionSecret[]> {
@@ -320,7 +317,9 @@ export function deleteRepoSecret(
   return request<void>("DELETE", repoSecretsPath(owner, repo, name));
 }
 
-export function listOrgSecrets(owner: string): Promise<OrgActionSecret[]> {
+export async function listOrgSecrets(
+  owner: string,
+): Promise<OrgActionSecret[]> {
   return fetchAllSecrets<OrgActionSecret>(orgSecretsPath(owner));
 }
 
@@ -374,7 +373,10 @@ export function upsertOrgSecret(
   return request<void>("PUT", orgSecretsPath(owner, name), payload);
 }
 
-export function deleteOrgSecret(owner: string, name: string): Promise<void> {
+export async function deleteOrgSecret(
+  owner: string,
+  name: string,
+): Promise<void> {
   return request<void>("DELETE", orgSecretsPath(owner, name));
 }
 
