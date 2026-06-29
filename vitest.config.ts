@@ -7,11 +7,26 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    setupFiles: ["@testing-library/jest-dom/vitest"],
+    setupFiles: ["./vitest.setup.ts"],
+    exclude: ["node_modules/**", "e2e/**", ".next/**"],
+    env: {
+      NEXT_PUBLIC_API_BASE_URL: "http://localhost:8080",
+      NEXT_PUBLIC_APP_VERSION: "test",
+    },
+    fakeTimers: {
+      shouldAdvanceTime: true,
+    },
   },
   resolve: {
+    dedupe: ["react", "react-dom"],
     alias: {
       "@": path.resolve(__dirname, "."),
+      // The published ESM build of libsodium-wrappers references a sibling
+      // libsodium.mjs that is not shipped; use the self-contained CJS build.
+      "libsodium-wrappers": path.resolve(
+        __dirname,
+        "node_modules/libsodium-wrappers/dist/modules/libsodium-wrappers.js",
+      ),
     },
   },
 });

@@ -2,11 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
+import { repoNameSchema } from "@/lib/validations";
 
 type CreateRepoResponse = {
   owner: string;
@@ -14,6 +18,15 @@ type CreateRepoResponse = {
 };
 
 type FieldErrors = Record<string, string[]>;
+
+const newRepoFormSchema = z.object({
+  name: repoNameSchema,
+  description: z.string().optional(),
+  visibility: z.enum(["public", "private"]),
+  auto_init: z.boolean().default(false),
+});
+
+type NewRepoFormValues = z.infer<typeof newRepoFormSchema>;
 
 function isApiError(err: unknown): err is ApiError {
   return err instanceof ApiError;
@@ -30,26 +43,30 @@ function getFieldErrors(err: unknown): FieldErrors {
 export default function NewRepoPage() {
   const router = useRouter();
   const { isAuthenticated } = useAuth();
-  const [repoName, setRepoName] = useState("");
-  const [description, setDescription] = useState("");
-  const [visibility, setVisibility] = useState<"public" | "private">("public");
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!repoName.trim() || submitting) return;
+  const { register, handleSubmit, formState, watch, setValue } = useForm<NewRepoFormValues>({
+    resolver: zodResolver(newRepoFormSchema),
+    defaultValues: { name: "", description: "", visibility: "public", auto_init: false },
+  });
 
-    setSubmitting(true);
+  const visibility = watch("visibility");
+
+  const onSubmit = handleSubmit(async (values) => {
+    if (!isAuthenticated || formState.isSubmitting) return;
+
     setError(null);
     setFieldErrors({});
 
     try {
       const created = (await apiClient.createRepo(
-        repoName.trim(),
-        visibility,
-        description.trim() || undefined,
+        values.name.trim(),
+        values.visibility,
+        {
+          description: values.description?.trim() || undefined,
+          autoInit: values.auto_init,
+        },
       )) as CreateRepoResponse;
       router.push(`/${created.owner}/${created.name}`);
     } catch (err) {
@@ -63,12 +80,10 @@ export default function NewRepoPage() {
       } else {
         setError("ネットワークエラーが発生しました。");
       }
-    } finally {
-      setSubmitting(false);
     }
-  };
+  });
 
-  const nameError = fieldErrors.name?.[0];
+  const nameError = formState.errors.name?.message ?? fieldErrors.name?.[0];
   const visibilityError = fieldErrors.visibility?.[0];
   const descriptionError = fieldErrors.description?.[0];
 
@@ -98,7 +113,7 @@ export default function NewRepoPage() {
           </p>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={onSubmit}>
           <div className="mb-4">
             <label htmlFor="repo-name" className="mb-1.5 block text-sm font-semibold">
               リポジトリ名 <span className="text-[#cf222e]">*</span>
@@ -106,14 +121,11 @@ export default function NewRepoPage() {
             <input
               id="repo-name"
               type="text"
-              value={repoName}
-              onChange={(e) => setRepoName(e.target.value)}
+              {...register("name")}
               placeholder="hello-world"
               className={`w-full rounded-md border px-3 py-2 text-sm ${
                 nameError ? "border-[#cf222e]" : "border-[#d1d9e0]"
               }`}
-              required
-              pattern="[a-zA-Z0-9._-]{1,100}"
               aria-invalid={nameError ? true : undefined}
               aria-describedby={nameError ? "repo-name-error" : undefined}
             />
@@ -130,8 +142,7 @@ export default function NewRepoPage() {
             </label>
             <textarea
               id="description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              {...register("description")}
               placeholder="このリポジトリの簡単な説明"
               rows={3}
               className={`w-full rounded-md border px-3 py-2 text-sm ${
@@ -158,7 +169,7 @@ export default function NewRepoPage() {
                 type="radio"
                 name="visibility"
                 checked={visibility === "public"}
-                onChange={() => setVisibility("public")}
+                onChange={() => setValue("visibility", "public")}
                 className="mt-1"
               />
               <div>
@@ -171,7 +182,7 @@ export default function NewRepoPage() {
                 type="radio"
                 name="visibility"
                 checked={visibility === "private"}
-                onChange={() => setVisibility("private")}
+                onChange={() => setValue("visibility", "private")}
                 className="mt-1"
               />
               <div>
@@ -182,6 +193,24 @@ export default function NewRepoPage() {
             {visibilityError && (
               <p className="mt-1.5 text-[13px] text-[#cf222e]">{visibilityError}</p>
             )}
+          </div>
+
+          <div className="mb-4">
+            <div className="flex cursor-pointer items-start gap-3 rounded-md border border-[#d1d9e0] p-3 hover:bg-[#f6f8fa]">
+              <input
+                id="auto-init"
+                type="checkbox"
+                checked={watch("auto_init")}
+                onChange={(e) => setValue("auto_init", e.target.checked)}
+                className="mt-1"
+              />
+              <label htmlFor="auto-init" className="cursor-pointer">
+                <div className="text-sm font-semibold">リポジトリをREADMEで初期化する</div>
+                <div className="text-[13px] text-[#59636e]">
+                  すぐにクローンできるリポジトリを作成します
+                </div>
+              </label>
+            </div>
           </div>
 
           {error && (
@@ -199,16 +228,16 @@ export default function NewRepoPage() {
             </Link>
             <button
               type="submit"
-              disabled={!repoName.trim() || submitting || !isAuthenticated}
+              disabled={formState.isSubmitting || !isAuthenticated}
               className="inline-flex items-center gap-2 rounded-md bg-[#1f883d] px-4 py-2 text-sm font-medium text-white hover:bg-[#1a7f37] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {submitting && (
+              {formState.isSubmitting && (
                 <span
                   className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
                   aria-hidden="true"
                 />
               )}
-              {submitting ? "作成中…" : "リポジトリを作成"}
+              {formState.isSubmitting ? "作成中…" : "リポジトリを作成"}
             </button>
           </div>
         </form>

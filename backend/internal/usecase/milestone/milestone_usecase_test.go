@@ -90,6 +90,14 @@ func (m *mockAuditLogRepo) InsertAuditLog(
 	return nil
 }
 
+func (m *mockAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (m *mockAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 func TestCreateMilestoneNumberAllocation(t *testing.T) {
 	repoID := uuid.New()
 	milestoneRepo := &mockMilestoneRepo{}
