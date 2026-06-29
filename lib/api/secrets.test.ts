@@ -1,3 +1,10 @@
+// @vitest-environment node
+//
+// libsodium-wrappers allocates typed arrays whose realm differs from jsdom's
+// global Uint8Array, which makes `instanceof Uint8Array` checks inside libsodium
+// fail. These tests are pure logic (no DOM), so run them in the node
+// environment for a single, consistent typed-array realm. The storage polyfill
+// in vitest.setup.ts still provides localStorage on globalThis.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import sodium from "libsodium-wrappers";
 
