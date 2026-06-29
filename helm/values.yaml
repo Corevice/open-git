@@ -75,13 +75,6 @@ ssh:
 
 secrets:
   existingSecret: ""
-  # Provide via --set / --set-file / -f at install time (never commit real values):
-  #   secrets.jwtSecret, secrets.dbPassword (postgres), secrets.minioRootPassword, secrets.minioAccessKey
-  # --set values are stored in Helm release metadata; prefer existingSecret for production.
-  # legacySecrets creates the -db / -minio Secrets that the backend/worker/migration
-  # Deployments reference by name. Keep true unless those workloads are rewired to the
-  # unified -secrets Secret.
-  legacySecrets: true
 
 serviceAccount:
   create: true

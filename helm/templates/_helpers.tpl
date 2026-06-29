@@ -49,6 +49,47 @@ Chart label
 {{- end }}
 
 {{/*
+Secret name — existingSecret if set, otherwise auto-generated name.
+*/}}
+{{- define "open-git.secretName" -}}
+{{- if .Values.secrets.existingSecret }}
+{{- .Values.secrets.existingSecret }}
+{{- else }}
+{{- printf "%s-secrets" (include "open-git.fullname" .) }}
+{{- end }}
+{{- end }}
+
+{{/*
+ServiceAccount name
+*/}}
+{{- define "open-git.serviceAccountName" -}}
+{{- if .Values.serviceAccount.name }}
+{{- .Values.serviceAccount.name }}
+{{- else if .Values.serviceAccount.create }}
+{{- include "open-git.fullname" . }}
+{{- else }}
+{{- "default" }}
+{{- end }}
+{{- end }}
+
+{{/*
+Pod-level security context
+*/}}
+{{- define "open-git.podSecurityContext" -}}
+runAsNonRoot: {{ .Values.securityContext.runAsNonRoot | default true }}
+runAsUser: {{ .Values.securityContext.runAsUser | default 1000 }}
+fsGroup: {{ .Values.securityContext.fsGroup | default (.Values.securityContext.runAsUser | default 1000) }}
+{{- end }}
+
+{{/*
+Container-level security context
+*/}}
+{{- define "open-git.containerSecurityContext" -}}
+allowPrivilegeEscalation: false
+readOnlyRootFilesystem: true
+{{- end }}
+
+{{/*
 Validated Git repository mount path from values.
 */}}
 {{- define "open-git.repositoriesMountPath" -}}

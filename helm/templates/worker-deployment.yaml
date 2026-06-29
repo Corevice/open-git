@@ -17,10 +17,22 @@ spec:
         {{- include "open-git.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: worker
     spec:
+      serviceAccountName: {{ include "open-git.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "open-git.podSecurityContext" . | nindent 8 }}
       containers:
         - name: worker
           image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
           imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          securityContext:
+            {{- include "open-git.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           args:
             - "--worker-only"
           env:
@@ -59,8 +71,21 @@ spec:
             - name: MINIO_BUCKET
               value: {{ .Values.minio.bucket | quote }}
             {{- end }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-git.secretName" . }}
+                  key: jwt-secret
+            - name: WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-git.secretName" . }}
+                  key: webhook-secret
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
