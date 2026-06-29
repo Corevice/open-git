@@ -33,6 +33,7 @@ jobs:
               - 'vitest.config.ts'
               - '*.ts'
               - '*.tsx'
+              - '.github/**'
 
       - uses: actions/setup-node@v4
         if: steps.filter.outputs.app == 'true' || github.ref == 'refs/heads/main'
@@ -80,11 +81,15 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
+              - '.golangci.yml'
+              - 'go.work'
+              - 'go.work.sum'
+              - '.github/**'
 
       - uses: actions/setup-go@v5
         if: steps.filter.outputs.backend == 'true' || github.ref == 'refs/heads/main'
         with:
-          go-version: '1.24'
+          go-version: '1.25'
 
       - uses: actions/cache@v4
         if: steps.filter.outputs.backend == 'true' || github.ref == 'refs/heads/main'
@@ -98,7 +103,7 @@ jobs:
 
       - name: Install golangci-lint
         if: steps.filter.outputs.backend == 'true' || github.ref == 'refs/heads/main'
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.62.0
+        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.1.0
 
       - name: golangci-lint
         if: steps.filter.outputs.backend == 'true' || github.ref == 'refs/heads/main'
