@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 38,
+  "uid": "system-overview",
+  "title": "System Overview",
+  "tags": ["open-git"],
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "organization_id",
+        "type": "query",
+        "datasource": {"uid": "prometheus"},
+        "definition": "label_values(http_requests_total, organization_id)",
+        "refresh": 2,
+        "includeAll": true,
+        "label": "Organization"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Goroutines",
+      "type": "timeseries",
+      "datasource": {"uid": "prometheus"},
+      "targets": [{"expr": "go_goroutines", "refId": "A"}],
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8}
+    },
+    {
+      "title": "Heap Memory",
+      "type": "timeseries",
+      "datasource": {"uid": "prometheus"},
+      "targets": [{"expr": "go_memstats_heap_inuse_bytes", "refId": "A"}],
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8}
+    },
+    {
+      "title": "CPU Usage",
+      "type": "timeseries",
+      "datasource": {"uid": "prometheus"},
+      "targets": [{"expr": "rate(process_cpu_seconds_total[5m])", "refId": "A"}],
+      "gridPos": {"x": 0, "y": 8, "w": 24, "h": 8}
+    }
+  ],
+  "version": 1
+}

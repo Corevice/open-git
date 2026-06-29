@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -38,7 +40,9 @@ func (m *mockAccessTokenRepo) FindByTokenHash(_ context.Context, tokenHash strin
 	return m.byHash[tokenHash], nil
 }
 
-func newAuthTestEcho(repo *mockAccessTokenRepo) *echo.Echo {
+func newAuthTestEcho(repo interface {
+	FindByTokenHash(ctx context.Context, tokenHash string) (*domain.AccessToken, error)
+}) *echo.Echo {
 	e := echo.New()
 	e.Use(middleware.AuthMiddleware(repo))
 	e.GET("/", func(c echo.Context) error {
@@ -52,6 +56,23 @@ func tokenHash(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func assertUnauthorizedWithDocURL(t *testing.T, rec *httptest.ResponseRecorder, wantMessage string) {
+	t.Helper()
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["message"] != wantMessage {
+		t.Fatalf("message = %q, want %q", body["message"], wantMessage)
+	}
+	if body["documentation_url"] != "https://docs.github.com/rest" {
+		t.Fatalf("documentation_url = %q", body["documentation_url"])
+	}
+}
+
 func TestMissingToken(t *testing.T) {
 	e := newAuthTestEcho(&mockAccessTokenRepo{})
 
@@ -59,9 +80,7 @@ func TestMissingToken(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", rec.Code)
-	}
+	assertUnauthorizedWithDocURL(t, rec, "missing authorization token")
 }
 
 func TestRevokedToken(t *testing.T) {
@@ -83,9 +102,7 @@ func TestRevokedToken(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", rec.Code)
-	}
+	assertUnauthorizedWithDocURL(t, rec, "token has been revoked")
 }
 
 func TestValidToken(t *testing.T) {
@@ -169,7 +186,37 @@ func TestExpiredToken(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", rec.Code)
-	}
+	assertUnauthorizedWithDocURL(t, rec, "token has expired")
+}
+
+func TestInvalidToken(t *testing.T) {
+	raw := "unknown-token"
+	e := newAuthTestEcho(&mockAccessTokenRepo{})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assertUnauthorizedWithDocURL(t, rec, "invalid authorization token")
+}
+
+type errAccessTokenRepo struct {
+	mockAccessTokenRepo
+}
+
+func (m *errAccessTokenRepo) FindByTokenHash(_ context.Context, _ string) (*domain.AccessToken, error) {
+	return nil, errors.New("lookup failed")
+}
+
+func TestInvalidTokenLookupError(t *testing.T) {
+	raw := "lookup-error-token"
+	e := newAuthTestEcho(&errAccessTokenRepo{})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assertUnauthorizedWithDocURL(t, rec, "invalid authorization token")
 }

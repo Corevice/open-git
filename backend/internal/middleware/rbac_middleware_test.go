@@ -11,7 +11,7 @@ import (
 	"github.com/open-git/backend/internal/middleware"
 )
 
-func TestMissingScope(t *testing.T) {
+func TestRequireScopeRepoMissing(t *testing.T) {
 	e := echo.New()
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -19,7 +19,7 @@ func TestMissingScope(t *testing.T) {
 			return next(c)
 		}
 	})
-	e.Use(middleware.RequireScope("write"))
+	e.Use(middleware.RequireScope("repo"))
 	e.GET("/", func(c echo.Context) error {
 		return c.NoContent(http.StatusOK)
 	})
@@ -31,25 +31,34 @@ func TestMissingScope(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", rec.Code)
 	}
+	if got := rec.Header().Get("X-Accepted-OAuth-Scopes"); got != "repo" {
+		t.Fatalf("X-Accepted-OAuth-Scopes = %q, want repo", got)
+	}
+	if got := rec.Header().Get("X-OAuth-Scopes"); got != "read" {
+		t.Fatalf("X-OAuth-Scopes = %q, want read", got)
+	}
 
 	var body map[string]string
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if body["message"] != "Missing scope: write" {
+	if body["message"] != "Resource not accessible by personal access token" {
 		t.Fatalf("unexpected message: %q", body["message"])
+	}
+	if body["documentation_url"] != "https://docs.github.com/rest" {
+		t.Fatalf("documentation_url = %q", body["documentation_url"])
 	}
 }
 
-func TestPresentScope(t *testing.T) {
+func TestRequireScopeRepoPresent(t *testing.T) {
 	e := echo.New()
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			middleware.SetAuthContext(c, 1, []string{"read", "write"})
+			middleware.SetAuthContext(c, 1, []string{"read", "repo"})
 			return next(c)
 		}
 	})
-	e.Use(middleware.RequireScope("write"))
+	e.Use(middleware.RequireScope("repo"))
 	e.GET("/", func(c echo.Context) error {
 		return c.NoContent(http.StatusOK)
 	})

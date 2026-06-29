@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain/entity"
+	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/middleware"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
 )
@@ -73,6 +75,7 @@ type BranchProtectionHandler struct {
 	branchProtectionRepo IBranchProtectionRepository
 	upsertUC             *repoUC.UpsertBranchProtectionUsecase
 	deleteUC             *repoUC.DeleteBranchProtectionUsecase
+	auditLog             domainrepo.IAuditLogRepository
 	resolveRepo          func(c echo.Context, owner, repo string) (*entity.Repository, error)
 	checkRepoAdmin       func(c echo.Context, repo *entity.Repository) error
 }
@@ -83,14 +86,31 @@ func NewBranchProtectionHandler(
 	deleteUC *repoUC.DeleteBranchProtectionUsecase,
 	resolveRepo func(c echo.Context, owner, repo string) (*entity.Repository, error),
 	checkRepoAdmin func(c echo.Context, repo *entity.Repository) error,
+	auditLog domainrepo.IAuditLogRepository,
 ) *BranchProtectionHandler {
 	return &BranchProtectionHandler{
 		branchProtectionRepo: branchProtectionRepo,
 		upsertUC:             upsertUC,
 		deleteUC:             deleteUC,
+		auditLog:             auditLog,
 		resolveRepo:          resolveRepo,
 		checkRepoAdmin:       checkRepoAdmin,
 	}
+}
+
+func (h *BranchProtectionHandler) recordAudit(ctx context.Context, orgID, actorID uuid.UUID, actorLogin, action, rulePattern string) {
+	if h.auditLog == nil {
+		return
+	}
+	_ = actorLogin
+	_ = h.auditLog.Create(ctx, &entity.AuditLog{
+		OrganizationID: orgID,
+		ActorID:        actorID,
+		Action:         action,
+		TargetType:     "branch_protection",
+		TargetID:       rulePattern,
+		CreatedAt:      time.Now().UTC(),
+	})
 }
 
 func (h *BranchProtectionHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
@@ -143,7 +163,15 @@ func (h *BranchProtectionHandler) UpsertBranchProtection(c echo.Context) error {
 	}
 
 	pattern := c.Param("branch")
-	result, err := h.upsertUC.Execute(c.Request().Context(), repo.OrganizationID, repo.ID, actorID, &repoUC.BranchProtectionRule{
+	ctx := c.Request().Context()
+	action := "branch_protection.create"
+	if _, err := h.branchProtectionRepo.GetByPattern(ctx, repo.OrganizationID, repo.ID, pattern); err == nil {
+		action = "branch_protection.update"
+	} else if !errors.Is(err, apperror.ErrNotFound) {
+		return err
+	}
+
+	result, err := h.upsertUC.Execute(ctx, repo.OrganizationID, repo.ID, actorID, &repoUC.BranchProtectionRule{
 		Pattern:                      pattern,
 		RequiredApprovingReviewCount: req.RequiredPullRequestReviews.RequiredApprovingReviewCount,
 	})
@@ -153,6 +181,8 @@ func (h *BranchProtectionHandler) UpsertBranchProtection(c echo.Context) error {
 		}
 		return err
 	}
+
+	h.recordAudit(ctx, repo.OrganizationID, actorID, "", action, pattern)
 
 	detail := branchProtectionDetailFromRequest(pattern, &req)
 	detail.RequiredApprovingReviewCount = result.RequiredApprovingReviewCount
@@ -175,12 +205,15 @@ func (h *BranchProtectionHandler) DeleteBranchProtection(c echo.Context) error {
 	}
 
 	pattern := c.Param("branch")
-	if err := h.deleteUC.Execute(c.Request().Context(), repo.OrganizationID, repo.ID, actorID, pattern); err != nil {
+	ctx := c.Request().Context()
+	if err := h.deleteUC.Execute(ctx, repo.OrganizationID, repo.ID, actorID, pattern); err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Branch not protected"})
 		}
 		return err
 	}
+
+	h.recordAudit(ctx, repo.OrganizationID, actorID, "", "branch_protection.delete", pattern)
 
 	return c.NoContent(http.StatusNoContent)
 }
