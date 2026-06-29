@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"database/sql"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -631,6 +632,17 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		mux := asynq.NewServeMux()
 		mcpWorker := worker.NewMCPVerificationWorker(mcpVerificationRepo, cfg.WebBaseURL)
 		mux.HandleFunc(queue.TypeMCPVerification, mcpWorker.HandleMCPVerification)
+		artifactCleanupWorker := worker.NewArtifactCleanupWorker(artifactRepo, artifactStorage, minioBucket)
+		mux.HandleFunc(queue.TypeArtifactCleanup, artifactCleanupWorker.HandleCleanup)
+		scheduler := asynq.NewScheduler(asynq.RedisClientOpt{Addr: cfg.RedisAddr}, nil)
+		if _, err := scheduler.Register("@hourly", asynq.NewTask(queue.TypeArtifactCleanup, nil)); err != nil {
+			return nil, fmt.Errorf("register artifact cleanup scheduler: %w", err)
+		}
+		go func() {
+			if err := scheduler.Run(); err != nil {
+				middleware.Log().Info("asynq scheduler stopped", "error", err)
+			}
+		}()
 		prMergeableWorker := queue.NewPRMergeableWorker(prRepo, repoRepo, gitSvc)
 		mux.HandleFunc(queue.TypePRMergeableCheck, prMergeableWorker.HandlePRMergeableCheck)
 		go func() {
@@ -732,6 +744,17 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 	rateLimitHandler := handler.NewRateLimitHandler()
 	rootHandler := handler.NewRootHandler()
+
+	thirdPartyLicenses := loadLicensesFromFile(cfg.LicensesFilePath)
+	metaHandler := handler.NewMetaHandler(handler.BuildInfo{
+		AppName:     cfg.AppName,
+		Version:     version,
+		GitCommit:   commit,
+		BuildDate:   buildTime,
+		LicenseName: cfg.LicenseName,
+		SourceURL:   cfg.SourceURL,
+	}, thirdPartyLicenses)
+	metaHandler.RegisterRoutes(e)
 
 	gitHTTPHandler := handler.NewGitHTTPHandler(
 		cfg.GitDataRoot,
@@ -921,6 +944,22 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		}()
 	}
 	return sshServer, nil
+}
+
+func loadLicensesFromFile(path string) []handler.LicenseEntry {
+	log := logger.Global()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Warn().Err(err).Str("path", path).Msg("failed to load licenses file")
+		return []handler.LicenseEntry{}
+	}
+
+	var entries []handler.LicenseEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		log.Warn().Err(err).Str("path", path).Msg("failed to parse licenses file")
+		return []handler.LicenseEntry{}
+	}
+	return entries
 }
 
 type noopMCPEnqueuer struct{}

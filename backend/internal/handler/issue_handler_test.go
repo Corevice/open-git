@@ -274,6 +274,28 @@ func TestIssueCreateEmptyTitle422(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
 	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["message"] != "Validation Failed" {
+		t.Fatalf("message = %v, want Validation Failed", resp["message"])
+	}
+	errors, ok := resp["errors"].([]any)
+	if !ok || len(errors) == 0 {
+		t.Fatalf("errors = %v, want non-empty array", resp["errors"])
+	}
+	first, ok := errors[0].(map[string]any)
+	if !ok {
+		t.Fatalf("errors[0] = %v, want object", errors[0])
+	}
+	if first["field"] != "title" {
+		t.Fatalf("errors[0].field = %v, want title", first["field"])
+	}
+	if first["code"] != "missing_field" {
+		t.Fatalf("errors[0].code = %v, want missing_field", first["code"])
+	}
 }
 
 func TestIssuePatchStateChangeOK(t *testing.T) {

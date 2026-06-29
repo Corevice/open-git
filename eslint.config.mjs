@@ -12,6 +12,7 @@ export default tseslint.config(
       'coverage/**',
       'next-env.d.ts',
       'docs/**',
+      'test/load/**',
     ],
   },
   js.configs.recommended,
