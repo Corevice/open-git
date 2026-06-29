@@ -449,11 +449,15 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	createLabelUC := labelusecase.NewCreateLabelUsecase(labelRepo)
 	updateLabelUC := labelusecase.NewUpdateLabelUsecase(labelRepo)
 	deleteLabelUC := labelusecase.NewDeleteLabelUsecase(labelRepo, issueAuditRepo)
+	addIssueLabelsUC := labelusecase.NewAddIssueLabelsUsecase(labelRepo)
+	removeIssueLabelUC := labelusecase.NewRemoveIssueLabelUsecase(labelRepo)
 	labelHandler := handler.NewLabelHandler(
-		listLabelsUC,
 		createLabelUC,
+		listLabelsUC,
 		updateLabelUC,
 		deleteLabelUC,
+		addIssueLabelsUC,
+		removeIssueLabelUC,
 		resolveRepo,
 	)
 
@@ -474,7 +478,14 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	createCommentUC := issueusecase.NewCreateCommentUsecase(issueRepo, commentRepo, issueAuditRepo)
 	listIssuesUC := issueusecase.NewListIssuesUsecase(issueRepo)
 	getIssueUC := issueusecase.NewGetIssueUsecase(issueRepo)
-	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, getIssueUC, updateIssueUC, createCommentUC, resolveRepo)
+	issueHandler := handler.NewIssueHandler(
+		createIssueUC,
+		listIssuesUC,
+		getIssueUC,
+		updateIssueUC,
+		createCommentUC,
+		resolveRepo,
+	)
 
 	gitSvc := infragit.NewGitServiceAdapter()
 	prRepo := infrarepo.NewPullRequestRepository(sqlxDB)
