@@ -124,6 +124,20 @@ func (m *mockWorkflowJobRepo) ListQueued(_ context.Context, _ uuid.UUID) ([]*ent
 	return nil, nil
 }
 
+func (m *mockWorkflowJobRepo) CreateBatch(_ context.Context, jobs []*entity.WorkflowJob) error {
+	if m.jobs == nil {
+		m.jobs = make(map[uuid.UUID]*entity.WorkflowJob)
+	}
+	for _, job := range jobs {
+		m.jobs[job.ID] = job
+	}
+	return nil
+}
+
+func (m *mockWorkflowJobRepo) ListByRunID(_ context.Context, _, _ uuid.UUID) ([]*entity.WorkflowJob, error) {
+	return nil, nil
+}
+
 var _ domainrepo.IWorkflowJobRepository = (*mockWorkflowJobRepo)(nil)
 
 func TestHandleDispatchJob_GitHubHostedRoutesToActAdapter(t *testing.T) {
