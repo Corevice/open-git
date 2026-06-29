@@ -84,6 +84,7 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 	ownerLogin := owner.Login
 	orgID := input.OrganizationID
 	if orgID == uuid.Nil {
+		// Personal repositories use the owner's encoded user UUID as organization ID.
 		orgID = int64ToUserUUID(owner.ID)
 	}
 
@@ -149,7 +150,14 @@ func UserUUIDToInt64(id uuid.UUID) (int64, error) {
 	if !isUserUUID(id) {
 		return 0, ErrInvalidUserUUID
 	}
-	return int64(binary.BigEndian.Uint64(id[8:])), nil
+	userID := int64(binary.BigEndian.Uint64(id[8:]))
+	if userID <= 0 {
+		return 0, ErrInvalidUserUUID
+	}
+	if int64ToUserUUID(userID) != id {
+		return 0, ErrInvalidUserUUID
+	}
+	return userID, nil
 }
 
 func int64ToUserUUID(id int64) uuid.UUID {
@@ -187,11 +195,11 @@ func (u *CreateRepositoryUsecase) rollbackCreate(ctx context.Context, repository
 	defer cancel()
 
 	var rollbackErr error
-	if err := RemoveRepositoryDiskDir(gitRoot, diskPath, repoName); err != nil {
-		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove bare repository: %w", err))
-	}
 	if err := u.repos.Delete(rollbackCtx, repositoryID); err != nil {
 		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("delete repository record: %w", err))
+	}
+	if err := RemoveRepositoryDiskDir(gitRoot, diskPath, repoName); err != nil {
+		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove bare repository: %w", err))
 	}
 	return rollbackErr
 }
@@ -213,38 +221,21 @@ func RemoveRepositoryDiskDir(gitRoot, diskPath, repoName string) error {
 		return errors.New("unsafe repository disk path")
 	}
 
+	cleanPath := filepath.Clean(safePath)
 	resolvedRoot, err := filepath.EvalSymlinks(filepath.Clean(gitRoot))
 	if err != nil {
 		return err
 	}
-	resolvedPath, err := filepath.EvalSymlinks(safePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
 
-	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	rel, err := filepath.Rel(resolvedRoot, cleanPath)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return errors.New("unsafe repository disk path")
 	}
-	if filepath.Base(resolvedPath) != repoName+".git" {
+	if filepath.Base(cleanPath) != repoName+".git" {
 		return errors.New("unsafe repository disk path")
 	}
 
-	fi, err = os.Lstat(resolvedPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return errors.New("unsafe repository disk path")
-	}
-
-	return os.RemoveAll(resolvedPath)
+	return os.RemoveAll(cleanPath)
 }
 
 func ValidateRepositoryDiskPath(gitRoot, diskPath, repoName string) (string, bool) {

@@ -234,12 +234,12 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 		return err
 	}
 
-	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
+	if err := repoUC.RemoveRepositoryDiskDir(h.gitRoot, repository.DiskPath, repository.Name); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
 	}
 
-	if err := repoUC.RemoveRepositoryDiskDir(h.gitRoot, repository.DiskPath, repository.Name); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository files"})
+	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -275,7 +275,12 @@ func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID uuid.U
 		}
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to get repository"})
 	}
-	if repository.OwnerID != userID {
+	requestOwnerID, err := repoUC.UserUUIDToInt64(userID)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+	}
+	repoOwnerID, err := repoUC.UserUUIDToInt64(repository.OwnerID)
+	if err != nil || requestOwnerID != repoOwnerID {
 		return nil, echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
 	}
 	return repository, nil

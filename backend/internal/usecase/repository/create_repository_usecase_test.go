@@ -84,13 +84,20 @@ func (m *mockRepositoryRepo) Delete(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
-type mockUserRepo struct{}
+type mockUserRepo struct {
+	users map[int64]*domain.User
+}
 
 func (m *mockUserRepo) Create(context.Context, *domain.User) error {
 	return nil
 }
 
 func (m *mockUserRepo) GetByID(_ context.Context, id int64) (*domain.User, error) {
+	if m.users != nil {
+		if user, ok := m.users[id]; ok {
+			return user, nil
+		}
+	}
 	if id == 1 {
 		return &domain.User{ID: 1, Login: "alice"}, nil
 	}

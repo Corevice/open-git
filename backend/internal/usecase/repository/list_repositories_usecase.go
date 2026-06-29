@@ -22,6 +22,14 @@ type repositoryListQuerier interface {
 	ListVisibleByOrg(ctx context.Context, organizationID, viewerID uuid.UUID, page, perPage int) ([]*entity.Repository, error)
 }
 
+type orgListWithTotal interface {
+	ListByOrgWithTotal(ctx context.Context, organizationID uuid.UUID, page, perPage int) ([]*entity.Repository, int, error)
+}
+
+type visibleListWithTotal interface {
+	ListVisibleByOrgWithTotal(ctx context.Context, organizationID, viewerID uuid.UUID, page, perPage int) ([]*entity.Repository, int, error)
+}
+
 func NormalizeRepositoryPagination(page, perPage int) (int, int) {
 	if page < 1 {
 		page = 1
@@ -69,25 +77,36 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 	}
 
 	page, perPage := NormalizeRepositoryPagination(input.Page, input.PerPage)
-	ownerUUID := int64ToUserUUID(owner.ID)
+	isOwner := false
+	if requestOwnerID, convErr := UserUUIDToInt64(input.RequestUserID); convErr == nil && requestOwnerID == owner.ID {
+		isOwner = true
+	}
 
 	var (
 		total     int
 		pageRepos []*entity.Repository
 	)
 
-	if input.RequestUserID == ownerUUID {
-		total, err = u.repos.CountByOrg(ctx, orgID)
-		if err != nil {
-			return nil, err
+	if isOwner {
+		if lister, ok := u.repos.(orgListWithTotal); ok {
+			pageRepos, total, err = lister.ListByOrgWithTotal(ctx, orgID, page, perPage)
+		} else {
+			total, err = u.repos.CountByOrg(ctx, orgID)
+			if err != nil {
+				return nil, err
+			}
+			pageRepos, err = u.repos.ListByOrg(ctx, orgID, page, perPage)
 		}
-		pageRepos, err = u.repos.ListByOrg(ctx, orgID, page, perPage)
 	} else {
-		total, err = u.repos.CountVisibleByOrg(ctx, orgID, input.RequestUserID)
-		if err != nil {
-			return nil, err
+		if lister, ok := u.repos.(visibleListWithTotal); ok {
+			pageRepos, total, err = lister.ListVisibleByOrgWithTotal(ctx, orgID, input.RequestUserID, page, perPage)
+		} else {
+			total, err = u.repos.CountVisibleByOrg(ctx, orgID, input.RequestUserID)
+			if err != nil {
+				return nil, err
+			}
+			pageRepos, err = u.repos.ListVisibleByOrg(ctx, orgID, input.RequestUserID, page, perPage)
 		}
-		pageRepos, err = u.repos.ListVisibleByOrg(ctx, orgID, input.RequestUserID, page, perPage)
 	}
 	if err != nil {
 		return nil, err
