@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ApiClient } from "@/lib/api";
 import type { OAuthApp } from "@/lib/api-types";
 import { useAuth } from "@/lib/auth";
+import { env } from "@/lib/env";
 
 function formatDate(value: string | null): string {
   if (!value) {
@@ -19,12 +20,10 @@ function formatDate(value: string | null): string {
 export default function OAuthAppsListPage() {
   const { token } = useAuth();
   const router = useRouter();
-  const baseURL =
-    process.env.NEXT_PUBLIC_API_BASE_URL ??
-    process.env.NEXT_PUBLIC_API_URL ??
-    "http://localhost:8080";
-
-  const apiClient = useMemo(() => new ApiClient(baseURL, router), [baseURL, router]);
+  const apiClient = useMemo(
+    () => new ApiClient(env.NEXT_PUBLIC_API_BASE_URL, router),
+    [router],
+  );
 
   const [apps, setApps] = useState<OAuthApp[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,6 +38,7 @@ export default function OAuthAppsListPage() {
 
   useEffect(() => {
     if (!token) {
+      setLoading(false);
       return;
     }
 
@@ -72,13 +72,21 @@ export default function OAuthAppsListPage() {
     };
   }, [apiClient, token]);
 
-  const handleDelete = async (id: string) => {
-    setDeletingId(id);
+  const handleDelete = async (app: OAuthApp) => {
+    if (
+      !window.confirm(
+        `Delete OAuth app "${app.name}"? This will permanently revoke all associated access tokens and cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingId(app.id);
     setError(null);
 
     try {
-      await apiClient.oauthApps.delete(id);
-      setApps((prev) => prev.filter((app) => app.id !== id));
+      await apiClient.oauthApps.delete(app.id);
+      setApps((prev) => prev.filter((item) => item.id !== app.id));
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to delete OAuth app.",
@@ -142,7 +150,7 @@ export default function OAuthAppsListPage() {
                         type="button"
                         variant="destructive"
                         size="sm"
-                        onClick={() => handleDelete(app.id)}
+                        onClick={() => handleDelete(app)}
                         disabled={deletingId === app.id}
                       >
                         {deletingId === app.id ? "Deleting…" : "Delete"}

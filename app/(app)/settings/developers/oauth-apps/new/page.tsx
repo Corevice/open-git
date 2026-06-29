@@ -10,23 +10,36 @@ import { Label } from "@/components/ui/label";
 import { ApiClient } from "@/lib/api";
 import type { OAuthAppWithSecret } from "@/lib/api-types";
 import { useAuth } from "@/lib/auth";
+import { env } from "@/lib/env";
 
 type CreatedApp = Pick<OAuthAppWithSecret, "id" | "client_id" | "client_secret">;
+
+function validateCallbackUrls(urls: string[]): string | null {
+  for (const url of urls) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return `Invalid callback URL "${url}": only http and https URLs are allowed.`;
+      }
+    } catch {
+      return `Invalid callback URL "${url}".`;
+    }
+  }
+  return null;
+}
 
 export default function NewOAuthAppPage() {
   const { token } = useAuth();
   const router = useRouter();
-  const baseURL =
-    process.env.NEXT_PUBLIC_API_BASE_URL ??
-    process.env.NEXT_PUBLIC_API_URL ??
-    "http://localhost:8080";
-
-  const apiClient = useMemo(() => new ApiClient(baseURL, router), [baseURL, router]);
+  const apiClient = useMemo(
+    () => new ApiClient(env.NEXT_PUBLIC_API_BASE_URL, router),
+    [router],
+  );
 
   const [name, setName] = useState("");
   const [homepageUrl, setHomepageUrl] = useState("");
   const [callbackUrls, setCallbackUrls] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdApp, setCreatedApp] = useState<CreatedApp | null>(null);
   const [copiedField, setCopiedField] = useState<"client_id" | "client_secret" | null>(
@@ -39,9 +52,18 @@ export default function NewOAuthAppPage() {
     }
   }, [apiClient, token]);
 
+  useEffect(() => {
+    if (!copiedField) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setCopiedField(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copiedField]);
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!name.trim() || !homepageUrl.trim() || loading) {
+    if (!name.trim() || !homepageUrl.trim() || submitting) {
       return;
     }
 
@@ -50,7 +72,13 @@ export default function NewOAuthAppPage() {
       .map((line) => line.trim())
       .filter(Boolean);
 
-    setLoading(true);
+    const callbackError = validateCallbackUrls(lines);
+    if (callbackError) {
+      setError(callbackError);
+      return;
+    }
+
+    setSubmitting(true);
     setError(null);
     setCreatedApp(null);
     setCopiedField(null);
@@ -76,7 +104,7 @@ export default function NewOAuthAppPage() {
         err instanceof Error ? err.message : "Failed to create OAuth app.",
       );
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
@@ -124,9 +152,10 @@ export default function NewOAuthAppPage() {
           </div>
           <div className="mb-3">
             <span className="text-xs font-medium text-[#59636e]">Client Secret</span>
-            <code className="mt-1 block break-all rounded bg-white px-3 py-2 text-sm font-mono">
-              {createdApp.client_secret}
-            </code>
+            <p className="mt-1 text-sm text-[#59636e]">
+              Your client secret was generated. Use the button below to copy it — it
+              is not shown on screen.
+            </p>
             <Button
               type="button"
               variant="outline"
@@ -204,9 +233,9 @@ export default function NewOAuthAppPage() {
           </Link>
           <Button
             type="submit"
-            disabled={loading || !name.trim() || !homepageUrl.trim()}
+            disabled={submitting || !name.trim() || !homepageUrl.trim()}
           >
-            {loading ? "Creating…" : "Register application"}
+            {submitting ? "Creating…" : "Register application"}
           </Button>
         </div>
       </form>

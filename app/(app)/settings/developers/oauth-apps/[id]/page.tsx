@@ -10,6 +10,21 @@ import { Label } from "@/components/ui/label";
 import { ApiClient } from "@/lib/api";
 import type { OAuthApp } from "@/lib/api-types";
 import { useAuth } from "@/lib/auth";
+import { env } from "@/lib/env";
+
+function validateCallbackUrls(urls: string[]): string | null {
+  for (const url of urls) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return `Invalid callback URL "${url}": only http and https URLs are allowed.`;
+      }
+    } catch {
+      return `Invalid callback URL "${url}".`;
+    }
+  }
+  return null;
+}
 
 export default function OAuthAppDetailPage() {
   const { token } = useAuth();
@@ -17,12 +32,10 @@ export default function OAuthAppDetailPage() {
   const params = useParams();
   const id = typeof params.id === "string" ? params.id : "";
 
-  const baseURL =
-    process.env.NEXT_PUBLIC_API_BASE_URL ??
-    process.env.NEXT_PUBLIC_API_URL ??
-    "http://localhost:8080";
-
-  const apiClient = useMemo(() => new ApiClient(baseURL, router), [baseURL, router]);
+  const apiClient = useMemo(
+    () => new ApiClient(env.NEXT_PUBLIC_API_BASE_URL, router),
+    [router],
+  );
 
   const [app, setApp] = useState<OAuthApp | null>(null);
   const [name, setName] = useState("");
@@ -82,6 +95,15 @@ export default function OAuthAppDetailPage() {
     };
   }, [apiClient, token, id]);
 
+  useEffect(() => {
+    if (!copiedSecret) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setCopiedSecret(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copiedSecret]);
+
   const handleSave = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!id || saving) {
@@ -92,6 +114,12 @@ export default function OAuthAppDetailPage() {
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
+
+    const callbackError = validateCallbackUrls(lines);
+    if (callbackError) {
+      setError(callbackError);
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -118,7 +146,15 @@ export default function OAuthAppDetailPage() {
   };
 
   const handleRegenerateSecret = async () => {
-    if (!id || regenerating) {
+    if (!id || regenerating || !app) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Regenerate the client secret for "${app.name}"? The current secret will stop working immediately.`,
+      )
+    ) {
       return;
     }
 
@@ -142,7 +178,15 @@ export default function OAuthAppDetailPage() {
   };
 
   const handleDelete = async () => {
-    if (!id || deleting) {
+    if (!id || deleting || !app) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Delete OAuth app "${app.name}"? This will permanently revoke all associated access tokens and cannot be undone.`,
+      )
+    ) {
       return;
     }
 
@@ -223,10 +267,11 @@ export default function OAuthAppDetailPage() {
           <p className="mb-2 text-sm font-semibold text-[#0969da]">
             Copy your new client secret now. You will not be able to see it again.
           </p>
-          <code className="block break-all rounded bg-white px-3 py-2 text-sm font-mono">
-            {regeneratedSecret}
-          </code>
-          <div className="mt-3 flex gap-2">
+          <p className="mb-3 text-sm text-[#59636e]">
+            Your new client secret was generated. Use the button below to copy it — it
+            is not shown on screen.
+          </p>
+          <div className="flex gap-2">
             <Button type="button" variant="outline" size="sm" onClick={handleCopySecret}>
               {copiedSecret ? "Copied" : "Copy"}
             </Button>
