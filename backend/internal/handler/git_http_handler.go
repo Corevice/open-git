@@ -26,7 +26,7 @@ import (
 )
 
 // GitMembershipAccess checks organization read/write permission and resolves member roles.
-// GetRole was added to support admin bypass decisions during protected-branch push enforcement.
+// HasReadAccess/HasWriteAccess take (userID, organizationID); GetRole takes (organizationID, userID).
 type GitMembershipAccess interface {
 	HasReadAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
 	HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error)
@@ -319,18 +319,16 @@ func (h *GitHTTPHandler) rejectProtectedUpdates(ctx context.Context, userID int6
 			continue
 		}
 		if cmd.New == plumbing.ZeroHash {
+			// Branch deletion: only enforce AllowDeletions; force-push and direct-push
+			// rules do not apply to delete commands.
 			if err := h.rejectProtectedDeletion(rule); err != nil {
 				return err
 			}
-			continue
-		}
-		if isForcePush(grepo, cmd.Old, cmd.New) {
+		} else if isForcePush(grepo, cmd.Old, cmd.New) {
 			if err := h.rejectDisallowedForcePush(rule, branch); err != nil {
 				return err
 			}
-			continue
-		}
-		if err := h.rejectProtectedDirectPush(branch); err != nil {
+		} else if err := h.rejectProtectedDirectPush(branch); err != nil {
 			return err
 		}
 	}
@@ -358,6 +356,8 @@ func (h *GitHTTPHandler) isOrgAdmin(ctx context.Context, userID int64, organizat
 }
 
 func (h *GitHTTPHandler) rejectProtectedDirectPush(branch string) error {
+	// All receive-pack updates to protected branches are rejected, including
+	// fast-forward pushes; changes must land via PR merge instead.
 	return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{
 		"message": fmt.Sprintf("direct push is not allowed on protected branch: %s", branch),
 	})
@@ -389,6 +389,8 @@ func branchFromRef(ref string) (string, bool) {
 	return strings.TrimPrefix(ref, prefix), true
 }
 
+// isForcePush reports whether the update rewrites history. Callers must handle
+// branch deletion (newHash == ZeroHash) before invoking this function.
 func isForcePush(repo *gogit.Repository, oldHash, newHash plumbing.Hash) bool {
 	if oldHash == plumbing.ZeroHash || newHash == plumbing.ZeroHash {
 		return false

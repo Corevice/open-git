@@ -127,8 +127,13 @@ func (mockTxManager) RunInTransaction(ctx context.Context, fn func(context.Conte
 	return fn(ctx)
 }
 
+type membershipRoleKey struct {
+	orgID  uuid.UUID
+	userID uuid.UUID
+}
+
 type mockMembershipRepo struct {
-	roles map[uuid.UUID]string
+	roles map[membershipRoleKey]string
 }
 
 func (m *mockMembershipRepo) Add(_ context.Context, _ *entity.Membership) error {
@@ -139,7 +144,7 @@ func (m *mockMembershipRepo) GetRole(_ context.Context, orgID, userID uuid.UUID)
 	if m.roles == nil {
 		return entity.RoleMember, nil
 	}
-	role, ok := m.roles[userID]
+	role, ok := m.roles[membershipRoleKey{orgID: orgID, userID: userID}]
 	if !ok {
 		return "", domain.ErrNotFound
 	}
@@ -311,7 +316,9 @@ func TestEnforceAdminsFalseAdminBypassesProtection(t *testing.T) {
 				RequiredChecks:  []string{"ci/build"},
 			},
 		},
-		&mockMembershipRepo{roles: map[uuid.UUID]string{actorID: entity.RoleAdmin}},
+		&mockMembershipRepo{roles: map[membershipRoleKey]string{
+			{orgID: pr.OrganizationID, userID: actorID}: entity.RoleAdmin,
+		}},
 		&mockReviewRepo{satisfiedReviews: 0},
 		&mockWorkflowRunRepo{},
 		auditRepo,
@@ -351,7 +358,9 @@ func TestEnforceAdminsTrueAdminBlockedByReviews(t *testing.T) {
 				RequiredReviews: 2,
 			},
 		},
-		&mockMembershipRepo{roles: map[uuid.UUID]string{actorID: entity.RoleAdmin}},
+		&mockMembershipRepo{roles: map[membershipRoleKey]string{
+			{orgID: pr.OrganizationID, userID: actorID}: entity.RoleAdmin,
+		}},
 		&mockReviewRepo{satisfiedReviews: 1},
 		&mockWorkflowRunRepo{},
 		&mockAuditLogRepo{},
@@ -384,7 +393,9 @@ func TestEnforceAdminsFalseAdminBypassesRequiredLinearHistory(t *testing.T) {
 				RequiredLinearHistory: true,
 			},
 		},
-		&mockMembershipRepo{roles: map[uuid.UUID]string{actorID: entity.RoleAdmin}},
+		&mockMembershipRepo{roles: map[membershipRoleKey]string{
+			{orgID: pr.OrganizationID, userID: actorID}: entity.RoleAdmin,
+		}},
 		&mockReviewRepo{},
 		&mockWorkflowRunRepo{},
 		auditRepo,
@@ -427,7 +438,9 @@ func TestEnforceAdminsFalseAdminBypassesRequiredConversationResolution(t *testin
 				RequiredConversationResolution: true,
 			},
 		},
-		&mockMembershipRepo{roles: map[uuid.UUID]string{actorID: entity.RoleAdmin}},
+		&mockMembershipRepo{roles: map[membershipRoleKey]string{
+			{orgID: pr.OrganizationID, userID: actorID}: entity.RoleAdmin,
+		}},
 		&mockReviewRepo{hasOpenConversations: true},
 		&mockWorkflowRunRepo{},
 		auditRepo,

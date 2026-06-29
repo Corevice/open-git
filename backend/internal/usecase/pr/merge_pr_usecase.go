@@ -20,9 +20,10 @@ const mergeMethodMerge = "merge"
 type MergePRInput struct {
 	OrganizationID uuid.UUID
 	RepositoryID   uuid.UUID
-	ActorID        uuid.UUID
+	ActorID        uuid.UUID // membership user ID; passed as userID to IMembershipRepository.GetRole
 	Number         int
 	MergeMethod    string
+	RequesterRole  string // optional; when empty, resolved via membershipRepo
 }
 
 type MergePRUsecase struct {
@@ -72,9 +73,13 @@ func (uc *MergePRUsecase) Execute(ctx context.Context, input MergePRInput) (*ent
 
 	mergeMethod := normalizeMergeMethod(input.MergeMethod)
 
-	requesterRole, err := uc.resolveRequesterRole(ctx, input.OrganizationID, input.ActorID)
-	if err != nil {
-		return nil, err
+	requesterRole := input.RequesterRole
+	if requesterRole == "" {
+		var err error
+		requesterRole, err = uc.resolveRequesterRole(ctx, input.OrganizationID, input.ActorID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if err := uc.checkBranchProtection(
@@ -165,6 +170,9 @@ func (uc *MergePRUsecase) checkBranchProtection(
 		return nil
 	}
 
+	// When enforce_admins is false, org admins may bypass every branch-protection
+	// check (required reviews, required checks, linear history, conversation
+	// resolution, etc.). This mirrors GitHub-style admin bypass and is audited.
 	if !rule.EnforceAdmins && requesterRole == entity.RoleAdmin {
 		if err := uc.logAdminProtectionBypass(ctx, organizationID, actorID, pr.ID); err != nil {
 			return err

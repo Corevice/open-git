@@ -48,7 +48,7 @@ func (s *stubMembership) HasWriteAccess(_ context.Context, _ int64, orgID uuid.U
 	return s.write, nil
 }
 
-func (s *stubMembership) GetRole(_ context.Context, _ int64, orgID uuid.UUID) (string, error) {
+func (s *stubMembership) GetRole(_ context.Context, orgID uuid.UUID, _ int64) (string, error) {
 	if s.orgID != uuid.Nil && s.orgID != orgID {
 		return "", nil
 	}
