@@ -1,7 +1,9 @@
-DROP TABLE action_secrets;
-DROP TABLE artifacts;
-DROP TABLE job_logs;
-DROP TABLE workflow_steps;
+DROP TRIGGER IF EXISTS trg_action_secrets_updated_at;
+DROP TABLE IF EXISTS action_secrets;
+DROP TABLE IF EXISTS artifacts;
+DROP TABLE IF EXISTS job_logs;
+DROP TABLE IF EXISTS workflow_steps;
+DROP TABLE IF EXISTS workflow_jobs;
 ALTER TABLE workflow_runs DROP COLUMN IF EXISTS triggered_by_user_id;
 ALTER TABLE workflow_runs DROP COLUMN IF EXISTS event;
 ALTER TABLE workflow_runs DROP COLUMN IF EXISTS run_attempt;
