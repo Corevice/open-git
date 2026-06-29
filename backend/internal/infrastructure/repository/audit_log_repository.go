@@ -176,13 +176,22 @@ func (r *sqlxAuditLogRepository) List(ctx context.Context, orgID uuid.UUID, acti
 	if err != nil {
 		return nil, 0, err
 	}
-	defer countRows.Close()
 	if countRows.Next() {
 		if err := countRows.Scan(&total); err != nil {
+			_ = countRows.Close()
 			return nil, 0, err
 		}
 	}
 	if err := countRows.Err(); err != nil {
+		_ = countRows.Close()
+		return nil, 0, err
+	}
+	// Close the count result set before issuing the next query. Holding it open
+	// would force a second concurrent connection; under SQLite :memory: each
+	// connection is an independent database that has not had the migrations
+	// applied, yielding "no such table". On PostgreSQL this is a harmless early
+	// close with no behavioral change.
+	if err := countRows.Close(); err != nil {
 		return nil, 0, err
 	}
 
@@ -274,13 +283,22 @@ func (r *sqlxAuditLogRepository) Search(ctx context.Context, input domainrepo.Au
 	if err != nil {
 		return nil, 0, err
 	}
-	defer countRows.Close()
 	if countRows.Next() {
 		if err := countRows.Scan(&total); err != nil {
+			_ = countRows.Close()
 			return nil, 0, err
 		}
 	}
 	if err := countRows.Err(); err != nil {
+		_ = countRows.Close()
+		return nil, 0, err
+	}
+	// Close the count result set before issuing the next query. Holding it open
+	// would force a second concurrent connection; under SQLite :memory: each
+	// connection is an independent database that has not had the migrations
+	// applied, yielding "no such table". On PostgreSQL this is a harmless early
+	// close with no behavioral change.
+	if err := countRows.Close(); err != nil {
 		return nil, 0, err
 	}
 
