@@ -30,26 +30,28 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/compat"
 	"github.com/open-git/backend/internal/config"
 	"github.com/open-git/backend/graph"
 	obs "github.com/open-git/backend/observability"
-	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/handler"
-	"github.com/open-git/backend/internal/logger"
 	"github.com/open-git/backend/internal/infrastructure/crypto"
 	infraDB "github.com/open-git/backend/internal/infrastructure/database"
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
-	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
+	"github.com/open-git/backend/internal/infrastructure/queue"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
+	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
+	"github.com/open-git/backend/internal/logger"
 	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
 	docsuc "github.com/open-git/backend/internal/usecase/docs"
+	importUC "github.com/open-git/backend/internal/usecase/import"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
 	labelusecase "github.com/open-git/backend/internal/usecase/label"
 	mcpusecase "github.com/open-git/backend/internal/usecase/mcp"
@@ -61,7 +63,6 @@ import (
 	userUC "github.com/open-git/backend/internal/usecase/user"
 	userpreferencesUC "github.com/open-git/backend/internal/usecase/user_preferences"
 	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
-	"github.com/open-git/backend/internal/infrastructure/queue"
 	"github.com/open-git/backend/internal/worker"
 	artifactusecase "github.com/open-git/backend/internal/usecase/artifact"
 	secretusecase "github.com/open-git/backend/internal/usecase/secret"
@@ -671,6 +672,32 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		deleteVerificationUC,
 	)
 
+	importJobRepo := infrarepo.NewImportJobRepository(sqlxDB)
+	getImportUC := importUC.NewGetImportJobUsecase(importJobRepo)
+	listImportUC := importUC.NewListImportJobsUsecase(importJobRepo)
+	cancelImportUC := importUC.NewCancelImportJobUsecase(importJobRepo, membershipRepo)
+
+	var createImportUC *importUC.CreateImportJobUsecase
+	var retryImportUC *importUC.RetryImportJobUsecase
+	if cfg.RedisAddr != "" {
+		importAsynqClient := queue.NewAsynqClient(cfg.RedisAddr)
+		createImportUC = importUC.NewCreateImportJobUsecase(importJobRepo, membershipRepo, repoRepo, entityOrgRepo, importAsynqClient)
+		retryImportUC = importUC.NewRetryImportJobUsecase(importJobRepo, importJobRepo, membershipRepo, importAsynqClient)
+	} else {
+		noopImport := noopImportEnqueuer{}
+		createImportUC = importUC.NewCreateImportJobUsecaseWithDeps(importJobRepo, membershipRepo, repoRepo, entityOrgRepo, nil, noopImport)
+		retryImportUC = importUC.NewRetryImportJobUsecaseWithEnqueuer(importJobRepo, importJobRepo, membershipRepo, noopImport)
+	}
+	importHandler := handler.NewImportHandler(
+		createImportUC,
+		getImportUC,
+		listImportUC,
+		cancelImportUC,
+		retryImportUC,
+		orgRepo,
+		legacyMembershipRepo,
+	)
+
 	exportAuditLogsUC := securityUC.NewExportAuditLogsUsecase(asynqClient)
 	orgAuditLogHandler := handler.NewOrgAuditLogHandler(
 		getOrgUC,
@@ -833,6 +860,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	compatHandler.RegisterRoutes(v1, authMiddleware)
 	mcpVerificationHandler.RegisterRoutes(v1, authMiddleware)
+	importHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
 
 	gqlResolver := &graph.Resolver{
@@ -898,6 +926,12 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 type noopMCPEnqueuer struct{}
 
 func (noopMCPEnqueuer) EnqueueMCPVerification(context.Context, queue.MCPVerificationPayload) error {
+	return errors.New("redis not configured")
+}
+
+type noopImportEnqueuer struct{}
+
+func (noopImportEnqueuer) EnqueueGitHubImport(context.Context, uuid.UUID, uuid.UUID) error {
 	return errors.New("redis not configured")
 }
 
