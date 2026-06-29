@@ -29,5 +29,8 @@ jobs:
           helm template gitforge helm/ > /tmp/rendered.yaml
           cat /tmp/rendered.yaml | docker run --rm -i ghcr.io/yannh/kubeconform:latest -strict -ignore-missing-schemas -
 
-      - name: Dry-run install
+      - name: Template render check
         run: helm template gitforge helm/ --set ingress.host=test.example.com >/dev/null
+
+      - name: Dry-run install
+        run: helm install gitforge helm/ --dry-run=client --set ingress.host=test.example.com
