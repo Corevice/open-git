@@ -151,13 +151,9 @@ export default function PullRequestDetailPage({ params }: Props) {
 
   const handleMerge = async (method: string) => {
     const prNumber = parseInt(number, 10);
-    try {
-      await mergePullRequest(owner, repo, prNumber, {
-        merge_method: method as "merge" | "squash" | "rebase",
-      });
-    } catch (e) {
-      throw e;
-    }
+    await mergePullRequest(owner, repo, prNumber, {
+      merge_method: method as "merge" | "squash" | "rebase",
+    });
     await loadPullRequest();
   };
 
