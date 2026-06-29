@@ -3,7 +3,7 @@ DROP TABLE IF EXISTS oauth_access_tokens;
 DROP TABLE IF EXISTS oauth_authorization_codes;
 
 -- SQLite does not support DROP COLUMN before version 3.35.
--- Recreate oauth_apps without the migration 006 columns (works on SQLite and PostgreSQL).
+-- Recreate oauth_apps without the migration 018 columns (works on SQLite and PostgreSQL).
 CREATE TABLE oauth_apps_rollback AS
 SELECT id, owner_id, client_id, client_secret_hash, redirect_uris, created_at
 FROM oauth_apps;
