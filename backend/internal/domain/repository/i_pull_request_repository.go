@@ -25,3 +25,15 @@ type IPullRequestRepository interface {
 	Update(ctx context.Context, pr *entity.PullRequest) error
 	SetMerged(ctx context.Context, id uuid.UUID, mergedAt time.Time, mergedBy uuid.UUID, sha string) error
 }
+
+type IBranchProtectionRepository interface {
+	GetForRef(ctx context.Context, repoID uuid.UUID, ref string) (*entity.BranchProtection, error)
+}
+
+type IReviewRepository interface {
+	CountSatisfiedReviews(ctx context.Context, prID uuid.UUID) (int, error)
+}
+
+type IWorkflowRunRepository interface {
+	ListByHeadSHA(ctx context.Context, repoID uuid.UUID, sha string) ([]*entity.WorkflowRun, error)
+}
