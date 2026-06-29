@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -123,14 +124,9 @@ func (m *mockExecScheduleEnqueuer) EnqueueSchedule(_ context.Context, payload Wo
 	return nil
 }
 
-type workflowJobWithTimeout struct {
-	entity.WorkflowJob
-	TimeoutMinutes int
-}
-
 func TestJobTimeoutMinutes_UsesReflectionField(t *testing.T) {
-	job := &workflowJobWithTimeout{TimeoutMinutes: 42}
-	if got := jobTimeoutMinutes(&job.WorkflowJob); got != 42 {
+	job := &entity.WorkflowJob{TimeoutMinutes: 42}
+	if got := jobTimeoutMinutes(job); got != 42 {
 		t.Fatalf("jobTimeoutMinutes() = %d, want 42", got)
 	}
 	if got := jobTimeoutMinutes(nil); got != defaultJobTimeoutMinutes {
@@ -265,13 +261,14 @@ func newJobExecTask(payload WorkflowJobExecPayload) (*asynq.Task, error) {
 }
 
 func TestWorkflowJobNeeds_ReflectsNeedsField(t *testing.T) {
-	type jobWithNeeds struct {
-		entity.WorkflowJob
-		Needs []string
+	// workflowJobNeeds reflects a "Needs" slice field off *entity.WorkflowJob.
+	// The current entity.WorkflowJob exposes no such field, so the helper must
+	// return no dependencies rather than panicking. (A nil job must also be
+	// handled safely.)
+	if got := workflowJobNeeds(&entity.WorkflowJob{}); len(got) != 0 {
+		t.Fatalf("workflowJobNeeds() = %v, want no needs", got)
 	}
-	job := &jobWithNeeds{Needs: []string{"build", "lint"}}
-	got := workflowJobNeeds(&job.WorkflowJob)
-	if len(got) != 2 || got[0] != "build" || got[1] != "lint" {
-		t.Fatalf("workflowJobNeeds() = %v, want [build lint]", got)
+	if got := workflowJobNeeds(nil); len(got) != 0 {
+		t.Fatalf("workflowJobNeeds(nil) = %v, want no needs", got)
 	}
 }

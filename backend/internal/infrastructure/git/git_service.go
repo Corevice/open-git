@@ -447,8 +447,15 @@ func DeleteBranch(repoPath, name string) error {
 		return err
 	}
 
-	err = repo.Storer.RemoveReference(plumbing.NewBranchReferenceName(name))
-	if err != nil {
+	refName := plumbing.NewBranchReferenceName(name)
+	if _, err := repo.Reference(refName, false); err != nil {
+		if errors.Is(err, plumbing.ErrReferenceNotFound) {
+			return ErrPathNotFound
+		}
+		return err
+	}
+
+	if err := repo.Storer.RemoveReference(refName); err != nil {
 		if errors.Is(err, plumbing.ErrReferenceNotFound) {
 			return ErrPathNotFound
 		}

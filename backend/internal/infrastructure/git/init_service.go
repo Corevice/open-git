@@ -50,7 +50,9 @@ func AutoInitRepository(bareRepoPath string, opts AutoInitOpts) error {
 	defer os.RemoveAll(tmpDir)
 
 	repo, err := gogit.PlainInitWithOptions(tmpDir, &gogit.PlainInitOptions{
-		DefaultBranch: plumbing.NewBranchReferenceName("main"),
+		InitOptions: gogit.InitOptions{
+			DefaultBranch: plumbing.NewBranchReferenceName("main"),
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("init working repo: %w", err)
