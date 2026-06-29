@@ -429,6 +429,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	)
 
 	contentHandler := handler.NewContentHandler(repoGitResolver)
+	branchHandler := handler.NewBranchHandler(repoGitResolver, repoRepo, membershipAdapter)
 
 	issuePATUC := authUC.NewIssuePATUsecase(tokenRepo)
 	revokePATUC := authUC.NewRevokePATUsecase(tokenRepo)
@@ -718,6 +719,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	repositoryHandler.RegisterRoutes(api, authMiddleware)
+	branchHandler.RegisterRoutes(api, authMiddleware)
 	collaboratorHandler.RegisterRoutes(api, authMiddleware)
 	contentHandler.RegisterRoutes(api)
 	issueHandler.RegisterRoutes(api, authMiddleware)
@@ -744,6 +746,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	securityAdvisoryHandler.RegisterRoutes(v3, authMiddleware)
 	dependabotAlertHandler.RegisterRoutes(v3, authMiddleware)
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
+	branchHandler.RegisterRoutes(v3, authMiddleware)
 	collaboratorHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
 	issueHandler.RegisterRoutes(v3, authMiddleware)
