@@ -5,35 +5,39 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
 )
 
 type IssueHandler struct {
 	createIssueUC   *issueusecase.CreateIssueUsecase
 	listIssuesUC    *issueusecase.ListIssuesUsecase
-	createCommentUC *issueusecase.CreateCommentUsecase
+	getIssueUC      *issueusecase.GetIssueUsecase
 	updateIssueUC   *issueusecase.UpdateIssueUsecase
+	createCommentUC *issueusecase.CreateCommentUsecase
 	resolveRepo     func(c echo.Context, owner, repo string) (*entity.Repository, error)
 }
 
 func NewIssueHandler(
 	createIssueUC *issueusecase.CreateIssueUsecase,
 	listIssuesUC *issueusecase.ListIssuesUsecase,
-	createCommentUC *issueusecase.CreateCommentUsecase,
+	getIssueUC *issueusecase.GetIssueUsecase,
 	updateIssueUC *issueusecase.UpdateIssueUsecase,
+	createCommentUC *issueusecase.CreateCommentUsecase,
 	resolveRepo func(c echo.Context, owner, repo string) (*entity.Repository, error),
 ) *IssueHandler {
 	return &IssueHandler{
 		createIssueUC:   createIssueUC,
 		listIssuesUC:    listIssuesUC,
-		createCommentUC: createCommentUC,
+		getIssueUC:      getIssueUC,
 		updateIssueUC:   updateIssueUC,
+		createCommentUC: createCommentUC,
 		resolveRepo:     resolveRepo,
 	}
 }
@@ -42,6 +46,7 @@ func (h *IssueHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	repoScope := middleware.RequireScope("repo")
 	g.GET("/repos/:owner/:repo/issues", h.ListIssues, auth, repoScope)
 	g.POST("/repos/:owner/:repo/issues", h.CreateIssue, auth, repoScope)
+	g.GET("/repos/:owner/:repo/issues/:number", h.GetIssue, auth, repoScope)
 	g.PATCH("/repos/:owner/:repo/issues/:number", h.UpdateIssue, auth, repoScope)
 	g.POST("/repos/:owner/:repo/issues/:number/comments", h.CreateComment, auth, repoScope)
 }
@@ -51,14 +56,17 @@ type createIssueRequest struct {
 	Body  string `json:"body"`
 }
 
-type createCommentRequest struct {
-	Body string `json:"body"`
+type updateIssueRequest struct {
+	Title           *string  `json:"title"`
+	Body            *string  `json:"body"`
+	State           *string  `json:"state"`
+	StateReason     *string  `json:"state_reason"`
+	Labels          []string `json:"labels"`
+	MilestoneNumber *int     `json:"milestone"`
 }
 
-type updateIssueRequest struct {
-	State string  `json:"state"`
-	Title *string `json:"title"`
-	Body  *string `json:"body"`
+type createCommentRequest struct {
+	Body string `json:"body"`
 }
 
 func (h *IssueHandler) ListIssues(c echo.Context) error {
@@ -72,8 +80,10 @@ func (h *IssueHandler) ListIssues(c echo.Context) error {
 		return err
 	}
 
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
+	page, perPage, err := middleware.ParsePaginationParams(c)
+	if err != nil {
+		return err
+	}
 
 	output, err := h.listIssuesUC.Execute(c.Request().Context(), issueusecase.ListIssuesInput{
 		OrganizationID: actor.OrganizationID,
@@ -87,7 +97,9 @@ func (h *IssueHandler) ListIssues(c echo.Context) error {
 		return err
 	}
 
-	setPaginationHeaders(c, output.Page, output.PerPage, output.Total)
+	if link := middleware.BuildAbsoluteLinkHeader(c, output.Page, output.PerPage, output.Total); link != "" {
+		c.Response().Header().Set("Link", link)
+	}
 	return c.JSON(http.StatusOK, toIssueResponses(output.Issues, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
@@ -127,6 +139,37 @@ func (h *IssueHandler) CreateIssue(c echo.Context) error {
 	return c.JSON(http.StatusCreated, toIssueResponse(issue, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
+func (h *IssueHandler) GetIssue(c echo.Context) error {
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+
+	actor, err := middleware.GetActor(c)
+	if err != nil {
+		return err
+	}
+
+	number, err := strconv.Atoi(c.Param("number"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid issue number")
+	}
+
+	issue, err := h.getIssueUC.Execute(c.Request().Context(), issueusecase.GetIssueInput{
+		OrganizationID: actor.OrganizationID,
+		RepositoryID:   repo.ID,
+		IssueNumber:    number,
+	})
+	if err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		}
+		return err
+	}
+
+	return c.JSON(http.StatusOK, toIssueResponse(issue, c.Param("owner"), c.Param("repo"), c.Request().Host))
+}
+
 func (h *IssueHandler) UpdateIssue(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
@@ -148,30 +191,28 @@ func (h *IssueHandler) UpdateIssue(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
-	if req.State != "" && req.State != "open" && req.State != "closed" {
+	if req.State != nil && *req.State != "open" && *req.State != "closed" {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, "invalid state value")
 	}
 
-	var statePtr *string
-	if req.State != "" {
-		statePtr = &req.State
-	}
-
 	issue, err := h.updateIssueUC.Execute(c.Request().Context(), issueusecase.UpdateIssueInput{
-		OrganizationID: actor.OrganizationID,
-		RepositoryID:   repo.ID,
-		IssueNumber:    number,
-		ActorID:        actor.UserID,
-		Title:          req.Title,
-		Body:           req.Body,
-		State:          statePtr,
+		OrganizationID:  actor.OrganizationID,
+		RepositoryID:    repo.ID,
+		ActorID:         actor.UserID,
+		IssueNumber:     number,
+		Title:           req.Title,
+		Body:            req.Body,
+		State:           req.State,
+		StateReason:     req.StateReason,
+		LabelNames:      req.Labels,
+		MilestoneNumber: req.MilestoneNumber,
 	})
 	if err != nil {
-		if errors.Is(err, apperror.ErrNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
-		}
 		if errors.Is(err, apperror.ErrValidation) {
 			return echo.NewHTTPError(http.StatusUnprocessableEntity, err.Error())
+		}
+		if errors.Is(err, apperror.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
 		return err
 	}
@@ -270,19 +311,39 @@ func setPaginationHeaders(c echo.Context, page, perPage, total int) {
 	c.Response().Header().Set("Link", strings.Join(links, ", "))
 }
 
+type issueLabelResponse struct {
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	Description string `json:"description"`
+}
+
+type issueMilestoneResponse struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	State  string `json:"state"`
+}
+
 type issueUserResponse struct {
 	Login string `json:"login"`
 }
 
 type issueResponse struct {
-	ID      uuid.UUID         `json:"id"`
-	Number  int               `json:"number"`
-	Title   string            `json:"title"`
-	Body    string            `json:"body"`
-	State   string            `json:"state"`
-	NodeID  string            `json:"node_id"`
-	HTMLURL string            `json:"html_url"`
-	User    issueUserResponse `json:"user"`
+	ID          int64                   `json:"id"`
+	NodeID      string                  `json:"node_id"`
+	Number      int                     `json:"number"`
+	Title       string                  `json:"title"`
+	Body        string                  `json:"body"`
+	State       string                  `json:"state"`
+	StateReason *string                 `json:"state_reason"`
+	User        issueUserResponse       `json:"user"`
+	Labels      []issueLabelResponse    `json:"labels"`
+	Milestone   *issueMilestoneResponse `json:"milestone"`
+	Comments    int                     `json:"comments"`
+	CreatedAt   string                  `json:"created_at"`
+	UpdatedAt   string                  `json:"updated_at"`
+	ClosedAt    *string                 `json:"closed_at"`
+	HTMLURL     string                  `json:"html_url"`
+	URL         string                  `json:"url"`
 }
 
 type commentResponse struct {
@@ -291,18 +352,39 @@ type commentResponse struct {
 }
 
 func toIssueResponse(issue *entity.Issue, owner, repoName, host string) issueResponse {
-	return issueResponse{
-		ID:      issue.ID,
-		Number:  issue.Number,
-		Title:   issue.Title,
-		Body:    issue.Body,
-		State:   issue.State,
-		NodeID:  IssueNodeID(issue.ID),
-		HTMLURL: "https://" + host + "/" + owner + "/" + repoName + "/issues/" + strconv.Itoa(issue.Number),
-		User: issueUserResponse{
-			Login: issue.AuthorLogin,
-		},
+	resp := issueResponse{
+		ID:          middleware.UUIDToInt64(issue.ID),
+		NodeID:      IssueNodeID(issue.ID),
+		Number:      issue.Number,
+		Title:       issue.Title,
+		Body:        issue.Body,
+		State:       issue.State,
+		StateReason: issue.StateReason,
+		User:        issueUserResponse{Login: issue.AuthorLogin},
+		Comments:    issue.CommentsCount,
+		CreatedAt:   issue.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:   issue.UpdatedAt.UTC().Format(time.RFC3339),
+		HTMLURL:     "https://" + host + "/" + owner + "/" + repoName + "/issues/" + strconv.Itoa(issue.Number),
+		URL:         "https://" + host + "/repos/" + owner + "/" + repoName + "/issues/" + strconv.Itoa(issue.Number),
 	}
+
+	if issue.ClosedAt != nil {
+		closed := issue.ClosedAt.UTC().Format(time.RFC3339)
+		resp.ClosedAt = &closed
+	}
+
+	if len(issue.Labels) > 0 {
+		resp.Labels = make([]issueLabelResponse, len(issue.Labels))
+		for i, label := range issue.Labels {
+			resp.Labels[i] = issueLabelResponse{
+				Name:        label.Name,
+				Color:       label.Color,
+				Description: label.Description,
+			}
+		}
+	}
+
+	return resp
 }
 
 func toIssueResponses(issues []*entity.Issue, owner, repoName, host string) []issueResponse {

@@ -17,6 +17,23 @@ type Run = {
   time: string;
 };
 
+type WorkflowFile = {
+  id: string;
+  name: string;
+  path: string;
+  state: "active" | "disabled";
+  parse_status: "valid" | "invalid" | "pending";
+  triggers: string[];
+  jobs: string[];
+};
+
+type ParseDiagnostic = {
+  line: number;
+  col: number;
+  severity: "error" | "warning" | "info";
+  message: string;
+};
+
 const runs: Run[] = [
   {
     id: "4521",
@@ -95,6 +112,54 @@ const workflows = [
   { name: "🛡 CodeQL Analysis", active: false },
 ];
 
+// TODO: fetch from GET /repos/:owner/:repo/actions/workflows
+const workflowFiles: WorkflowFile[] = [
+  {
+    id: "wf-ci",
+    name: "CI",
+    path: ".github/workflows/ci.yml",
+    state: "active",
+    parse_status: "valid",
+    triggers: ["push", "pull_request"],
+    jobs: ["build", "test"],
+  },
+  {
+    id: "wf-deploy",
+    name: "Deploy",
+    path: ".github/workflows/deploy.yml",
+    state: "active",
+    parse_status: "invalid",
+    triggers: ["push"],
+    jobs: ["deploy"],
+  },
+  {
+    id: "wf-codeql",
+    name: "CodeQL",
+    path: ".github/workflows/codeql.yml",
+    state: "disabled",
+    parse_status: "pending",
+    triggers: ["schedule"],
+    jobs: ["analyze"],
+  },
+];
+
+const mockDiagnostics: Record<string, ParseDiagnostic[]> = {
+  "wf-deploy": [
+    {
+      line: 12,
+      col: 5,
+      severity: "error",
+      message: "step cannot define both 'uses' and 'run'",
+    },
+    {
+      line: 18,
+      col: 1,
+      severity: "warning",
+      message: "unknown permission scope 'write-all'",
+    },
+  ],
+};
+
 function statusBadge(status: Run["status"]) {
   switch (status) {
     case "Success":
@@ -108,12 +173,38 @@ function statusBadge(status: Run["status"]) {
   }
 }
 
+function parseStatusBadge(parseStatus: WorkflowFile["parse_status"]) {
+  switch (parseStatus) {
+    case "valid":
+      return "bg-[#dafbe1] text-[#1a7f37]";
+    case "invalid":
+      return "bg-[#ffebe9] text-[#cf222e]";
+    case "pending":
+      return "bg-[#fff8c5] text-[#9a6700]";
+  }
+}
+
+function diagnosticSeverityColor(severity: ParseDiagnostic["severity"]) {
+  switch (severity) {
+    case "error":
+      return "text-[#cf222e]";
+    case "warning":
+      return "text-[#9a6700]";
+    case "info":
+      return "text-[#656d76]";
+  }
+}
+
 export default function Page() {
   const [filter, setFilter] = useState("");
   const [event, setEvent] = useState("");
   const [status, setStatus] = useState("");
   const [branch, setBranch] = useState("");
   const [actor, setActor] = useState("");
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+
+  const selectedWorkflow =
+    workflowFiles.find((w) => w.id === selectedWorkflowId) ?? null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -212,6 +303,35 @@ export default function Page() {
               </Link>
             ))}
 
+            <div className="text-xs uppercase text-[#656d76] mb-2 mt-6">Workflow Files</div>
+            {workflowFiles.map((w) => {
+              const filename = w.path.split("/").pop() ?? w.path;
+              return (
+                <button
+                  key={w.id}
+                  type="button"
+                  onClick={() => setSelectedWorkflowId(w.id)}
+                  className={`w-full text-left px-3 py-2 rounded-md text-sm mb-0.5 flex items-center gap-2 flex-wrap ${
+                    w.id === selectedWorkflowId
+                      ? "bg-[#ddf4ff] text-[#0969da]"
+                      : "text-[#1f2328] hover:bg-[#f3f4f6]"
+                  }`}
+                >
+                  <span className="truncate">{filename}</span>
+                  {w.state === "disabled" && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#eaeef2] text-[#656d76]">
+                      disabled
+                    </span>
+                  )}
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[10px] ${parseStatusBadge(w.parse_status)}`}
+                  >
+                    {w.parse_status}
+                  </span>
+                </button>
+              );
+            })}
+
             <div className="text-xs uppercase text-[#656d76] mb-2 mt-6">Management</div>
             <Link href="/10-actions-list" className="block px-3 py-2 rounded-md text-sm mb-0.5 hover:bg-[#f3f4f6]">
               ⚙ Caches
@@ -281,6 +401,74 @@ export default function Page() {
                 ↕ Sort
               </Link>
             </form>
+
+            {selectedWorkflow !== null && (
+              <div className="bg-white border border-[#d0d7de] rounded-md mb-4 overflow-hidden">
+                <div className="px-4 py-3 border-b border-[#d0d7de] flex justify-between items-start">
+                  <div>
+                    <div className="text-sm font-semibold">{selectedWorkflow.name}</div>
+                    <div className="text-xs font-mono text-[#656d76] mt-0.5">
+                      {selectedWorkflow.path}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedWorkflowId(null)}
+                    className="px-2 py-1 text-xs border border-[#d0d7de] rounded-md hover:bg-[#f3f4f6]"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="px-4 py-3 border-b border-[#d0d7de]">
+                  <div className="text-xs text-[#656d76] mb-1">Triggers</div>
+                  <div className="flex flex-wrap gap-1">
+                    {selectedWorkflow.triggers.map((trigger) => (
+                      <span
+                        key={trigger}
+                        className="bg-[#eaeef2] text-[#1f2328] px-2 py-0.5 rounded text-xs"
+                      >
+                        {trigger}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="px-4 py-3 border-b border-[#d0d7de]">
+                  <div className="text-xs text-[#656d76] mb-1">Jobs</div>
+                  <div className="flex flex-wrap gap-1">
+                    {selectedWorkflow.jobs.map((job) => (
+                      <span
+                        key={job}
+                        className="bg-[#eaeef2] text-[#1f2328] px-2 py-0.5 rounded text-xs"
+                      >
+                        {job}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                {mockDiagnostics[selectedWorkflow.id] && (
+                  <div className="px-4 py-3">
+                    <div className="text-xs text-[#656d76] mb-2">Parse Diagnostics</div>
+                    <ul className="space-y-2">
+                      {mockDiagnostics[selectedWorkflow.id].map((diag, idx) => (
+                        <li key={idx} className="text-xs flex items-start gap-2">
+                          <span className={`font-mono ${diagnosticSeverityColor(diag.severity)}`}>
+                            Line {diag.line}:{diag.col}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] uppercase ${diagnosticSeverityColor(diag.severity)}`}
+                          >
+                            {diag.severity}
+                          </span>
+                          <span className={diagnosticSeverityColor(diag.severity)}>
+                            {diag.message}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">
               <div className="px-4 py-3 bg-[#f6f8fa] border-b border-[#d0d7de] text-sm text-[#656d76] flex justify-between items-center">
