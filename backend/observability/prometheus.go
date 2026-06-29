@@ -1,8 +1,10 @@
 package observability
 
 import (
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -13,7 +15,7 @@ import (
 var (
 	httpRequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "http_requests_total",
+			Name: "githost_http_requests_total",
 			Help: "Total number of HTTP requests.",
 		},
 		[]string{"method", "path", "status"},
@@ -21,7 +23,7 @@ var (
 
 	httpRequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "http_request_duration_seconds",
+			Name:    "githost_http_request_duration_seconds",
 			Help:    "HTTP request duration in seconds.",
 			Buckets: prometheus.DefBuckets,
 		},
@@ -30,13 +32,29 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(httpRequestsTotal)
-	prometheus.MustRegister(httpRequestDuration)
+	if err := prometheus.Register(httpRequestsTotal); err != nil {
+		if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
+			log.Printf("metrics: already registered, reusing existing collector: %v", err)
+		}
+	}
+	if err := prometheus.Register(httpRequestDuration); err != nil {
+		if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
+			log.Printf("metrics: already registered, reusing existing collector: %v", err)
+		}
+	}
 }
 
 // EchoPrometheusMiddleware records request count and latency for each route.
 func EchoPrometheusMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		path := c.Path()
+		if path == "" {
+			path = c.Request().URL.Path
+		}
+		if path == "/metrics" || strings.HasPrefix(path, "/metrics") {
+			return next(c)
+		}
+
 		start := time.Now()
 		err := next(c)
 		duration := time.Since(start).Seconds()
@@ -50,7 +68,7 @@ func EchoPrometheusMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			}
 		}
 
-		path := c.Path()
+		path = c.Path()
 		if path == "" {
 			path = c.Request().URL.Path
 		}
@@ -70,7 +88,31 @@ func EchoPrometheusMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-// RegisterMetricsRoute registers the /metrics endpoint on the given Echo instance.
-func RegisterMetricsRoute(e *echo.Echo) {
-	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
+// NewMetricsHandler returns an Echo handler that exposes Prometheus metrics.
+func NewMetricsHandler(authToken string) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("metrics handler panic recovered: %v", r)
+			}
+		}()
+
+		if authToken != "" {
+			auth := c.Request().Header.Get("Authorization")
+			if !strings.HasPrefix(auth, "Bearer ") {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			}
+			token := strings.TrimPrefix(auth, "Bearer ")
+			if token != authToken {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			}
+		}
+
+		return echo.WrapHandler(promhttp.Handler())(c)
+	}
+}
+
+// RegisterMetricsRoute registers the metrics endpoint on the given Echo instance.
+func RegisterMetricsRoute(e *echo.Echo, path, authToken string) {
+	e.GET(path, NewMetricsHandler(authToken))
 }

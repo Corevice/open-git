@@ -102,6 +102,14 @@ func (handlerWebhookAuditRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.U
 	return nil
 }
 
+func (handlerWebhookAuditRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (handlerWebhookAuditRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 func webhookTestRepo() *entity.Repository {
 	return &entity.Repository{
 		ID:             webhookTestRepoID,

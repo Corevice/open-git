@@ -21,10 +21,10 @@ type Artifact struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID
 	RepositoryID   uuid.UUID
-	WorkflowRunID  uuid.UUID
+	RunID          uuid.UUID
 	Name           string
 	StorageKey     string
-	SizeInBytes    int64
+	SizeBytes      int64
 	Status         ArtifactStatus
 	RetentionDays  int
 	CreatedAt      time.Time
