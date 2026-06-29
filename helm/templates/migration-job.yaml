@@ -1,0 +1,57 @@
+{{/*
+This Job runs as a Helm pre-install/pre-upgrade hook. If migration fails,
+helm install/upgrade aborts and the previous release revision keeps running
+rather than leaving the cluster in a partially-migrated state.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "open-git.fullname" . }}-migration
+  labels:
+    {{- include "open-git.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "-5"
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        {{- include "open-git.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: migration
+          image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          args:
+            - "/bin/sh"
+            - "-c"
+            - "./server migrate"
+          env:
+            - name: DB_TYPE
+              value: {{ .Values.db.type | quote }}
+            {{- if eq .Values.db.type "postgres" }}
+            - name: POSTGRES_HOST
+              value: {{ .Values.db.postgres.host | quote }}
+            - name: POSTGRES_PORT
+              value: {{ .Values.db.postgres.port | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.db.postgres.name | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.db.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-git.fullname" . }}-db
+                  key: postgres-password
+            {{- else }}
+            - name: SQLITE_PATH
+              value: {{ .Values.db.sqlite.path | quote }}
+            {{- end }}
