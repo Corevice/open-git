@@ -273,8 +273,7 @@ export default async function RepoPage({
                 entries={entries}
                 owner={owner}
                 repo={repo}
-                branch={branch}
-                currentPath=""
+                treeRef={branch}
               />
             </div>
 

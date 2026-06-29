@@ -171,22 +171,22 @@ export default function Page() {
                     <tr>
                       <td className="w-10 text-right text-[#6e7781] bg-[#f6f8fa] px-2.5">15</td>
                       <td className="w-10 text-right text-[#6e7781] bg-[#f6f8fa] px-2.5">15</td>
-                      <td className="px-2.5">&nbsp;import React from 'react';</td>
+                      <td className="px-2.5">&nbsp;import React from {"'react'"};</td>
                     </tr>
                     <tr className="bg-[#ffebe9]">
                       <td className="w-10 text-right text-[#6e7781] bg-[#ffd7d5] px-2.5">16</td>
                       <td className="w-10 text-right text-[#6e7781] bg-[#ffd7d5] px-2.5"></td>
-                      <td className="px-2.5">- import {"{ useState }"} from 'react';</td>
+                      <td className="px-2.5">- import {"{ useState }"} from {"'react'"};</td>
                     </tr>
                     <tr className="bg-[#dafbe1]">
                       <td className="w-10 text-right text-[#6e7781] bg-[#ccffd8] px-2.5"></td>
                       <td className="w-10 text-right text-[#6e7781] bg-[#ccffd8] px-2.5">16</td>
-                      <td className="px-2.5">+ import {"{ useState, useContext }"} from 'react';</td>
+                      <td className="px-2.5">+ import {"{ useState, useContext }"} from {"'react'"};</td>
                     </tr>
                     <tr className="bg-[#dafbe1]">
                       <td className="w-10 text-right text-[#6e7781] bg-[#ccffd8] px-2.5"></td>
                       <td className="w-10 text-right text-[#6e7781] bg-[#ccffd8] px-2.5">17</td>
-                      <td className="px-2.5">+ import {"{ ThemeContext }"} from '../theme';</td>
+                      <td className="px-2.5">+ import {"{ ThemeContext }"} from {"'../theme'"};</td>
                     </tr>
                     <tr>
                       <td className="w-10 text-right text-[#6e7781] bg-[#f6f8fa] px-2.5">17</td>

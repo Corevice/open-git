@@ -62,7 +62,7 @@ export function PerformanceClient({
     useState<PerfBenchmarkItem | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [, setJobId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);

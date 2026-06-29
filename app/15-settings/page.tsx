@@ -80,6 +80,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     apiClient.sshKeys.list().then(setSshKeys).catch(console.error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount; apiClient is recreated each render
   }, []);
 
   const handleSaveProfile = (e: React.FormEvent) => {

@@ -236,8 +236,7 @@ export default function RepoTreePage({
               entries={entries}
               owner={owner}
               repo={repo}
-              branch={currentRef}
-              currentPath={currentPath}
+              treeRef={currentRef}
             />
           )}
         </div>

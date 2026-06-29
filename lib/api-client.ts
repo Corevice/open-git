@@ -121,6 +121,7 @@ export interface RepoApiClient extends ApiClient {
     visibility: "public" | "private",
     options?: { autoInit?: boolean; description?: string },
   ): Promise<T>;
+  listRepos<T>(opts?: { token?: string }): Promise<T>;
 }
 
 export function isApiError(err: unknown): err is ApiError {
@@ -311,7 +312,13 @@ export function createRepoApiClient(baseUrl: string): RepoApiClient {
     async updateDefaultBranch(owner, repo, branch, opts) {
       await base.patch(repoApiPath(owner, repo), { default_branch: branch }, opts);
     },
-    async getCommits(owner, repo, sha, page, perPage = 30) {
+    async getCommits<T>(
+      owner: string,
+      repo: string,
+      sha: string,
+      page: number,
+      perPage = 30,
+    ) {
       const url = `${apiBase}/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(sha)}&per_page=${perPage}&page=${page}`;
       const res = await fetch(url, {
         method: "GET",
@@ -373,6 +380,9 @@ export function createRepoApiClient(baseUrl: string): RepoApiClient {
         ...(options?.description ? { description: options.description } : {}),
         auto_init: options?.autoInit ?? false,
       });
+    },
+    listRepos(opts) {
+      return base.get("/user/repos?per_page=100", opts);
     },
   };
 }
