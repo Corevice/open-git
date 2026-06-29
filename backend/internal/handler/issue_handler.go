@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
 )
 
 type IssueHandler struct {
@@ -184,6 +184,10 @@ func (h *IssueHandler) UpdateIssue(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
+	if req.State != nil && *req.State != "open" && *req.State != "closed" {
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, "invalid state value")
+	}
+
 	issue, err := h.updateIssueUC.Execute(c.Request().Context(), issueusecase.UpdateIssueInput{
 		OrganizationID:  actor.OrganizationID,
 		RepositoryID:    repo.ID,
@@ -300,33 +304,39 @@ func setPaginationHeaders(c echo.Context, page, perPage, total int) {
 	c.Response().Header().Set("Link", strings.Join(links, ", "))
 }
 
+type issueLabelResponse struct {
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	Description string `json:"description"`
+}
+
+type issueMilestoneResponse struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	State  string `json:"state"`
+}
+
+type issueUserResponse struct {
+	Login string `json:"login"`
+}
+
 type issueResponse struct {
-	ID          string `json:"id"`
-	NodeID      string `json:"node_id"`
-	Number      int    `json:"number"`
-	Title       string `json:"title"`
-	Body        string `json:"body"`
-	State       string `json:"state"`
-	StateReason *string `json:"state_reason"`
-	User        struct {
-		Login string `json:"login"`
-	} `json:"user"`
-	Labels []struct {
-		Name        string `json:"name"`
-		Color       string `json:"color"`
-		Description string `json:"description"`
-	} `json:"labels"`
-	Milestone *struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		State  string `json:"state"`
-	} `json:"milestone"`
-	Comments  int     `json:"comments"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
-	ClosedAt  *string `json:"closed_at"`
-	HTMLURL   string  `json:"html_url"`
-	URL       string  `json:"url"`
+	ID          uuid.UUID               `json:"id"`
+	NodeID      string                  `json:"node_id"`
+	Number      int                     `json:"number"`
+	Title       string                  `json:"title"`
+	Body        string                  `json:"body"`
+	State       string                  `json:"state"`
+	StateReason *string                 `json:"state_reason"`
+	User        issueUserResponse       `json:"user"`
+	Labels      []issueLabelResponse    `json:"labels"`
+	Milestone   *issueMilestoneResponse `json:"milestone"`
+	Comments    int                     `json:"comments"`
+	CreatedAt   string                  `json:"created_at"`
+	UpdatedAt   string                  `json:"updated_at"`
+	ClosedAt    *string                 `json:"closed_at"`
+	HTMLURL     string                  `json:"html_url"`
+	URL         string                  `json:"url"`
 }
 
 type commentResponse struct {
@@ -334,23 +344,21 @@ type commentResponse struct {
 	Body string    `json:"body"`
 }
 
-func toIssueResponse(issue *entity.Issue, owner, repo, host string) issueResponse {
+func toIssueResponse(issue *entity.Issue, owner, repoName, host string) issueResponse {
 	resp := issueResponse{
-		ID:          issue.ID.String(),
-		NodeID:      "I_" + issue.ID.String(),
+		ID:          issue.ID,
+		NodeID:      IssueNodeID(issue.ID),
 		Number:      issue.Number,
 		Title:       issue.Title,
 		Body:        issue.Body,
 		State:       issue.State,
 		StateReason: issue.StateReason,
-		User: struct {
-			Login string `json:"login"`
-		}{Login: issue.AuthorLogin},
-		Comments:  issue.CommentsCount,
-		CreatedAt: issue.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt: issue.UpdatedAt.UTC().Format(time.RFC3339),
-		HTMLURL:   "https://" + host + "/" + owner + "/" + repo + "/issues/" + strconv.Itoa(issue.Number),
-		URL:       "https://" + host + "/repos/" + owner + "/" + repo + "/issues/" + strconv.Itoa(issue.Number),
+		User:        issueUserResponse{Login: issue.AuthorLogin},
+		Comments:    issue.CommentsCount,
+		CreatedAt:   issue.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:   issue.UpdatedAt.UTC().Format(time.RFC3339),
+		HTMLURL:     "https://" + host + "/" + owner + "/" + repoName + "/issues/" + strconv.Itoa(issue.Number),
+		URL:         "https://" + host + "/repos/" + owner + "/" + repoName + "/issues/" + strconv.Itoa(issue.Number),
 	}
 
 	if issue.ClosedAt != nil {
@@ -359,17 +367,9 @@ func toIssueResponse(issue *entity.Issue, owner, repo, host string) issueRespons
 	}
 
 	if len(issue.Labels) > 0 {
-		resp.Labels = make([]struct {
-			Name        string `json:"name"`
-			Color       string `json:"color"`
-			Description string `json:"description"`
-		}, len(issue.Labels))
+		resp.Labels = make([]issueLabelResponse, len(issue.Labels))
 		for i, label := range issue.Labels {
-			resp.Labels[i] = struct {
-				Name        string `json:"name"`
-				Color       string `json:"color"`
-				Description string `json:"description"`
-			}{
+			resp.Labels[i] = issueLabelResponse{
 				Name:        label.Name,
 				Color:       label.Color,
 				Description: label.Description,
@@ -380,10 +380,10 @@ func toIssueResponse(issue *entity.Issue, owner, repo, host string) issueRespons
 	return resp
 }
 
-func toIssueResponses(issues []*entity.Issue, owner, repo, host string) []issueResponse {
+func toIssueResponses(issues []*entity.Issue, owner, repoName, host string) []issueResponse {
 	result := make([]issueResponse, 0, len(issues))
 	for _, issue := range issues {
-		result = append(result, toIssueResponse(issue, owner, repo, host))
+		result = append(result, toIssueResponse(issue, owner, repoName, host))
 	}
 	return result
 }

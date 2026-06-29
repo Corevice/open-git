@@ -22,8 +22,9 @@ import (
 
 var (
 	issueTestOrgID   = uuid.MustParse("00000000-0000-0000-0000-000000000042")
-	issueTestUserID  = uuid.MustParse("00000000-0000-0000-0000-000000000007")
+	issueTestUserID  = int64(7)
 	issueTestRepoID  = uuid.MustParse("00000000-0000-0000-0000-000000000099")
+	issueTestIssueID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	issueTestOwner   = "alice"
 	issueTestRepo    = "demo"
 )
@@ -56,16 +57,16 @@ func (m *issueHandlerMockRepo) GetByNumber(ctx context.Context, repoID uuid.UUID
 	return issue, nil
 }
 
+func (m *issueHandlerMockRepo) GetByID(_ context.Context, _ uuid.UUID) (*entity.Issue, error) {
+	return nil, nil
+}
+
 func (m *issueHandlerMockRepo) ListByRepo(_ context.Context, _ repository.ListIssuesFilter) ([]*entity.Issue, int, error) {
 	issues := make([]*entity.Issue, 0, len(m.issues))
 	for _, issue := range m.issues {
 		issues = append(issues, issue)
 	}
 	return issues, len(issues), nil
-}
-
-func (m *issueHandlerMockRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) {
-	return len(m.issues) + 1, nil
 }
 
 func (m *issueHandlerMockRepo) Update(ctx context.Context, issue *entity.Issue) error {
@@ -81,6 +82,16 @@ func (m *issueHandlerMockRepo) Update(ctx context.Context, issue *entity.Issue) 
 	return nil
 }
 
+func (m *issueHandlerMockRepo) Delete(_ context.Context, _ uuid.UUID) error { return nil }
+
+func (m *issueHandlerMockRepo) Count(_ context.Context, _ repository.ListIssuesFilter) (int, error) {
+	return len(m.issues), nil
+}
+
+func (m *issueHandlerMockRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) {
+	return len(m.issues) + 1, nil
+}
+
 type issueHandlerMockLabelRepo struct{}
 
 func (issueHandlerMockLabelRepo) Create(context.Context, *entity.Label) error { return nil }
@@ -92,10 +103,10 @@ func (issueHandlerMockLabelRepo) ListByRepo(context.Context, uuid.UUID, int, int
 }
 func (issueHandlerMockLabelRepo) Update(context.Context, *entity.Label) error { return nil }
 func (issueHandlerMockLabelRepo) Delete(context.Context, uuid.UUID) error     { return nil }
-func (issueHandlerMockLabelRepo) AddToIssue(context.Context, uuid.UUID, uuid.UUID) error {
+func (issueHandlerMockLabelRepo) AddToIssue(context.Context, uuid.UUID, int, uuid.UUID) error {
 	return nil
 }
-func (issueHandlerMockLabelRepo) RemoveFromIssue(context.Context, uuid.UUID, uuid.UUID) error {
+func (issueHandlerMockLabelRepo) RemoveFromIssue(context.Context, uuid.UUID, int, uuid.UUID) error {
 	return nil
 }
 
@@ -113,13 +124,17 @@ func (issueHandlerMockMilestoneRepo) Delete(context.Context, uuid.UUID) error   
 func (issueHandlerMockMilestoneRepo) NextNumber(context.Context, uuid.UUID) (int, error) {
 	return 0, nil
 }
-func (issueHandlerMockMilestoneRepo) IncrOpenCount(context.Context, uuid.UUID) error  { return nil }
-func (issueHandlerMockMilestoneRepo) DecrOpenCount(context.Context, uuid.UUID) error  { return nil }
+func (issueHandlerMockMilestoneRepo) IncrOpenCount(context.Context, uuid.UUID) error { return nil }
+func (issueHandlerMockMilestoneRepo) DecrOpenCount(context.Context, uuid.UUID) error { return nil }
 
 type issueHandlerMockAuditLog struct{}
 
 func (issueHandlerMockAuditLog) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID, string, string, uuid.UUID, json.RawMessage) error {
 	return nil
+}
+func (issueHandlerMockAuditLog) Create(context.Context, *entity.AuditLog) error { return nil }
+func (issueHandlerMockAuditLog) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
 }
 
 type issueHandlerMockTxManager struct{}
@@ -128,23 +143,16 @@ func (issueHandlerMockTxManager) RunInTransaction(ctx context.Context, fn func(c
 	return fn(ctx)
 }
 
-func issueHandlerAuthMiddleware(orgID, userID uuid.UUID) echo.MiddlewareFunc {
+func issueHandlerAuthMiddleware(orgID uuid.UUID, userID int64) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			middleware.SetActor(c, middleware.Actor{
-				UserID:         userID,
-				OrganizationID: orgID,
-			})
-			c.Set("scopes", []string{"repo"})
+			middleware.SetActorContext(c, userID, orgID, []string{"repo"})
 			return next(c)
 		}
 	}
 }
 
-func newIssueHandlerEcho(
-	t *testing.T,
-	issueRepo *issueHandlerMockRepo,
-) *echo.Echo {
+func newIssueHandlerEcho(t *testing.T, issueRepo *issueHandlerMockRepo) *echo.Echo {
 	t.Helper()
 
 	createUC := issueusecase.NewCreateIssueUsecase(issueRepo, issueHandlerMockAuditLog{}, issueHandlerMockTxManager{})
@@ -180,7 +188,7 @@ func newIssueHandlerEcho(
 func sampleIssue(number int, state string) *entity.Issue {
 	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
 	return &entity.Issue{
-		ID:             uuid.MustParse("00000000-0000-0000-0000-000000000001"),
+		ID:             issueTestIssueID,
 		OrganizationID: issueTestOrgID,
 		RepositoryID:   issueTestRepoID,
 		Number:         number,
@@ -195,6 +203,10 @@ func sampleIssue(number int, state string) *entity.Issue {
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
+}
+
+func strPtr(s string) *string {
+	return &s
 }
 
 func TestIssueGetOK(t *testing.T) {
@@ -303,6 +315,158 @@ func TestIssuePatchStateChangeOK(t *testing.T) {
 	}
 }
 
-func strPtr(s string) *string {
-	return &s
+func TestPatchIssueClose(t *testing.T) {
+	issueRepo := &issueHandlerMockRepo{
+		issues: map[int]*entity.Issue{
+			1: {
+				ID:           issueTestIssueID,
+				RepositoryID: issueTestRepoID,
+				Number:       1,
+				Title:        "Bug",
+				State:        "open",
+				AuthorLogin:  issueTestOwner,
+			},
+		},
+	}
+	e := newIssueHandlerEcho(t, issueRepo)
+
+	body := bytes.NewBufferString(`{"state":"closed"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/repos/"+issueTestOwner+"/"+issueTestRepo+"/issues/1", body)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Host = "git.example.com"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["state"] != "closed" {
+		t.Fatalf("state = %v, want closed", resp["state"])
+	}
+}
+
+func TestPatchIssueOpen(t *testing.T) {
+	issueRepo := &issueHandlerMockRepo{
+		issues: map[int]*entity.Issue{
+			1: {
+				ID:           issueTestIssueID,
+				RepositoryID: issueTestRepoID,
+				Number:       1,
+				Title:        "Bug",
+				State:        "closed",
+				AuthorLogin:  issueTestOwner,
+			},
+		},
+	}
+	e := newIssueHandlerEcho(t, issueRepo)
+
+	body := bytes.NewBufferString(`{"state":"open"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/repos/"+issueTestOwner+"/"+issueTestRepo+"/issues/1", body)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Host = "git.example.com"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["state"] != "open" {
+		t.Fatalf("state = %v, want open", resp["state"])
+	}
+}
+
+func TestPatchIssueNotFound(t *testing.T) {
+	e := newIssueHandlerEcho(t, &issueHandlerMockRepo{issues: map[int]*entity.Issue{}})
+
+	body := bytes.NewBufferString(`{"state":"closed"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/repos/"+issueTestOwner+"/"+issueTestRepo+"/issues/999", body)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+}
+
+func TestPatchIssueInvalidState(t *testing.T) {
+	issueRepo := &issueHandlerMockRepo{
+		issues: map[int]*entity.Issue{
+			1: {
+				ID:           issueTestIssueID,
+				RepositoryID: issueTestRepoID,
+				Number:       1,
+				Title:        "Bug",
+				State:        "open",
+				AuthorLogin:  issueTestOwner,
+			},
+		},
+	}
+	e := newIssueHandlerEcho(t, issueRepo)
+
+	body := bytes.NewBufferString(`{"state":"invalid"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/repos/"+issueTestOwner+"/"+issueTestRepo+"/issues/1", body)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
+	}
+}
+
+func TestListIssuesContainsNodeIDAndHTMLURL(t *testing.T) {
+	issueRepo := &issueHandlerMockRepo{
+		issues: map[int]*entity.Issue{
+			1: {
+				ID:           issueTestIssueID,
+				RepositoryID: issueTestRepoID,
+				Number:       1,
+				Title:        "Bug",
+				State:        "open",
+				AuthorLogin:  issueTestOwner,
+			},
+		},
+	}
+	e := newIssueHandlerEcho(t, issueRepo)
+
+	req := httptest.NewRequest(http.MethodGet, "/repos/"+issueTestOwner+"/"+issueTestRepo+"/issues", nil)
+	req.Host = "git.example.com"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp) != 1 {
+		t.Fatalf("len = %d, want 1", len(resp))
+	}
+
+	item := resp[0]
+	nodeID, ok := item["node_id"].(string)
+	if !ok || nodeID == "" {
+		t.Fatalf("node_id = %v, want non-empty string", item["node_id"])
+	}
+	htmlURL, ok := item["html_url"].(string)
+	if !ok || htmlURL == "" {
+		t.Fatalf("html_url = %v, want non-empty string", item["html_url"])
+	}
+	if htmlURL != "https://git.example.com/"+issueTestOwner+"/"+issueTestRepo+"/issues/1" {
+		t.Fatalf("html_url = %q, want https://git.example.com/%s/%s/issues/1", htmlURL, issueTestOwner, issueTestRepo)
+	}
 }

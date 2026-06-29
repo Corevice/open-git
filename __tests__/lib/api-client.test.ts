@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createApiClient } from "@/lib/api-client";
+import { createApiClient, createRepoApiClient } from "@/lib/api-client";
 
 describe("api-client", () => {
   beforeEach(() => {
@@ -11,7 +11,7 @@ describe("api-client", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ id: 1 }),
+      text: async () => JSON.stringify({ id: 1 }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -33,7 +33,7 @@ describe("api-client", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ id: 1 }),
+      text: async () => JSON.stringify({ id: 1 }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -71,7 +71,7 @@ describe("api-client", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => data,
+      text: async () => JSON.stringify(data),
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -79,5 +79,34 @@ describe("api-client", () => {
     const result = await client.get("/healthz");
 
     expect(result).toEqual(data);
+  });
+
+  it("createRef with token includes Authorization header", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      text: async () => "",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createRepoApiClient("http://localhost:8080");
+    await client.createRef(
+      "owner",
+      "repo",
+      "refs/heads/feature",
+      "abc123",
+      { token: "test-token" },
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/repos/owner/repo/git/refs",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-token",
+          Accept: "application/vnd.github+json",
+        }),
+      }),
+    );
   });
 });
