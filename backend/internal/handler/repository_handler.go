@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/domain/entity"
+	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
@@ -67,24 +68,28 @@ type createRepositoryRequest struct {
 }
 
 type updateRepositoryRequest struct {
-	Private *bool   `json:"private"`
-	Name    *string `json:"name"`
+	Private       *bool   `json:"private"`
+	Name          *string `json:"name"`
+	DefaultBranch *string `json:"default_branch"`
 }
 
 type repositoryOwnerResponse struct {
 	Login string `json:"login"`
-	ID    string `json:"id"`
+	ID    int64  `json:"id"`
 }
 
 type repositoryResponse struct {
-	ID            string                  `json:"id"`
+	ID            int64                   `json:"id"`
 	NodeID        string                  `json:"node_id"`
 	Name          string                  `json:"name"`
 	FullName      string                  `json:"full_name"`
 	HTMLURL       string                  `json:"html_url"`
+	URL           string                  `json:"url"`
+	CloneURL      string                  `json:"clone_url"`
 	Private       bool                    `json:"private"`
 	Description   string                  `json:"description"`
 	DefaultBranch string                  `json:"default_branch"`
+	CreatedAt     time.Time               `json:"created_at"`
 	Owner         repositoryOwnerResponse `json:"owner"`
 }
 
@@ -115,7 +120,7 @@ func (h *RepositoryHandler) List(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to count repositories"})
 	}
 
-	if link := middleware.BuildLinkHeader(c.Request().URL.Path, page, perPage, total); link != "" {
+	if link := middleware.BuildAbsoluteLinkHeader(c, page, perPage, total); link != "" {
 		c.Response().Header().Set("Link", link)
 	}
 
@@ -170,7 +175,7 @@ func (h *RepositoryHandler) ListOrg(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to count repositories"})
 	}
 
-	if link := middleware.BuildLinkHeader(c.Request().URL.Path, page, perPage, total); link != "" {
+	if link := middleware.BuildAbsoluteLinkHeader(c, page, perPage, total); link != "" {
 		c.Response().Header().Set("Link", link)
 	}
 
@@ -282,12 +287,18 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 }
 
 func (h *RepositoryHandler) GetRepository(c echo.Context) error {
+	owner := c.Param("owner")
+	repoName := c.Param("repo")
+	if err := ValidateOwnerRepo(owner, repoName); err != nil {
+		return err
+	}
+
 	requestUserID := middleware.UserUUIDFromContext(c)
 
 	repository, err := h.get.Execute(c.Request().Context(), repoUC.GetRepositoryInput{
 		RequestUserID: requestUserID,
-		OwnerLogin:    c.Param("owner"),
-		Name:          c.Param("repo"),
+		OwnerLogin:    owner,
+		Name:          repoName,
 	})
 	if err != nil {
 		if errors.Is(err, repoUC.ErrNotFound) {
@@ -314,7 +325,7 @@ func (h *RepositoryHandler) UpdateRepository(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid request"})
 	}
-	if req.Private == nil && req.Name == nil {
+	if req.Private == nil && req.Name == nil && req.DefaultBranch == nil {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid request"})
 	}
 
@@ -353,6 +364,16 @@ func (h *RepositoryHandler) UpdateRepository(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to update repository"})
 		}
 		repository.Visibility = visibility
+	}
+
+	if req.DefaultBranch != nil {
+		if err := h.repos.UpdateDefaultBranch(ctx, repository.ID, *req.DefaultBranch); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to update repository"})
+		}
+		if repository.GitPath != "" {
+			_ = infragit.SetDefaultBranch(repository.GitPath, *req.DefaultBranch)
+		}
+		repository.DefaultBranch = *req.DefaultBranch
 	}
 
 	return c.JSON(http.StatusOK, toRepositoryResponse(repository, c.Request().Host))
@@ -428,7 +449,7 @@ func (h *RepositoryHandler) GetAuditLog(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to list audit logs"})
 	}
 
-	if link := middleware.BuildLinkHeader(c.Request().URL.Path, page, perPage, output.Total); link != "" {
+	if link := middleware.BuildAbsoluteLinkHeader(c, page, perPage, output.Total); link != "" {
 		c.Response().Header().Set("Link", link)
 	}
 
@@ -496,17 +517,20 @@ func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID uuid.U
 func toRepositoryResponse(r *entity.Repository, host string) repositoryResponse {
 	ownerLogin := r.OwnerLogin
 	return repositoryResponse{
-		ID:            r.ID.String(),
+		ID:            middleware.UUIDToInt64(r.ID),
 		NodeID:        RepoNodeID(r.ID),
 		Name:          r.Name,
 		FullName:      ownerLogin + "/" + r.Name,
 		HTMLURL:       "https://" + host + "/" + ownerLogin + "/" + r.Name,
+		URL:           "https://" + host + "/api/v3/repos/" + ownerLogin + "/" + r.Name,
+		CloneURL:      "https://" + host + "/" + ownerLogin + "/" + r.Name + ".git",
 		Private:       r.Visibility == entity.VisibilityPrivate,
 		Description:   r.Description,
 		DefaultBranch: r.DefaultBranch,
+		CreatedAt:     r.CreatedAt,
 		Owner: repositoryOwnerResponse{
 			Login: ownerLogin,
-			ID:    r.OwnerID.String(),
+			ID:    middleware.UUIDToInt64(r.OwnerID),
 		},
 	}
 }

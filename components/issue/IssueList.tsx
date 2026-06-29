@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+
+import { EmptyState } from "@/components/ui/empty-state";
+import { Pagination } from "@/components/ui/pagination";
 
 type Label = { name: string; color: string };
-type Milestone = { number: number; title: string; open_issues: number };
 type Issue = {
   number: number;
   title: string;
@@ -22,6 +23,7 @@ type IssueListProps = {
   state?: string;
   labels?: string;
   milestone?: string;
+  assignee?: string;
   page?: string;
 };
 
@@ -33,15 +35,6 @@ function parseLinkHeader(header: string | null): Record<string, string> {
     if (match) links[match[2]] = match[1];
   }
   return links;
-}
-
-function linkToPath(url: string): string {
-  try {
-    const parsed = new URL(url, "http://localhost");
-    return `${parsed.pathname}${parsed.search}`;
-  } catch {
-    return url;
-  }
 }
 
 function formatAge(dateStr: string): string {
@@ -70,38 +63,16 @@ export default function IssueList({
   state = "open",
   labels: labelsParam = "",
   milestone = "",
+  assignee = "",
   page = "1",
 }: IssueListProps) {
-  const router = useRouter();
   const basePath = `/${owner}/${repo}/issues`;
+  const currentPage = Math.max(1, parseInt(page, 10) || 1);
 
   const [issues, setIssues] = useState<Issue[]>([]);
-  const [allLabels, setAllLabels] = useState<Label[]>([]);
-  const [milestones, setMilestones] = useState<Milestone[]>([]);
-  const [pagination, setPagination] = useState<Record<string, string>>({});
+  const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const selectedLabels = labelsParam ? labelsParam.split(",").filter(Boolean) : [];
-
-  const buildQuery = useCallback(
-    (overrides: Record<string, string | undefined> = {}) => {
-      const params = new URLSearchParams();
-      const nextState = overrides.state ?? state;
-      const nextLabels = overrides.labels ?? labelsParam;
-      const nextMilestone = overrides.milestone ?? milestone;
-      const nextPage = overrides.page ?? page;
-
-      if (nextState && nextState !== "all") params.set("state", nextState);
-      if (nextLabels) params.set("labels", nextLabels);
-      if (nextMilestone) params.set("milestone", nextMilestone);
-      if (nextPage && nextPage !== "1") params.set("page", nextPage);
-
-      const qs = params.toString();
-      return qs ? `?${qs}` : "";
-    },
-    [state, labelsParam, milestone, page],
-  );
 
   useEffect(() => {
     let cancelled = false;
@@ -114,14 +85,11 @@ export default function IssueList({
         if (state && state !== "all") query.set("state", state);
         if (labelsParam) query.set("labels", labelsParam);
         if (milestone) query.set("milestone", milestone);
+        if (assignee) query.set("assignee", assignee);
         if (page) query.set("page", page);
         query.set("per_page", "30");
 
-        const [issuesRes, labelsRes, milestonesRes] = await Promise.all([
-          fetch(`/repos/${owner}/${repo}/issues?${query.toString()}`),
-          fetch(`/repos/${owner}/${repo}/labels?per_page=100`),
-          fetch(`/repos/${owner}/${repo}/milestones?state=open&per_page=100`),
-        ]);
+        const issuesRes = await fetch(`/repos/${owner}/${repo}/issues?${query.toString()}`);
 
         if (!issuesRes.ok) throw new Error("Failed to load issues");
 
@@ -129,10 +97,8 @@ export default function IssueList({
         if (cancelled) return;
 
         setIssues(issuesData);
-        setPagination(parseLinkHeader(issuesRes.headers.get("Link")));
-
-        if (labelsRes.ok) setAllLabels((await labelsRes.json()) as Label[]);
-        if (milestonesRes.ok) setMilestones((await milestonesRes.json()) as Milestone[]);
+        const pagination = parseLinkHeader(issuesRes.headers.get("Link"));
+        setHasNext(!!pagination.next);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load issues");
       } finally {
@@ -144,76 +110,13 @@ export default function IssueList({
     return () => {
       cancelled = true;
     };
-  }, [owner, repo, state, labelsParam, milestone, page]);
-
-  const navigate = (overrides: Record<string, string | undefined>) => {
-    router.push(`${basePath}${buildQuery(overrides)}`);
-  };
-
-  const toggleLabel = (name: string) => {
-    const next = selectedLabels.includes(name)
-      ? selectedLabels.filter((l) => l !== name)
-      : [...selectedLabels, name];
-    navigate({ labels: next.join(","), page: "1" });
-  };
+  }, [owner, repo, state, labelsParam, milestone, assignee, page]);
 
   const openCount = issues.filter((i) => i.state === "open").length;
   const closedCount = issues.filter((i) => i.state === "closed").length;
 
   return (
     <div>
-      <div className="flex flex-wrap gap-3 items-center mb-4 p-3 bg-[#f6f8fa] border border-[#d0d7de] rounded-md">
-        <div className="flex gap-1">
-          {(["open", "closed", "all"] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => navigate({ state: s, page: "1" })}
-              className={`px-3 py-1.5 text-sm rounded-md border ${
-                state === s
-                  ? "bg-white border-[#0969da] text-[#0969da] font-semibold"
-                  : "bg-white border-[#d0d7de] hover:bg-[#f6f8fa]"
-              }`}
-            >
-              {s === "open" ? "Open" : s === "closed" ? "Closed" : "All"}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap gap-1.5 items-center">
-          <span className="text-xs text-[#656d76] font-semibold uppercase">Labels:</span>
-          {allLabels.map((label) => {
-            const selected = selectedLabels.includes(label.name);
-            return (
-              <button
-                key={label.name}
-                type="button"
-                onClick={() => toggleLabel(label.name)}
-                className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
-                  selected ? "ring-2 ring-[#0969da] ring-offset-1" : "opacity-80 hover:opacity-100"
-                }`}
-                style={labelStyle(label.color)}
-              >
-                {label.name}
-              </button>
-            );
-          })}
-        </div>
-
-        <select
-          value={milestone}
-          onChange={(e) => navigate({ milestone: e.target.value, page: "1" })}
-          className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-white"
-        >
-          <option value="">All milestones</option>
-          {milestones.map((m) => (
-            <option key={m.number} value={String(m.number)}>
-              {m.title} ({m.open_issues} open)
-            </option>
-          ))}
-        </select>
-      </div>
-
       <div className="flex gap-4 items-center bg-[#f6f8fa] border border-[#d0d7de] border-b-0 rounded-t-md px-4 py-3 text-sm">
         <span className="font-semibold">⊙ {openCount} Open</span>
         <span className="text-[#656d76]">✓ {closedCount} Closed</span>
@@ -234,7 +137,7 @@ export default function IssueList({
       {!loading && !error && (
         <div className="bg-white border border-[#d0d7de] border-t-0 rounded-b-md">
           {issues.length === 0 ? (
-            <div className="px-4 py-8 text-center text-[#656d76]">No issues found.</div>
+            <EmptyState title="No issues" description="There are no issues matching your filters." />
           ) : (
             issues.map((issue) => (
               <div
@@ -271,25 +174,13 @@ export default function IssueList({
         </div>
       )}
 
-      {(pagination.prev || pagination.next) && (
-        <div className="flex justify-center gap-2 py-5">
-          {pagination.prev && (
-            <Link
-              href={linkToPath(pagination.prev).replace(/^\/repos\/[^/]+\/[^/]+\/issues/, basePath)}
-              className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#0969da]"
-            >
-              ← Prev
-            </Link>
-          )}
-          {pagination.next && (
-            <Link
-              href={linkToPath(pagination.next).replace(/^\/repos\/[^/]+\/[^/]+\/issues/, basePath)}
-              className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#0969da]"
-            >
-              Next →
-            </Link>
-          )}
-        </div>
+      {!loading && !error && (
+        <Pagination
+          page={currentPage}
+          hasNext={hasNext}
+          hasPrev={currentPage > 1}
+          basePath={basePath}
+        />
       )}
     </div>
   );

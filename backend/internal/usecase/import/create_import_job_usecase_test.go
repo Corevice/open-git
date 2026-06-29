@@ -172,6 +172,10 @@ func (m *mockRepositoryRepo) UpdateVisibility(context.Context, uuid.UUID, string
 
 func (m *mockRepositoryRepo) UpdateName(context.Context, uuid.UUID, string) error { return nil }
 
+func (m *mockRepositoryRepo) UpdateDefaultBranch(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
 func (m *mockRepositoryRepo) Delete(context.Context, uuid.UUID) error { return nil }
 
 type mockOrgRepo struct {
