@@ -46,7 +46,33 @@ type IMembershipRepository interface {
 }
 
 type IOAuthAppRepository interface {
+	Create(ctx context.Context, app *domain.OAuthApp) error
+	GetByID(ctx context.Context, id string) (*domain.OAuthApp, error)
 	GetByClientID(ctx context.Context, clientID string) (*domain.OAuthApp, error)
+	ListByOwnerUser(ctx context.Context, userID int64, page, perPage int) ([]*domain.OAuthApp, error)
+	ListByOrganization(ctx context.Context, orgID int64, page, perPage int) ([]*domain.OAuthApp, error)
+	Update(ctx context.Context, app *domain.OAuthApp) error
+	Delete(ctx context.Context, id string, ownerUserID int64) error
+	UpdateSecretHash(ctx context.Context, id, hash string) error
+}
+
+type IOAuthAuthorizationCodeRepository interface {
+	Create(ctx context.Context, code *domain.OAuthAuthorizationCode) error
+	ConsumeByCodeHash(ctx context.Context, codeHash string) (*domain.OAuthAuthorizationCode, error)
+}
+
+type IOAuthAccessTokenRepository interface {
+	Create(ctx context.Context, token *domain.OAuthAccessToken) error
+	FindByTokenHash(ctx context.Context, hash string) (*domain.OAuthAccessToken, error)
+	RevokeByUserAndApp(ctx context.Context, userID int64, appID string) error
+	RevokeAllByAppID(ctx context.Context, appID string, ownerUserID int64) error
+}
+
+type IOAuthAuthorizationRepository interface {
+	Upsert(ctx context.Context, auth *domain.OAuthAuthorization) error
+	GetByUserAndApp(ctx context.Context, userID int64, appID string) (*domain.OAuthAuthorization, error)
+	ListByUser(ctx context.Context, userID int64) ([]*domain.OAuthAuthorization, error)
+	Delete(ctx context.Context, userID int64, appID string) error
 }
 
 type IOrganizationRepository interface {
@@ -61,6 +87,17 @@ type ISSHKeyStore interface {
 	ListByUserID(ctx context.Context, userID uuid.UUID) ([]*entity.SSHKey, error)
 	Create(ctx context.Context, key *entity.SSHKey) error
 	Delete(ctx context.Context, id, userID uuid.UUID) error
+}
+
+type IWorkflowRepository interface {
+	Upsert(ctx context.Context, wf *entity.Workflow) error
+	GetByID(ctx context.Context, orgID, id uuid.UUID) (*entity.Workflow, error)
+	GetByPath(ctx context.Context, orgID, repoID uuid.UUID, path string) (*entity.Workflow, error)
+	ListByRepo(ctx context.Context, orgID, repoID uuid.UUID) ([]*entity.Workflow, error)
+	SaveRevision(ctx context.Context, rev *entity.WorkflowRevision) error
+	GetLatestRevision(ctx context.Context, workflowID uuid.UUID) (*entity.WorkflowRevision, error)
+	SaveDiagnostics(ctx context.Context, revID uuid.UUID, diags []*entity.WorkflowDiagnostic) error
+	ListDiagnosticsByRevision(ctx context.Context, revID uuid.UUID) ([]*entity.WorkflowDiagnostic, error)
 }
 
 type IRepositoryCollaboratorRepository interface {

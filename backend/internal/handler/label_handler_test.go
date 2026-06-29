@@ -38,7 +38,7 @@ func openLabelTestDB(t *testing.T) *sqlx.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := database.RunMigrations(db, "sqlite", "../../../migrations"); err != nil {
+	if err := database.RunMigrations(db, "sqlite", "../../migrations"); err != nil {
 		_ = db.Close()
 		t.Fatalf("run migrations: %v", err)
 	}
@@ -107,10 +107,12 @@ func newLabelTestEnv(t *testing.T) labelTestEnv {
 	auditRepo := infrarepo.NewAuditLogRepository(db)
 
 	h := handler.NewLabelHandler(
-		labelusecase.NewListLabelsUsecase(labelRepo),
 		labelusecase.NewCreateLabelUsecase(labelRepo),
+		labelusecase.NewListLabelsUsecase(labelRepo),
 		labelusecase.NewUpdateLabelUsecase(labelRepo),
 		labelusecase.NewDeleteLabelUsecase(labelRepo, auditRepo),
+		labelusecase.NewAddIssueLabelsUsecase(labelRepo),
+		labelusecase.NewRemoveIssueLabelUsecase(labelRepo),
 		func(_ echo.Context, _, _ string) (*entity.Repository, error) {
 			return testRepo, nil
 		},

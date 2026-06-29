@@ -14,12 +14,32 @@ type mockOAuthAppRepo struct {
 	apps map[string]*domain.OAuthApp
 }
 
+func (m *mockOAuthAppRepo) Create(_ context.Context, _ *domain.OAuthApp) error { return nil }
+
+func (m *mockOAuthAppRepo) GetByID(_ context.Context, _ string) (*domain.OAuthApp, error) {
+	return nil, nil
+}
+
 func (m *mockOAuthAppRepo) GetByClientID(_ context.Context, clientID string) (*domain.OAuthApp, error) {
 	if m.apps == nil {
 		return nil, nil
 	}
 	return m.apps[clientID], nil
 }
+
+func (m *mockOAuthAppRepo) ListByOwnerUser(_ context.Context, _ int64, _, _ int) ([]*domain.OAuthApp, error) {
+	return nil, nil
+}
+
+func (m *mockOAuthAppRepo) ListByOrganization(_ context.Context, _ int64, _, _ int) ([]*domain.OAuthApp, error) {
+	return nil, nil
+}
+
+func (m *mockOAuthAppRepo) Update(_ context.Context, _ *domain.OAuthApp) error { return nil }
+
+func (m *mockOAuthAppRepo) Delete(_ context.Context, _ string, _ int64) error { return nil }
+
+func (m *mockOAuthAppRepo) UpdateSecretHash(_ context.Context, _, _ string) error { return nil }
 
 type mockOAuthCodeStore struct {
 	values map[string]string

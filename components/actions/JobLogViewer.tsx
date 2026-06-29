@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { useJobLogStream } from "@/hooks/useJobLogStream";
 
 export function stripAnsi(text: string): string {
+  // eslint-disable-next-line no-control-regex -- ANSI escape sequences start with the ESC control char
   return text.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
@@ -18,7 +19,13 @@ type JobLogViewerProps = {
 const MAX_VISIBLE_LINES = 2000;
 
 export function JobLogViewer({ owner, repo, jobId, isActive }: JobLogViewerProps) {
-  const { lines, streaming } = useJobLogStream({ owner, repo, jobId, isActive });
+  const { lines, status } = useJobLogStream({
+    owner,
+    repo,
+    jobId,
+    enabled: isActive,
+  });
+  const streaming = status === "streaming";
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const visibleLineCount = Math.min(lines.length, MAX_VISIBLE_LINES);

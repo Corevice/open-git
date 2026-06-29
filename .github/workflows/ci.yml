@@ -58,9 +58,9 @@ jobs:
           DB_DSN: postgres://postgres:postgres@localhost:5432/testdb?sslmode=disable
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.1
+          version: v2.1.6
           working-directory: backend
           args: --timeout=5m
 

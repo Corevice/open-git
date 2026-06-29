@@ -206,8 +206,9 @@ func scanCompatTestRun(scanner compatTestRunScanner) (*entity.CompatTestRun, err
 	var (
 		run            entity.CompatTestRun
 		triggeredByRaw any
-		startedAt      sql.NullTime
-		finishedAt     sql.NullTime
+		startedAt      nullTime
+		finishedAt     nullTime
+		createdAt      nullTime
 	)
 
 	if err := scanner.Scan(
@@ -223,10 +224,11 @@ func scanCompatTestRun(scanner compatTestRunScanner) (*entity.CompatTestRun, err
 		&run.CoverageRate,
 		&startedAt,
 		&finishedAt,
-		&run.CreatedAt,
+		&createdAt,
 	); err != nil {
 		return nil, err
 	}
+	run.CreatedAt = createdAt.Time
 
 	triggeredBy, err := parseOptionalUUID(triggeredByRaw)
 	if err != nil {

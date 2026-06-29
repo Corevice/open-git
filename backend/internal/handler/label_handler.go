@@ -15,26 +15,32 @@ import (
 )
 
 type LabelHandler struct {
-	listLabelsUC  *labelusecase.ListLabelsUsecase
-	createLabelUC *labelusecase.CreateLabelUsecase
-	updateLabelUC *labelusecase.UpdateLabelUsecase
-	deleteLabelUC *labelusecase.DeleteLabelUsecase
-	resolveRepo   func(c echo.Context, owner, repo string) (*entity.Repository, error)
+	createLabelUC      *labelusecase.CreateLabelUsecase
+	listLabelsUC       *labelusecase.ListLabelsUsecase
+	updateLabelUC      *labelusecase.UpdateLabelUsecase
+	deleteLabelUC      *labelusecase.DeleteLabelUsecase
+	addIssueLabelUC    *labelusecase.AddIssueLabelsUsecase
+	removeIssueLabelUC *labelusecase.RemoveIssueLabelUsecase
+	resolveRepo        func(c echo.Context, owner, repo string) (*entity.Repository, error)
 }
 
 func NewLabelHandler(
-	listLabelsUC *labelusecase.ListLabelsUsecase,
 	createLabelUC *labelusecase.CreateLabelUsecase,
+	listLabelsUC *labelusecase.ListLabelsUsecase,
 	updateLabelUC *labelusecase.UpdateLabelUsecase,
 	deleteLabelUC *labelusecase.DeleteLabelUsecase,
+	addIssueLabelUC *labelusecase.AddIssueLabelsUsecase,
+	removeIssueLabelUC *labelusecase.RemoveIssueLabelUsecase,
 	resolveRepo func(c echo.Context, owner, repo string) (*entity.Repository, error),
 ) *LabelHandler {
 	return &LabelHandler{
-		listLabelsUC:  listLabelsUC,
-		createLabelUC: createLabelUC,
-		updateLabelUC: updateLabelUC,
-		deleteLabelUC: deleteLabelUC,
-		resolveRepo:   resolveRepo,
+		createLabelUC:      createLabelUC,
+		listLabelsUC:       listLabelsUC,
+		updateLabelUC:      updateLabelUC,
+		deleteLabelUC:      deleteLabelUC,
+		addIssueLabelUC:    addIssueLabelUC,
+		removeIssueLabelUC: removeIssueLabelUC,
+		resolveRepo:        resolveRepo,
 	}
 }
 
@@ -44,6 +50,8 @@ func (h *LabelHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	g.POST("/repos/:owner/:repo/labels", h.CreateLabel, auth, repoScope)
 	g.PATCH("/repos/:owner/:repo/labels/:name", h.UpdateLabel, auth, repoScope)
 	g.DELETE("/repos/:owner/:repo/labels/:name", h.DeleteLabel, auth, repoScope)
+	g.POST("/repos/:owner/:repo/issues/:number/labels", h.AddIssueLabels, auth, repoScope)
+	g.DELETE("/repos/:owner/:repo/issues/:number/labels/:name", h.RemoveIssueLabel, auth, repoScope)
 }
 
 type createLabelRequest struct {
@@ -58,12 +66,17 @@ type updateLabelRequest struct {
 	Description *string `json:"description"`
 }
 
+type addIssueLabelsRequest struct {
+	Labels []string `json:"labels"`
+}
+
 type labelResponse struct {
-	ID          uuid.UUID `json:"id"`
-	Name        string    `json:"name"`
-	Color       string    `json:"color"`
-	Description string    `json:"description"`
-	NodeID      string    `json:"node_id"`
+	ID          int64  `json:"id"`
+	NodeID      string `json:"node_id"`
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
 }
 
 func (h *LabelHandler) ListLabels(c echo.Context) error {
@@ -85,7 +98,7 @@ func (h *LabelHandler) ListLabels(c echo.Context) error {
 	}
 
 	setPaginationHeaders(c, output.Page, output.PerPage, output.Total)
-	return c.JSON(http.StatusOK, toLabelResponses(output.Labels))
+	return c.JSON(http.StatusOK, toLabelResponses(output.Labels, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
 func (h *LabelHandler) CreateLabel(c echo.Context) error {
@@ -113,7 +126,7 @@ func (h *LabelHandler) CreateLabel(c echo.Context) error {
 		return err
 	}
 
-	return c.JSON(http.StatusCreated, toLabelResponse(label))
+	return c.JSON(http.StatusCreated, toLabelResponse(label, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
 func (h *LabelHandler) UpdateLabel(c echo.Context) error {
@@ -144,7 +157,7 @@ func (h *LabelHandler) UpdateLabel(c echo.Context) error {
 		return err
 	}
 
-	return c.JSON(http.StatusOK, toLabelResponse(label))
+	return c.JSON(http.StatusOK, toLabelResponse(label, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
 func (h *LabelHandler) DeleteLabel(c echo.Context) error {
@@ -174,20 +187,98 @@ func (h *LabelHandler) DeleteLabel(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func toLabelResponse(label *entity.Label) labelResponse {
+func (h *LabelHandler) AddIssueLabels(c echo.Context) error {
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+
+	number, err := strconv.Atoi(c.Param("number"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid issue number")
+	}
+
+	var req addIssueLabelsRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	if err := h.addIssueLabelUC.Execute(c.Request().Context(), labelusecase.AddIssueLabelsInput{
+		RepositoryID: repo.ID,
+		IssueNumber:  number,
+		Names:        req.Labels,
+	}); err != nil {
+		if errors.Is(err, apperror.ErrValidation) {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, err.Error())
+		}
+		return err
+	}
+
+	output, err := h.listLabelsUC.Execute(c.Request().Context(), labelusecase.ListLabelsInput{
+		RepositoryID: repo.ID,
+		Page:         1,
+		PerPage:      100,
+	})
+	if err != nil {
+		return err
+	}
+
+	nameSet := make(map[string]struct{}, len(req.Labels))
+	for _, name := range req.Labels {
+		nameSet[name] = struct{}{}
+	}
+
+	added := make([]*entity.Label, 0, len(req.Labels))
+	for _, label := range output.Labels {
+		if _, ok := nameSet[label.Name]; ok {
+			added = append(added, label)
+		}
+	}
+
+	return c.JSON(http.StatusOK, toLabelResponses(added, c.Param("owner"), c.Param("repo"), c.Request().Host))
+}
+
+func (h *LabelHandler) RemoveIssueLabel(c echo.Context) error {
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+
+	number, err := strconv.Atoi(c.Param("number"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid issue number")
+	}
+
+	err = h.removeIssueLabelUC.Execute(c.Request().Context(), labelusecase.RemoveIssueLabelInput{
+		RepositoryID: repo.ID,
+		IssueNumber:  number,
+		Name:         c.Param("name"),
+	})
+	if err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
+		return err
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}
+
+func toLabelResponse(label *entity.Label, owner, repoName, host string) labelResponse {
 	return labelResponse{
-		ID:          label.ID,
+		ID:          middleware.UUIDToInt64(label.ID),
+		NodeID:      LabelNodeID(label.ID),
 		Name:        label.Name,
 		Color:       label.Color,
 		Description: label.Description,
-		NodeID:      LabelNodeID(label.ID),
+		URL:         "https://" + host + "/repos/" + owner + "/" + repoName + "/labels/" + label.Name,
 	}
 }
 
-func toLabelResponses(labels []*entity.Label) []labelResponse {
+func toLabelResponses(labels []*entity.Label, owner, repoName, host string) []labelResponse {
 	result := make([]labelResponse, 0, len(labels))
 	for _, label := range labels {
-		result = append(result, toLabelResponse(label))
+		result = append(result, toLabelResponse(label, owner, repoName, host))
 	}
 	return result
 }
