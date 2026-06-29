@@ -8,8 +8,8 @@ import { useAuth } from "@/lib/auth";
 
 type OrgRole = "owner" | "member";
 
-type OrgPeopleApiClient = ApiClient & {
-  orgs: ApiClient["orgs"] & {
+type OrgPeopleApiClient = Omit<ApiClient, "orgs"> & {
+  orgs: Omit<ApiClient["orgs"], "inviteMember" | "removeMember"> & {
     inviteMember(
       org: string,
       username: string,

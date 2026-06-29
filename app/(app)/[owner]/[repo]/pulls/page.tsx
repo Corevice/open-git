@@ -4,48 +4,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-type Label = { name: string; color: string };
-type Milestone = { number: number; title: string; open_issues: number };
-type PullRequestItem = {
-  number: number;
-  title: string;
-  state: "open" | "closed";
-  draft?: boolean;
-  merged_at?: string | null;
-  mergeable_state?: string;
-  user: { login: string };
-  created_at: string;
-  comments?: number;
-};
+import { ApiError, listPullRequests, listPullRequestsWithPagination } from "@/lib/api";
+import type { PullRequest } from "@/types/pull-request";
+
+type Tab = "open" | "closed" | "merged";
 
 type Props = {
   params: Promise<{ owner: string; repo: string }>;
-  searchParams: Promise<{
-    state?: string;
-    labels?: string;
-    milestone?: string;
-    page?: string;
-  }>;
+  searchParams: Promise<{ state?: string; page?: string }>;
 };
-
-function parseLinkHeader(header: string | null): Record<string, string> {
-  if (!header) return {};
-  const links: Record<string, string> = {};
-  for (const part of header.split(",")) {
-    const match = part.match(/<([^>]+)>;\s*rel="([^"]+)"/);
-    if (match) links[match[2]] = match[1];
-  }
-  return links;
-}
-
-function linkToPath(url: string): string {
-  try {
-    const parsed = new URL(url, "http://localhost");
-    return `${parsed.pathname}${parsed.search}`;
-  } catch {
-    return url;
-  }
-}
 
 function formatAge(dateStr: string): string {
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -67,11 +34,40 @@ function labelStyle(color: string): React.CSSProperties {
   return { backgroundColor: hex, color: "#fff" };
 }
 
-function hasConflicts(pr: PullRequestItem): boolean {
-  return pr.mergeable_state === "dirty" || pr.mergeable_state === "conflicting";
+function tabFromState(state: string | undefined): Tab {
+  if (state === "closed") return "closed";
+  if (state === "merged") return "merged";
+  return "open";
 }
 
-function prStatusBadge(pr: PullRequestItem): { label: string; className: string; iconClass: string } {
+function stateFromTab(tab: Tab): string {
+  if (tab === "merged") return "closed";
+  return tab;
+}
+
+function filterByTab(items: PullRequest[], tab: Tab): PullRequest[] {
+  if (tab === "open") {
+    return items.filter((pr) => pr.state === "open" && !pr.merged_at);
+  }
+  if (tab === "merged") {
+    return items.filter((pr) => pr.merged_at != null);
+  }
+  return items.filter((pr) => pr.state === "closed" && !pr.merged_at);
+}
+
+function hasConflicts(pr: PullRequest): boolean {
+  return (
+    pr.mergeable === false ||
+    pr.mergeable_state === "dirty" ||
+    pr.mergeable_state === "conflicting"
+  );
+}
+
+function prStatusBadge(pr: PullRequest): {
+  label: string;
+  className: string;
+  iconClass: string;
+} {
   if (pr.merged_at) {
     return {
       label: "Merged",
@@ -107,19 +103,54 @@ function prStatusBadge(pr: PullRequestItem): { label: string; className: string;
   };
 }
 
+function paginationHref(linkUrl: string, basePath: string): string {
+  try {
+    const url = new URL(linkUrl, "http://localhost");
+    const params = new URLSearchParams();
+    const state = url.searchParams.get("state");
+    const pageParam = url.searchParams.get("page");
+    if (state && state !== "open") params.set("state", state);
+    if (pageParam && pageParam !== "1") params.set("page", pageParam);
+    const query = params.toString();
+    return query ? `${basePath}?${query}` : basePath;
+  } catch {
+    return basePath;
+  }
+}
+
+function authorLogin(pr: PullRequest): string {
+  return pr.user?.login ?? pr.author_id ?? "unknown";
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="bg-white border border-[#d0d7de] border-t-0 rounded-b-md">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-start gap-3 px-4 py-3 border-t border-[#d0d7de] animate-pulse"
+        >
+          <div className="w-4 h-4 bg-[#eaeef2] rounded mt-1" />
+          <div className="flex-1 space-y-2">
+            <div className="h-4 bg-[#eaeef2] rounded w-2/3" />
+            <div className="h-3 bg-[#eaeef2] rounded w-1/3" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function PullsPage({ params, searchParams }: Props) {
   const router = useRouter();
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
-  const [state, setState] = useState("open");
-  const [labelsParam, setLabelsParam] = useState("");
-  const [milestone, setMilestone] = useState("");
+  const [activeTab, setActiveTab] = useState<Tab>("open");
   const [page, setPage] = useState("1");
 
-  const [pulls, setPulls] = useState<PullRequestItem[]>([]);
-  const [allLabels, setAllLabels] = useState<Label[]>([]);
-  const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [pulls, setPulls] = useState<PullRequest[]>([]);
   const [pagination, setPagination] = useState<Record<string, string>>({});
+  const [tabCounts, setTabCounts] = useState({ open: 0, closed: 0, merged: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -127,46 +158,60 @@ export default function PullsPage({ params, searchParams }: Props) {
     Promise.all([params, searchParams]).then(([p, sp]) => {
       setOwner(p.owner);
       setRepo(p.repo);
-      setState(sp.state ?? "open");
-      setLabelsParam(sp.labels ?? "");
-      setMilestone(sp.milestone ?? "");
+      setActiveTab(tabFromState(sp.state));
       setPage(sp.page ?? "1");
     });
   }, [params, searchParams]);
 
   const basePath = owner && repo ? `/${owner}/${repo}/pulls` : "";
-  const selectedLabels = labelsParam ? labelsParam.split(",").filter(Boolean) : [];
 
   const buildQuery = useCallback(
-    (overrides: Record<string, string | undefined> = {}) => {
-      const params = new URLSearchParams();
-      const nextState = overrides.state ?? state;
-      const nextLabels = overrides.labels ?? labelsParam;
-      const nextMilestone = overrides.milestone ?? milestone;
+    (overrides: { state?: Tab; page?: string } = {}) => {
+      const qs = new URLSearchParams();
+      const nextTab = overrides.state ?? activeTab;
       const nextPage = overrides.page ?? page;
 
-      if (nextState && nextState !== "all") params.set("state", nextState);
-      if (nextLabels) params.set("labels", nextLabels);
-      if (nextMilestone) params.set("milestone", nextMilestone);
-      if (nextPage && nextPage !== "1") params.set("page", nextPage);
+      if (nextTab !== "open") qs.set("state", nextTab);
+      if (nextPage && nextPage !== "1") qs.set("page", nextPage);
 
-      const qs = params.toString();
-      return qs ? `?${qs}` : "";
+      const query = qs.toString();
+      return query ? `?${query}` : "";
     },
-    [state, labelsParam, milestone, page],
+    [activeTab, page],
   );
 
-  const navigate = (overrides: Record<string, string | undefined>) => {
+  const navigate = (overrides: { state?: Tab; page?: string }) => {
     if (!basePath) return;
     router.push(`${basePath}${buildQuery(overrides)}`);
   };
 
-  const toggleLabel = (name: string) => {
-    const next = selectedLabels.includes(name)
-      ? selectedLabels.filter((l) => l !== name)
-      : [...selectedLabels, name];
-    navigate({ labels: next.join(","), page: "1" });
-  };
+  useEffect(() => {
+    if (!owner || !repo) return;
+
+    let cancelled = false;
+
+    async function loadCounts() {
+      try {
+        const [openData, closedData] = await Promise.all([
+          listPullRequests(owner, repo, "open", 1, 100),
+          listPullRequests(owner, repo, "closed", 1, 100),
+        ]);
+        if (cancelled) return;
+        setTabCounts({
+          open: filterByTab(openData, "open").length,
+          closed: filterByTab(closedData, "closed").length,
+          merged: filterByTab(closedData, "merged").length,
+        });
+      } catch {
+        // tab counts are best-effort
+      }
+    }
+
+    loadCounts();
+    return () => {
+      cancelled = true;
+    };
+  }, [owner, repo]);
 
   useEffect(() => {
     if (!owner || !repo) return;
@@ -177,31 +222,24 @@ export default function PullsPage({ params, searchParams }: Props) {
       setLoading(true);
       setError(null);
       try {
-        const query = new URLSearchParams();
-        if (state && state !== "all") query.set("state", state);
-        if (labelsParam) query.set("labels", labelsParam);
-        if (milestone) query.set("milestone", milestone);
-        if (page) query.set("page", page);
-        query.set("per_page", "30");
-
-        const [pullsRes, labelsRes, milestonesRes] = await Promise.all([
-          fetch(`/repos/${owner}/${repo}/pulls?${query.toString()}`),
-          fetch(`/repos/${owner}/${repo}/labels?per_page=100`),
-          fetch(`/repos/${owner}/${repo}/milestones?state=open&per_page=100`),
-        ]);
-
-        if (!pullsRes.ok) throw new Error("Failed to load pull requests");
-
-        const pullsData = (await pullsRes.json()) as PullRequestItem[];
+        const pageNum = parseInt(page, 10) || 1;
+        const { items, links } = await listPullRequestsWithPagination(
+          owner,
+          repo,
+          stateFromTab(activeTab),
+          pageNum,
+          30,
+        );
         if (cancelled) return;
-
-        setPulls(pullsData);
-        setPagination(parseLinkHeader(pullsRes.headers.get("Link")));
-
-        if (labelsRes.ok) setAllLabels((await labelsRes.json()) as Label[]);
-        if (milestonesRes.ok) setMilestones((await milestonesRes.json()) as Milestone[]);
+        setPulls(filterByTab(items, activeTab));
+        setPagination(links);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load pull requests");
+        if (cancelled) return;
+        if (e instanceof ApiError && e.status === 404) {
+          router.push("/404");
+          return;
+        }
+        setError(e instanceof Error ? e.message : "Failed to load pull requests");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -211,10 +249,11 @@ export default function PullsPage({ params, searchParams }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [owner, repo, state, labelsParam, milestone, page]);
+  }, [owner, repo, activeTab, page, router]);
 
-  const openCount = pulls.filter((p) => p.state === "open" && !p.merged_at).length;
-  const closedCount = pulls.filter((p) => p.state === "closed" || p.merged_at).length;
+  const openCount = tabCounts.open;
+  const closedCount = tabCounts.closed;
+  const mergedCount = tabCounts.merged;
 
   if (!owner || !repo) {
     return (
@@ -243,66 +282,36 @@ export default function PullsPage({ params, searchParams }: Props) {
 
         <div className="flex flex-wrap gap-3 items-center mb-4 p-3 bg-[#f6f8fa] border border-[#d0d7de] rounded-md">
           <div className="flex gap-1">
-            {(["open", "closed", "all"] as const).map((s) => (
+            {(
+              [
+                { id: "open" as const, label: "Open" },
+                { id: "closed" as const, label: "Closed" },
+                { id: "merged" as const, label: "Merged" },
+              ] as const
+            ).map(({ id, label }) => (
               <button
-                key={s}
+                key={id}
                 type="button"
-                onClick={() => navigate({ state: s, page: "1" })}
+                onClick={() => navigate({ state: id, page: "1" })}
                 className={`px-3 py-1.5 text-sm rounded-md border ${
-                  state === s
+                  activeTab === id
                     ? "bg-white border-[#0969da] text-[#0969da] font-semibold"
                     : "bg-white border-[#d0d7de] hover:bg-[#f6f8fa]"
                 }`}
               >
-                {s === "open" ? "Open" : s === "closed" ? "Closed" : "All"}
+                {label}
               </button>
             ))}
           </div>
-
-          <div className="flex flex-wrap gap-1.5 items-center">
-            <span className="text-xs text-[#656d76] font-semibold uppercase">Labels:</span>
-            {allLabels.map((label) => {
-              const selected = selectedLabels.includes(label.name);
-              return (
-                <button
-                  key={label.name}
-                  type="button"
-                  onClick={() => toggleLabel(label.name)}
-                  className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
-                    selected ? "ring-2 ring-[#0969da] ring-offset-1" : "opacity-80 hover:opacity-100"
-                  }`}
-                  style={labelStyle(label.color)}
-                >
-                  {label.name}
-                </button>
-              );
-            })}
-          </div>
-
-          <select
-            value={milestone}
-            onChange={(e) => navigate({ milestone: e.target.value, page: "1" })}
-            className="px-3 py-1.5 text-sm border border-[#d0d7de] rounded-md bg-white"
-          >
-            <option value="">All milestones</option>
-            {milestones.map((m) => (
-              <option key={m.number} value={String(m.number)}>
-                {m.title} ({m.open_issues} open)
-              </option>
-            ))}
-          </select>
         </div>
 
         <div className="flex gap-4 items-center bg-[#f6f8fa] border border-[#d0d7de] border-b-0 rounded-t-md px-4 py-3 text-sm">
           <span className="font-semibold text-[#1a7f37]">⇆ {openCount} Open</span>
           <span className="text-[#656d76]">✓ {closedCount} Closed</span>
+          <span className="text-[#656d76]">⊕ {mergedCount} Merged</span>
         </div>
 
-        {loading && (
-          <div className="bg-white border border-[#d0d7de] px-4 py-8 text-center text-[#656d76]">
-            Loading pull requests…
-          </div>
-        )}
+        {loading && <LoadingSkeleton />}
 
         {error && (
           <div className="bg-white border border-[#d0d7de] px-4 py-8 text-center text-[#d1242f]">
@@ -335,13 +344,19 @@ export default function PullsPage({ params, searchParams }: Props) {
                       >
                         {badge.label}
                       </span>
+                      {pr.labels?.map((label) => (
+                        <span
+                          key={label.name}
+                          className="inline-block ml-1 px-2 py-0.5 rounded-full text-[11px] font-semibold"
+                          style={labelStyle(label.color)}
+                        >
+                          {label.name}
+                        </span>
+                      ))}
                       <div className="text-xs text-[#656d76] mt-1">
-                        #{pr.number} opened {formatAge(pr.created_at)} by {pr.user.login}
+                        #{pr.number} opened {formatAge(pr.created_at)} by {authorLogin(pr)}
                       </div>
                     </div>
-                    {pr.comments != null && (
-                      <div className="text-xs text-[#656d76] whitespace-nowrap">💬 {pr.comments}</div>
-                    )}
                   </div>
                 );
               })
@@ -353,7 +368,7 @@ export default function PullsPage({ params, searchParams }: Props) {
           <div className="flex justify-center gap-2 py-5">
             {pagination.prev && (
               <Link
-                href={linkToPath(pagination.prev).replace(/^\/repos\/[^/]+\/[^/]+\/pulls/, basePath)}
+                href={paginationHref(pagination.prev, basePath)}
                 className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#0969da]"
               >
                 ← Prev
@@ -361,7 +376,7 @@ export default function PullsPage({ params, searchParams }: Props) {
             )}
             {pagination.next && (
               <Link
-                href={linkToPath(pagination.next).replace(/^\/repos\/[^/]+\/[^/]+\/pulls/, basePath)}
+                href={paginationHref(pagination.next, basePath)}
                 className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#0969da]"
               >
                 Next →

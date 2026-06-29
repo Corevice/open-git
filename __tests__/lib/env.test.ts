@@ -5,6 +5,10 @@ describe("env validation", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.unstubAllEnvs();
+    // The test runner provides a default NEXT_PUBLIC_API_BASE_URL; clear it so
+    // each case controls the environment explicitly.
+    delete process.env.NEXT_PUBLIC_API_BASE_URL;
+    delete process.env.NEXT_PUBLIC_APP_VERSION;
   });
 
   it("parses a valid NEXT_PUBLIC_API_BASE_URL", async () => {
