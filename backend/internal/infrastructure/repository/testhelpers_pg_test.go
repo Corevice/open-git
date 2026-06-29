@@ -52,7 +52,7 @@ func openPostgresTestDB(t *testing.T) *sqlx.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	if err := database.RunMigrations(db, "postgres", "../../migrations"); err != nil {
+	if err := database.RunMigrations(db, "postgres", "../../../migrations"); err != nil {
 		t.Fatalf("run migrations: %v", err)
 	}
 

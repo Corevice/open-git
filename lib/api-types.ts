@@ -78,8 +78,109 @@ export interface Token {
   createdAt: string;
 }
 
-export interface OAuthApp {
-  id: number;
+export type OAuthApp = {
+  id: string;
+  client_id: string;
   name: string;
-  clientId: string;
+  homepage_url: string;
+  callback_urls: string[];
+  owner_type: string;
+  created_at: string;
+};
+
+export type OAuthAppWithSecret = OAuthApp & { client_secret: string };
+
+export type OAuthAppCreateInput = {
+  name: string;
+  homepage_url: string;
+  callback_urls: string[];
+  owner_type: "user" | "organization";
+  owner_user_id?: number;
+  organization_id?: number;
+};
+
+export type OAuthAuthorizationInfo = {
+  oauth_app_id: string;
+  app_name: string;
+  granted_scopes: string[];
+  updated_at: string;
+};
+
+export interface ObservabilityDashboard {
+  uid: string;
+  title: string;
+  category: "system" | "git" | "api" | "ci" | "db";
+  grafana_path: string;
+}
+
+export interface ObservabilityDashboardsResponse {
+  dashboards: ObservabilityDashboard[];
+}
+
+export interface GrafanaURLResponse {
+  url: string;
+}
+
+export type AdvisorySeverity = "critical" | "high" | "medium" | "low";
+
+export type AdvisoryState = "open" | "acknowledged" | "resolved" | "dismissed";
+
+export type DismissedReason =
+  | "no_bandwidth"
+  | "tolerable_risk"
+  | "inaccurate"
+  | "not_used";
+
+export interface SecurityAdvisory {
+  id: string;
+  organization_id: string;
+  repository_id: string | null;
+  ghsa_id: string;
+  cve_id: string | null;
+  severity: AdvisorySeverity;
+  summary: string;
+  description: string;
+  affected_package: string;
+  affected_versions: string;
+  patched_versions: string;
+  state: AdvisoryState;
+  dismissed_reason: DismissedReason | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DependabotAlert {
+  id: string;
+  organization_id: string;
+  repository_id: string;
+  alert_number: number;
+  advisory_id: string;
+  manifest_path: string;
+  state: "open" | "dismissed" | "fixed";
+  auto_dismissed_at: string | null;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  organization_id: string;
+  actor_id: string | null;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  metadata: Record<string, unknown>;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
+export interface ScanJob {
+  id: string;
+  organization_id: string;
+  repository_id: string;
+  type: "dependency" | "secret";
+  status: "queued" | "running" | "completed" | "scan_failed" | "parse_error";
+  retry_count: number;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
 }

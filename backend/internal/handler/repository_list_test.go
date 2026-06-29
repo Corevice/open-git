@@ -185,8 +185,9 @@ func newRepositoryHandlerEcho(
 	listRepos := repoUC.NewListRepositoriesUsecase(repos, memberships, nil)
 	create := repoUC.NewCreateRepositoryUsecase(repos)
 	get := repoUC.NewGetRepositoryUsecase(repos, nil, memberships)
+	listAuditLogs := repoUC.NewListAuditLogsUsecase(&mockListAuditLogsUsecase{})
 
-	h := handler.NewRepositoryHandler(create, get, listRepos, repos, orgs, auditLog)
+	h := handler.NewRepositoryHandler(create, get, listRepos, repos, orgs, auditLog, listAuditLogs)
 
 	e := echo.New()
 	g := e.Group("")
@@ -252,7 +253,7 @@ func TestListUserReposOK(t *testing.T) {
 	}
 }
 
-func TestListUserReposInvalidPerPage(t *testing.T) {
+func TestListUserReposNegativePerPageClampsToOne(t *testing.T) {
 	repos := &listMockRepositoryRepo{
 		byOwner: map[uuid.UUID][]*entity.Repository{
 			listTestUserUUID: makeUserRepos(1),
@@ -264,8 +265,8 @@ func TestListUserReposInvalidPerPage(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
 
