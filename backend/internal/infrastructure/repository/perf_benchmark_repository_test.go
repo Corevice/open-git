@@ -34,7 +34,7 @@ func TestPerfBenchmarkRepository_Create(t *testing.T) {
 		ID:           benchmarkID,
 		ScenarioName: "rest-repos-read",
 		Environment:  "ci",
-		Status:       entity.StatusCompleted,
+		Status:       entity.BenchmarkStatusCompleted,
 		SLOResult:    entity.SLOPass,
 		StartedAt:    startedAt,
 		FinishedAt:   &finishedAt,
