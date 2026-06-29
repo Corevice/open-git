@@ -1,5 +1,5 @@
 CREATE TABLE perf_benchmarks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY,
     scenario_name TEXT NOT NULL,
     environment TEXT NOT NULL CHECK (environment IN ('docker-compose','k8s','ci')),
     status TEXT NOT NULL DEFAULT 'completed',
@@ -9,11 +9,11 @@ CREATE TABLE perf_benchmarks (
     git_sha TEXT,
     metrics JSONB NOT NULL,
     regression JSONB,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE perf_slo_thresholds (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY,
     scenario_name TEXT NOT NULL UNIQUE,
     p95_ms_max INT,
     p99_ms_max INT,
@@ -30,12 +30,12 @@ CREATE TABLE perf_baselines (
 );
 
 CREATE TABLE perf_jobs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'queued',
-    triggered_by UUID REFERENCES users(id),
+    triggered_by TEXT REFERENCES users(id),
     benchmark_id UUID REFERENCES perf_benchmarks(id),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_perf_benchmarks_scenario_created ON perf_benchmarks(scenario_name, created_at DESC);

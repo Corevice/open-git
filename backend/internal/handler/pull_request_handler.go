@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/domain/service"
@@ -22,6 +22,8 @@ import (
 type PullRequestHandler struct {
 	createPRUC        *prusecase.CreatePRUsecase
 	mergePRUC         *prusecase.MergePRUsecase
+	createReviewUC    *prusecase.CreateReviewUsecase
+	listReviewsUC     *prusecase.ListReviewsUsecase
 	prRepo            repository.IPullRequestRepository
 	reviewRepo        repository.IReviewRepository
 	reviewCommentRepo repository.IReviewCommentRepository
@@ -32,6 +34,8 @@ type PullRequestHandler struct {
 func NewPullRequestHandler(
 	createPRUC *prusecase.CreatePRUsecase,
 	mergePRUC *prusecase.MergePRUsecase,
+	createReviewUC *prusecase.CreateReviewUsecase,
+	listReviewsUC *prusecase.ListReviewsUsecase,
 	prRepo repository.IPullRequestRepository,
 	reviewRepo repository.IReviewRepository,
 	reviewCommentRepo repository.IReviewCommentRepository,
@@ -41,6 +45,8 @@ func NewPullRequestHandler(
 	return &PullRequestHandler{
 		createPRUC:        createPRUC,
 		mergePRUC:         mergePRUC,
+		createReviewUC:    createReviewUC,
+		listReviewsUC:     listReviewsUC,
 		prRepo:            prRepo,
 		reviewRepo:        reviewRepo,
 		reviewCommentRepo: reviewCommentRepo,
@@ -154,12 +160,6 @@ type reviewCommentResponse struct {
 	Side          string     `json:"side"`
 	CreatedAt     string     `json:"created_at"`
 	UpdatedAt     string     `json:"updated_at"`
-}
-
-var reviewEventToState = map[string]string{
-	"APPROVE":          entity.ReviewStateApproved,
-	"REQUEST_CHANGES":  entity.ReviewStateChangesRequested,
-	"COMMENT":          entity.ReviewStateCommented,
 }
 
 func (h *PullRequestHandler) ListPullRequests(c echo.Context) error {
@@ -400,7 +400,13 @@ func (h *PullRequestHandler) GetPullRequestFiles(c echo.Context) error {
 }
 
 func (h *PullRequestHandler) CreateReview(c echo.Context) error {
-	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	owner := c.Param("owner")
+	repoName := c.Param("repo")
+	if err := ValidateOwnerRepo(owner, repoName); err != nil {
+		return err
+	}
+
+	repo, err := h.resolveRepo(c, owner, repoName)
 	if err != nil {
 		return err
 	}
@@ -415,65 +421,43 @@ func (h *PullRequestHandler) CreateReview(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid pull request number")
 	}
 
-	pr, err := h.prRepo.GetByNumber(c.Request().Context(), repo.ID, number)
-	if err != nil {
-		return err
-	}
-	if pr.State == entity.PullRequestStateClosed || pr.State == entity.PullRequestStateMerged {
-		return echo.NewHTTPError(http.StatusUnprocessableEntity, "cannot review a closed pull request")
-	}
-
 	var req createReviewRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
-	state, ok := reviewEventToState[strings.ToUpper(req.Event)]
-	if !ok {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid review event")
-	}
-
-	now := time.Now().UTC()
-	review := &entity.Review{
-		ID:            uuid.New(),
-		PullRequestID: pr.ID,
-		ReviewerID:    actor.UserID,
-		State:         state,
-		Body:          req.Body,
-		CommitSHA:     pr.HeadSHA,
-		SubmittedAt:   &now,
-		CreatedAt:     now,
-	}
-
-	if err := h.reviewRepo.Create(c.Request().Context(), review); err != nil {
+	review, err := h.createReviewUC.Execute(c.Request().Context(), prusecase.CreateReviewInput{
+		OrganizationID: repo.OrganizationID,
+		RepositoryID:   repo.ID,
+		Number:         number,
+		ActorID:        actor.UserID,
+		Event:          req.Event,
+		Body:           req.Body,
+	})
+	if err != nil {
+		if errors.Is(err, apperror.ErrValidation) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid review event")
+		}
+		if errors.Is(err, domain.ErrForbidden) {
+			return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "Forbidden"})
+		}
+		if errors.Is(err, apperror.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
 		return err
 	}
 
-	ctx := c.Request().Context()
-	for _, comment := range req.Comments {
-		reviewID := review.ID
-		rc := &entity.ReviewComment{
-			ID:            uuid.New(),
-			PullRequestID: pr.ID,
-			AuthorID:      actor.UserID,
-			ReviewID:      &reviewID,
-			Path:          comment.Path,
-			Body:          comment.Body,
-			Line:          comment.Line,
-			Side:          entity.SideRight,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		}
-		if err := h.reviewCommentRepo.Create(ctx, rc); err != nil {
-			return err
-		}
-	}
-
-	return c.JSON(http.StatusOK, toReviewResponse(review))
+	return c.JSON(http.StatusCreated, toReviewResponse(review))
 }
 
 func (h *PullRequestHandler) ListReviews(c echo.Context) error {
-	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	owner := c.Param("owner")
+	repoName := c.Param("repo")
+	if err := ValidateOwnerRepo(owner, repoName); err != nil {
+		return err
+	}
+
+	repo, err := h.resolveRepo(c, owner, repoName)
 	if err != nil {
 		return err
 	}
@@ -483,13 +467,15 @@ func (h *PullRequestHandler) ListReviews(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid pull request number")
 	}
 
-	pr, err := h.prRepo.GetByNumber(c.Request().Context(), repo.ID, number)
+	reviews, err := h.listReviewsUC.Execute(c.Request().Context(), prusecase.ListReviewsInput{
+		OrganizationID: repo.OrganizationID,
+		RepositoryID:   repo.ID,
+		Number:         number,
+	})
 	if err != nil {
-		return err
-	}
-
-	reviews, err := h.reviewRepo.ListByPR(c.Request().Context(), pr.ID)
-	if err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
 		return err
 	}
 
