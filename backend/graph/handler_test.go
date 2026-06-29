@@ -260,8 +260,12 @@ func TestGraphQL_AuthenticatedViewerReachesResolver(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	resp := decodeGraphQLResponse(t, rec)
-	require.NotEmpty(t, resp.Errors)
-	require.Contains(t, resp.Errors[0].Message, "not implemented")
+	// The viewer resolver is now implemented; an authenticated request should
+	// reach it and resolve to the token's user with no errors.
+	require.Empty(t, resp.Errors)
+	viewer, ok := resp.Data["viewer"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "octocat", viewer["login"])
 }
 
 func TestMain(m *testing.M) {

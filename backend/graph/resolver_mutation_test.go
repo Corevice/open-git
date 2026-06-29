@@ -38,6 +38,14 @@ func (mutationAuditLogRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID
 	return nil
 }
 
+func (mutationAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (mutationAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 type mutationTxManager struct{}
 
 func (mutationTxManager) RunInTransaction(ctx context.Context, fn func(context.Context) error) error {
@@ -116,8 +124,8 @@ func (m *mutationRepoRepo) GetByOwnerAndName(context.Context, uuid.UUID, string)
 	return nil, nil
 }
 
-func (m *mutationRepoRepo) ListByOrg(context.Context, uuid.UUID, int, int) ([]*entity.Repository, int, error) {
-	return nil, 0, nil
+func (m *mutationRepoRepo) ListByOrg(context.Context, uuid.UUID, int, int) ([]*entity.Repository, error) {
+	return nil, nil
 }
 
 func (m *mutationRepoRepo) UpdateVisibility(context.Context, uuid.UUID, string) error { return nil }

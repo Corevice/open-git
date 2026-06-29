@@ -552,10 +552,13 @@ func (r *issueResolver) Labels(ctx context.Context, obj *model.Issue, first *int
 		labelIDs = append(labelIDs, label.ID)
 	}
 
-	loaded, errs := loaders.LabelByID.LoadMany(ctx, labelIDs)
+	loaded, err := loaders.LabelByID.LoadAll(ctx, labelIDs)
+	if err != nil {
+		return nil, err
+	}
 	labels := make([]*model.Label, 0, len(loaded))
-	for i, label := range loaded {
-		if errs[i] != nil || label == nil {
+	for _, label := range loaded {
+		if label == nil {
 			continue
 		}
 		labels = append(labels, mapEntityLabel(label))
