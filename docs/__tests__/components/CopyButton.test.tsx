@@ -5,16 +5,19 @@ import CopyButton from "../../components/CopyButton";
 
 describe("CopyButton", () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("copies code to clipboard and shows confirmation text", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", {
-      clipboard: { writeText },
+    // userEvent.setup() installs its own navigator.clipboard stub, so define the
+    // spy afterwards to ensure the component writes through to this mock.
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
     });
 
-    const user = userEvent.setup();
     render(<CopyButton code="hello" />);
 
     expect(screen.getByRole("button", { name: "コードをコピー" })).toHaveTextContent(

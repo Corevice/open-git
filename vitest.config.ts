@@ -8,7 +8,9 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
-    exclude: ["node_modules/**", "e2e/**", ".next/**"],
+    // docs/ is a separate package (excluded from the root tsconfig too) with its
+    // own vitest config; it is tested via `cd docs && npm test`.
+    exclude: ["node_modules/**", "e2e/**", ".next/**", "docs/**"],
     env: {
       NEXT_PUBLIC_API_BASE_URL: "http://localhost:8080",
       NEXT_PUBLIC_APP_VERSION: "test",
