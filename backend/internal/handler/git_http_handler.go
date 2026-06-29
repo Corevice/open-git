@@ -23,6 +23,7 @@ import (
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
+	repo "github.com/open-git/backend/internal/repository"
 )
 
 // ResolvedGitRepository is metadata required to serve Git Smart HTTP for a repo.
@@ -53,11 +54,12 @@ type GitBranchProtectionStore interface {
 
 // GitHTTPHandler serves Git Smart HTTP protocol endpoints.
 type GitHTTPHandler struct {
-	gitRoot      string
-	resolver     GitRepositoryResolver
-	memberships  GitMembershipAccess
-	protections  GitBranchProtectionStore
-	authRequired echo.MiddlewareFunc
+	gitRoot       string
+	resolver      GitRepositoryResolver
+	memberships   GitMembershipAccess
+	protections   GitBranchProtectionStore
+	collaborators repo.IRepositoryCollaboratorRepository
+	authRequired  echo.MiddlewareFunc
 }
 
 func NewGitHTTPHandler(
@@ -65,14 +67,16 @@ func NewGitHTTPHandler(
 	resolver GitRepositoryResolver,
 	memberships GitMembershipAccess,
 	protections GitBranchProtectionStore,
+	collaborators repo.IRepositoryCollaboratorRepository,
 	authRequired echo.MiddlewareFunc,
 ) *GitHTTPHandler {
 	return &GitHTTPHandler{
-		gitRoot:      gitRoot,
-		resolver:     resolver,
-		memberships:  memberships,
-		protections:  protections,
-		authRequired: authRequired,
+		gitRoot:       gitRoot,
+		resolver:      resolver,
+		memberships:   memberships,
+		protections:   protections,
+		collaborators: collaborators,
+		authRequired:  authRequired,
 	}
 }
 
@@ -255,6 +259,12 @@ func (h *GitHTTPHandler) ensureReadAccessForUser(ctx context.Context, userID int
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to check permissions"})
 	}
 	if !ok {
+		if h.collaborators != nil {
+			perm, err := h.collaborators.GetPermission(ctx, repo.ID, middleware.Int64ToUUID(userID))
+			if err == nil && perm != "" {
+				return nil
+			}
+		}
 		return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "read access required"})
 	}
 	return nil
@@ -272,6 +282,12 @@ func (h *GitHTTPHandler) ensureWriteAccess(ctx context.Context, userID int64, re
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to check permissions"})
 	}
 	if !ok {
+		if h.collaborators != nil {
+			perm, err := h.collaborators.GetPermission(ctx, repo.ID, middleware.Int64ToUUID(userID))
+			if err == nil && (perm == entity.CollaboratorPermWrite || perm == entity.CollaboratorPermAdmin) {
+				return nil
+			}
+		}
 		return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "write access required"})
 	}
 	return nil
