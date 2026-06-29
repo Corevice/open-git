@@ -118,16 +118,18 @@ export default function IssueDetailPage({ params }: Props) {
       return;
     }
 
+    const authToken = token;
+    const currentIssue = issue;
     let cancelled = false;
 
     async function checkPermissions() {
       try {
         const currentUser = await apiClient.get<CurrentUser>("/api/v3/user", {
-          token,
+          token: authToken,
         });
         if (cancelled) return;
 
-        if (currentUser.login === issue.user.login) {
+        if (currentUser.login === currentIssue.user.login) {
           setCanManageIssue(true);
           return;
         }
@@ -140,7 +142,7 @@ export default function IssueDetailPage({ params }: Props) {
         try {
           const members = await apiClient.get<OrgMember[]>(
             `/api/v3/orgs/${owner}/members`,
-            { token },
+            { token: authToken },
           );
           if (cancelled) return;
           const membership = members.find((m) => m.login === currentUser.login);

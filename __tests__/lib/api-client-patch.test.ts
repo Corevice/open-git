@@ -11,7 +11,7 @@ describe("api-client patch", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ state: "closed" }),
+      text: async () => JSON.stringify({ state: "closed" }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -74,9 +74,11 @@ describe("api-client patch", () => {
     });
   });
 
-  it("401 response triggers window.location.href = '/sign-in'", async () => {
-    const location = { href: "" };
-    vi.stubGlobal("window", { location });
+  it("401 response redirects to /sign-in and rejects with status 401", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", {
+      location: { origin: "http://localhost", assign },
+    });
 
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -92,6 +94,6 @@ describe("api-client patch", () => {
       client.patch("/api/v3/repos/acme/demo/issues/1", { state: "closed" }),
     ).rejects.toMatchObject({ status: 401 });
 
-    expect(location.href).toBe("/sign-in");
+    expect(assign).toHaveBeenCalledWith("/sign-in");
   });
 });
