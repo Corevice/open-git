@@ -17,13 +17,22 @@ export type AccessTokenListItem = AccessTokenMeta & {
 
 export const API_TOKEN_KEY = "open-git-auth-token";
 
+export type ApiFieldError = {
+  field?: string;
+  code?: string;
+  message?: string;
+  resource?: string;
+};
+
 export class ApiError extends Error {
   status: number;
+  errors?: ApiFieldError[];
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, errors?: ApiFieldError[]) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.errors = errors;
   }
 }
 
@@ -83,9 +92,14 @@ export class ApiClient {
 
     if (!response.ok) {
       let message = response.statusText;
+      let errors: ApiFieldError[] | undefined;
       try {
-        const errorBody = (await response.json()) as { message?: string };
+        const errorBody = (await response.json()) as {
+          message?: string;
+          errors?: ApiFieldError[];
+        };
         message = errorBody.message ?? message;
+        errors = errorBody.errors;
       } catch {
         // ignore JSON parse errors
       }
@@ -95,7 +109,7 @@ export class ApiClient {
         this.router?.push("/login");
       }
 
-      throw new ApiError(response.status, message);
+      throw new ApiError(response.status, message, errors);
     }
 
     const contentType = response.headers.get("content-type");
@@ -141,6 +155,15 @@ export class ApiClient {
     get: (login: string) => this.get<OrgProfile>(`/api/v3/orgs/${login}`),
     listMembers: (org: string) =>
       this.get<OrgMember[]>(`/api/v3/orgs/${org}/members`),
+    create: (data: { login: string; name: string; description?: string }) =>
+      this.post<OrgProfile>("/api/v3/orgs", data),
+    update: (login: string, data: { name?: string; description?: string }) =>
+      this.patch<OrgProfile>(`/api/v3/orgs/${login}`, data),
+    delete: (login: string) => this.del(`/api/v3/orgs/${login}`),
+    inviteMember: (org: string, username: string, role: string) =>
+      this.put<void>(`/api/v3/orgs/${org}/memberships/${username}`, { role }),
+    removeMember: (org: string, username: string) =>
+      this.del(`/api/v3/orgs/${org}/members/${username}`),
   };
 
   sshKeys = {

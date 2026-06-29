@@ -199,6 +199,63 @@ describe("sshKeys", () => {
   });
 });
 
+describe("orgs", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("create calls POST /api/v3/orgs with correct body", async () => {
+    const org = {
+      id: 1,
+      login: "acme",
+      name: "ACME",
+      type: "Organization",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => org,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+    const result = await client.orgs.create({ login: "acme", name: "ACME" });
+
+    expect(result).toEqual(org);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/orgs",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ login: "acme", name: "ACME" }),
+      }),
+    );
+  });
+
+  it("delete calls DELETE /api/v3/orgs/acme", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: {
+        get: () => null,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+
+    await expect(client.orgs.delete("acme")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/orgs/acme",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+});
+
 describe("users", () => {
   beforeEach(() => {
     localStorage.clear();
