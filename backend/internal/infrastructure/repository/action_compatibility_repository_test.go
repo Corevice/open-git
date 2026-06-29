@@ -25,7 +25,7 @@ func setupTestDB(t *testing.T) *sqlx.DB {
 		CREATE TABLE action_verifications (
 			id TEXT PRIMARY KEY,
 			organization_id TEXT NOT NULL,
-			trigger TEXT NOT NULL,
+			"trigger" TEXT NOT NULL,
 			status TEXT NOT NULL,
 			requested_by TEXT,
 			started_at TIMESTAMP,

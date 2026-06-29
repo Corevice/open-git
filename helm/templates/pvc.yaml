@@ -16,5 +16,7 @@ spec:
   resources:
     requests:
       storage: {{ .Values.persistence.repositories.size | default "50Gi" | quote }}
-  storageClassName: {{ .Values.global.storageClass | default "" | quote }}
+  {{- with .Values.global.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
 {{- end }}
