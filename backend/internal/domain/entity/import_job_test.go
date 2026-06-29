@@ -12,12 +12,12 @@ func TestImportJobStatusConstantsNonEmpty(t *testing.T) {
 		value entity.ImportJobStatus
 		want  string
 	}{
-		{"StatusQueued", entity.StatusQueued, "queued"},
-		{"StatusRunning", entity.StatusRunning, "running"},
-		{"StatusPaused", entity.StatusPaused, "paused"},
-		{"StatusCompleted", entity.StatusCompleted, "completed"},
-		{"StatusFailed", entity.StatusFailed, "failed"},
-		{"StatusCancelled", entity.StatusCancelled, "cancelled"},
+		{"ImportJobStatusQueued", entity.ImportJobStatusQueued, "queued"},
+		{"ImportJobStatusRunning", entity.ImportJobStatusRunning, "running"},
+		{"ImportJobStatusPaused", entity.ImportJobStatusPaused, "paused"},
+		{"ImportJobStatusCompleted", entity.ImportJobStatusCompleted, "completed"},
+		{"ImportJobStatusFailed", entity.ImportJobStatusFailed, "failed"},
+		{"ImportJobStatusCancelled", entity.ImportJobStatusCancelled, "cancelled"},
 	}
 
 	for _, tt := range tests {
@@ -38,12 +38,12 @@ func TestImportJobPhaseConstantsNonEmpty(t *testing.T) {
 		value entity.ImportJobPhase
 		want  string
 	}{
-		{"PhaseClone", entity.PhaseClone, "clone"},
-		{"PhaseMetadata", entity.PhaseMetadata, "metadata"},
-		{"PhaseIssues", entity.PhaseIssues, "issues"},
-		{"PhasePullRequests", entity.PhasePullRequests, "pull_requests"},
-		{"PhaseWiki", entity.PhaseWiki, "wiki"},
-		{"PhaseDone", entity.PhaseDone, "done"},
+		{"ImportJobPhaseClone", entity.ImportJobPhaseClone, "clone"},
+		{"ImportJobPhaseMetadata", entity.ImportJobPhaseMetadata, "metadata"},
+		{"ImportJobPhaseIssues", entity.ImportJobPhaseIssues, "issues"},
+		{"ImportJobPhasePullRequests", entity.ImportJobPhasePullRequests, "pull_requests"},
+		{"ImportJobPhaseWiki", entity.ImportJobPhaseWiki, "wiki"},
+		{"ImportJobPhaseDone", entity.ImportJobPhaseDone, "done"},
 	}
 
 	for _, tt := range tests {

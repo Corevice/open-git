@@ -9,31 +9,31 @@ import (
 type ImportJobStatus string
 
 const (
-	StatusQueued    ImportJobStatus = "queued"
-	StatusRunning   ImportJobStatus = "running"
-	StatusPaused    ImportJobStatus = "paused"
-	StatusCompleted ImportJobStatus = "completed"
-	StatusFailed    ImportJobStatus = "failed"
-	StatusCancelled ImportJobStatus = "cancelled"
+	ImportJobStatusQueued    ImportJobStatus = "queued"
+	ImportJobStatusRunning   ImportJobStatus = "running"
+	ImportJobStatusPaused    ImportJobStatus = "paused"
+	ImportJobStatusCompleted ImportJobStatus = "completed"
+	ImportJobStatusFailed    ImportJobStatus = "failed"
+	ImportJobStatusCancelled ImportJobStatus = "cancelled"
 )
 
 type ImportJobPhase string
 
 const (
-	PhaseClone        ImportJobPhase = "clone"
-	PhaseMetadata     ImportJobPhase = "metadata"
-	PhaseIssues       ImportJobPhase = "issues"
-	PhasePullRequests ImportJobPhase = "pull_requests"
-	PhaseWiki         ImportJobPhase = "wiki"
-	PhaseDone         ImportJobPhase = "done"
+	ImportJobPhaseClone        ImportJobPhase = "clone"
+	ImportJobPhaseMetadata     ImportJobPhase = "metadata"
+	ImportJobPhaseIssues       ImportJobPhase = "issues"
+	ImportJobPhasePullRequests ImportJobPhase = "pull_requests"
+	ImportJobPhaseWiki         ImportJobPhase = "wiki"
+	ImportJobPhaseDone         ImportJobPhase = "done"
 )
 
-type PhaseProgress struct {
-	Done  int
-	Total int
+type ImportPhaseProgress struct {
+	Done  int `json:"done"`
+	Total int `json:"total"`
 }
 
-type ImportProgress map[string]PhaseProgress
+type ImportProgress map[string]ImportPhaseProgress
 
 type ImportJob struct {
 	ID                 uuid.UUID
@@ -55,8 +55,8 @@ type ImportJob struct {
 type ImportUserMapping struct {
 	ID                uuid.UUID
 	ImportJobID       uuid.UUID
-	GithubLogin       string
-	GithubDisplayName string
+	GitHubLogin       string
+	GitHubDisplayName string
 	LocalUserID       *uuid.UUID
 }
 

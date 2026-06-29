@@ -9,8 +9,16 @@ import (
 )
 
 const (
-	TypeWebhookDeliver = "webhook:deliver"
+	TypeWebhookDeliver    = "webhook:deliver"
+	TypeMCPVerification   = "mcp:verification"
 )
+
+type MCPVerificationPayload struct {
+	RunID              string   `json:"run_id"`
+	OrganizationID     string   `json:"organization_id"`
+	RepositoryFullName string   `json:"repository_full_name"`
+	Targets            []string `json:"targets"`
+}
 
 type WebhookDeliveryPayload struct {
 	DeliveryID     string `json:"delivery_id"`
@@ -31,6 +39,15 @@ func NewAsynqServer(addr string, concurrency int) *asynq.Server {
 		asynq.RedisClientOpt{Addr: addr},
 		asynq.Config{Concurrency: concurrency},
 	)
+}
+
+func EnqueueMCPVerification(ctx context.Context, client *asynq.Client, payload MCPVerificationPayload) (*asynq.TaskInfo, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal mcp verification payload: %w", err)
+	}
+	task := asynq.NewTask(TypeMCPVerification, data, asynq.MaxRetry(3))
+	return client.EnqueueContext(ctx, task)
 }
 
 func EnqueueWebhookDelivery(ctx context.Context, client *asynq.Client, payload WebhookDeliveryPayload) (*asynq.TaskInfo, error) {

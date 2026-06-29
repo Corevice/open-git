@@ -14,7 +14,7 @@ func TestPingWebhookUsecaseCreatesPingDelivery(t *testing.T) {
 	orgID := uuid.New()
 	webhookID := uuid.New()
 
-	webhookRepo := newMockWebhookRepo(&entity.Webhook{
+	webhookRepo := newMockDeliveryWebhookRepo(&entity.Webhook{
 		ID:             webhookID,
 		OrganizationID: orgID,
 		URL:            "https://example.com/hook",

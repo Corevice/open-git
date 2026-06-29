@@ -14,7 +14,7 @@ func TestRedeliverWebhookUsecaseCreatesRedelivery(t *testing.T) {
 	webhookID := uuid.New()
 	originalID := uuid.New()
 
-	webhookRepo := newMockWebhookRepo(&entity.Webhook{
+	webhookRepo := newMockDeliveryWebhookRepo(&entity.Webhook{
 		ID:             webhookID,
 		OrganizationID: orgID,
 		URL:            "https://example.com/hook",
