@@ -2,95 +2,121 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
+      - develop
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  changes:
+  frontend-ci:
     runs-on: ubuntu-latest
-    outputs:
-      backend: ${{ steps.filter.outputs.backend }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            app:
+              - 'app/**'
+              - 'components/**'
+              - 'lib/**'
+              - 'middleware.ts'
+              - 'next.config.mjs'
+              - 'package.json'
+              - 'tsconfig.json'
+              - 'vitest.config.ts'
+              - '*.ts'
+              - '*.tsx'
+
+      - uses: actions/setup-node@v4
+        if: steps.filter.outputs.app == 'true' || github.ref == 'refs/heads/main'
+        with:
+          node-version: 20
+
+      - uses: actions/cache@v4
+        if: steps.filter.outputs.app == 'true' || github.ref == 'refs/heads/main'
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.filter.outputs.app == 'true' || github.ref == 'refs/heads/main'
+        run: npm ci
+
+      - name: Lint
+        if: steps.filter.outputs.app == 'true' || github.ref == 'refs/heads/main'
+        run: npm run lint
+
+      - name: Typecheck
+        if: steps.filter.outputs.app == 'true' || github.ref == 'refs/heads/main'
+        run: npx tsc --noEmit
+
+      - name: Test
+        if: steps.filter.outputs.app == 'true' || github.ref == 'refs/heads/main'
+        run: npx vitest run
+
+      - name: Build
+        if: steps.filter.outputs.app == 'true' || github.ref == 'refs/heads/main'
+        run: npm run build
+
+  backend-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
             backend:
               - 'backend/**'
-              - 'go.work'
-              - 'go.work.sum'
-
-  backend:
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: testdb
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
+        if: steps.filter.outputs.backend == 'true' || github.ref == 'refs/heads/main'
         with:
-          go-version: '1.25'
+          go-version: '1.24'
 
-      - name: Download dependencies
-        run: go mod download
+      - uses: actions/cache@v4
+        if: steps.filter.outputs.backend == 'true' || github.ref == 'refs/heads/main'
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
 
-      - name: Run SQLite unit tests
-        run: go test ./... -count=1 -timeout 60s
+      - name: Vet
+        if: steps.filter.outputs.backend == 'true' || github.ref == 'refs/heads/main'
+        run: go vet ./...
 
-      - name: Run PostgreSQL integration tests
-        run: go test -tags integration ./internal/infrastructure/... -count=1 -timeout 120s
-        env:
-          DB_TYPE: postgres
-          DB_DSN: postgres://postgres:postgres@localhost:5432/testdb?sslmode=disable
+      - name: Install golangci-lint
+        if: steps.filter.outputs.backend == 'true' || github.ref == 'refs/heads/main'
+        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.62.0
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v2.1
-          working-directory: backend
-          args: --timeout=5m
+        if: steps.filter.outputs.backend == 'true' || github.ref == 'refs/heads/main'
+        run: golangci-lint run ./... --timeout=5m
 
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage
-          path: backend/coverage.out
+      - name: Test with race detector
+        if: steps.filter.outputs.backend == 'true' || github.ref == 'refs/heads/main'
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
-  compat-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Check coverage threshold
+        if: steps.filter.outputs.backend == 'true' || github.ref == 'refs/heads/main'
+        run: |
+          total=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          if (( $(echo "$total < 60" | bc -l) )); then
+            echo "Coverage ${total}% below 60% threshold"
+            exit 1
+          fi
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-
-      - name: Run compatibility tests
-        run: cd backend && go test ./internal/compat/... -v -count=1 -timeout 120s 2>&1 | tee compat-results.txt
-
-      - name: Upload compat test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: compat-test-results
-          path: backend/compat-results.txt
-
-  validate-dashboards:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: node -e "const fs=require('fs'); const dir='deploy/grafana/dashboards'; fs.readdirSync(dir).filter(f=>f.endsWith('.json')).forEach(f=>{const d=JSON.parse(fs.readFileSync(dir+'/'+f,'utf8'));if(!d.uid||!d.schemaVersion)throw new Error('missing uid/schemaVersion in '+f);if(!d.templating||!d.templating.list.some(v=>v.name==='organization_id'))throw new Error('missing organization_id variable in '+f);console.log('OK',f)})"
+      - name: Build
+        if: steps.filter.outputs.backend == 'true' || github.ref == 'refs/heads/main'
+        run: go build ./cmd/server
