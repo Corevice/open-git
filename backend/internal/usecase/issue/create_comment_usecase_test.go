@@ -13,12 +13,28 @@ import (
 	"github.com/google/uuid"
 )
 
-type mockCommentRepo struct {
+type createMockCommentRepo struct {
 	comments []*entity.Comment
 }
 
-func (m *mockCommentRepo) Create(_ context.Context, comment *entity.Comment) error {
+func (m *createMockCommentRepo) Create(_ context.Context, comment *entity.Comment) error {
 	m.comments = append(m.comments, comment)
+	return nil
+}
+
+func (m *createMockCommentRepo) GetByID(context.Context, uuid.UUID) (*entity.Comment, error) {
+	return nil, nil
+}
+
+func (m *createMockCommentRepo) ListByIssue(context.Context, uuid.UUID, int, int) ([]*entity.Comment, int, error) {
+	return nil, 0, nil
+}
+
+func (m *createMockCommentRepo) Update(context.Context, *entity.Comment) error {
+	return nil
+}
+
+func (m *createMockCommentRepo) Delete(context.Context, uuid.UUID) error {
 	return nil
 }
 
@@ -39,6 +55,22 @@ func (m *commentIssueRepo) ListByRepo(_ context.Context, _ repository.ListIssues
 }
 
 func (m *commentIssueRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *commentIssueRepo) GetByID(context.Context, uuid.UUID) (*entity.Issue, error) {
+	return m.issue, nil
+}
+
+func (m *commentIssueRepo) Update(context.Context, *entity.Issue) error {
+	return nil
+}
+
+func (m *commentIssueRepo) Delete(context.Context, uuid.UUID) error {
+	return nil
+}
+
+func (m *commentIssueRepo) Count(context.Context, repository.ListIssuesFilter) (int, error) {
 	return 0, nil
 }
 
@@ -73,7 +105,7 @@ func TestCommentOnDeletedIssue(t *testing.T) {
 
 	uc := issueusecase.NewCreateCommentUsecase(
 		&commentIssueRepo{issue: issue},
-		&mockCommentRepo{},
+		&createMockCommentRepo{},
 		commentAuditLogRepo{},
 	)
 

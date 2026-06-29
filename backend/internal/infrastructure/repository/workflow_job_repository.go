@@ -185,6 +185,25 @@ func (r *sqlxWorkflowJobRepository) Cancel(ctx context.Context, jobID uuid.UUID)
 	return nil
 }
 
+func (r *sqlxWorkflowJobRepository) ListByRunID(ctx context.Context, orgID, runID uuid.UUID) ([]*entity.WorkflowJob, error) {
+	const query = `
+		SELECT id, workflow_run_id, organization_id, repository_id, name, status, conclusion,
+			assigned_runner_id, runs_on, acquire_lock_version, started_at, finished_at,
+			timeout_minutes, created_at
+		FROM workflow_jobs
+		WHERE organization_id = ? AND workflow_run_id = ?
+		ORDER BY created_at ASC
+	`
+	q := r.db.Rebind(query)
+	rows, err := r.db.QueryxContext(ctx, q, orgID, runID)
+	if err != nil {
+		return nil, dbErrors.MapDBError(err)
+	}
+	defer rows.Close()
+
+	return scanWorkflowJobRows(rows)
+}
+
 func (r *sqlxWorkflowJobRepository) ListQueued(ctx context.Context, orgID uuid.UUID) ([]*entity.WorkflowJob, error) {
 	const query = `
 		SELECT id, workflow_run_id, organization_id, repository_id, name, status, conclusion,
