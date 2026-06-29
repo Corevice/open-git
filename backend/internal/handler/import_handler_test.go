@@ -223,6 +223,10 @@ func (m *importMockRepositoryRepo) UpdateVisibility(context.Context, uuid.UUID, 
 
 func (m *importMockRepositoryRepo) UpdateName(context.Context, uuid.UUID, string) error { return nil }
 
+func (m *importMockRepositoryRepo) UpdateDefaultBranch(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
 func (m *importMockRepositoryRepo) Delete(context.Context, uuid.UUID) error { return nil }
 
 type importMockEntityOrgRepo struct {
