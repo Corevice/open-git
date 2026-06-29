@@ -29,7 +29,7 @@ vi.mock("@/components/ui/toast", () => ({
 }));
 
 function mockAdminFetch() {
-  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  return vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
 
     if (url.endsWith("/api/v3/user")) {

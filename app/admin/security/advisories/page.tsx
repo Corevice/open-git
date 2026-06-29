@@ -1,7 +1,13 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { AdvisoryStatusForm } from "@/components/admin/AdvisoryStatusForm";
 import {
@@ -102,7 +108,7 @@ function resolveRepoScope(advisory: AdvisoryListItem): {
   return null;
 }
 
-export default function SecurityAdvisoriesPage() {
+function SecurityAdvisoriesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { token } = useAuth();
@@ -425,5 +431,13 @@ export default function SecurityAdvisoriesPage() {
         ) : null}
       </Dialog>
     </SecurityPageLayout>
+  );
+}
+
+export default function SecurityAdvisoriesPage() {
+  return (
+    <Suspense fallback={null}>
+      <SecurityAdvisoriesContent />
+    </Suspense>
   );
 }

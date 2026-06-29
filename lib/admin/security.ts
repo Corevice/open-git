@@ -36,6 +36,7 @@ export function isAdminOrgRole(role: string): boolean {
 export function sanitizeAuditSearchPhrase(phrase: string): string {
   return phrase
     .trim()
+    // eslint-disable-next-line no-control-regex -- intentionally strip ASCII control characters
     .replace(/[\u0000-\u001f\u007f]/g, "")
     .slice(0, 256);
 }

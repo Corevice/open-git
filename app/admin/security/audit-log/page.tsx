@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 
 import {
   SecurityAccessDenied,
@@ -54,7 +54,7 @@ const ACTION_OPTIONS = [
   { value: "settings.update", label: "settings.update" },
 ] as const;
 
-export default function SecurityAuditLogPage() {
+function SecurityAuditLogContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { token } = useAuth();
@@ -368,5 +368,13 @@ export default function SecurityAuditLogPage() {
         )}
       </div>
     </SecurityPageLayout>
+  );
+}
+
+export default function SecurityAuditLogPage() {
+  return (
+    <Suspense fallback={null}>
+      <SecurityAuditLogContent />
+    </Suspense>
   );
 }
