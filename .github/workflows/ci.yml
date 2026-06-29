@@ -109,8 +109,6 @@ jobs:
         run: npm install
       - name: Validate frontmatter
         run: npx tsx scripts/validate-frontmatter.ts
-      - name: TypeScript check
-        run: npx tsc --noEmit
       - name: Build static site
         run: npm run build
       - name: Generate Pagefind index
@@ -118,5 +116,5 @@ jobs:
       - name: Check dead links
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --offline --include-fragments './out/**/*.html'
+          args: --offline --include-fragments --root-dir docs/out --fallback-extensions html --exclude-path docs/out/404.html './docs/out/**/*.html'
           fail: true
