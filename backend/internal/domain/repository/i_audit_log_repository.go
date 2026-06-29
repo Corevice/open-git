@@ -23,6 +23,11 @@ type IAuditLogSearchRepository interface {
 	Search(ctx context.Context, input AuditLogSearchInput) ([]*entity.AuditLog, int, error)
 }
 
+type IAuditLogFullRepository interface {
+	IAuditLogRepository
+	IAuditLogSearchRepository
+}
+
 type IAuditLogRepository interface {
 	Create(ctx context.Context, log *entity.AuditLog) error
 	List(ctx context.Context, orgID uuid.UUID, action string, page, perPage int) ([]*entity.AuditLog, int, error)
