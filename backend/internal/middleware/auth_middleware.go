@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,7 +31,6 @@ type Actor struct {
 }
 
 type jwtClaims struct {
-	UserID int64 `json:"sub"`
 	jwt.RegisteredClaims
 }
 
@@ -236,9 +236,14 @@ func parseJWTAuth(raw string) (int64, []string, bool) {
 	}
 
 	claims, ok := token.Claims.(*jwtClaims)
-	if !ok || claims.UserID == 0 {
+	if !ok || claims.Subject == "" {
 		return 0, nil, false
 	}
 
-	return claims.UserID, nil, true
+	userID, parseErr := strconv.ParseInt(claims.Subject, 10, 64)
+	if parseErr != nil || userID == 0 {
+		return 0, nil, false
+	}
+
+	return userID, nil, true
 }

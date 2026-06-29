@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,7 +35,6 @@ func NewLoginUsecase(users repository.IUserRepository, jwtSecret string) *LoginU
 }
 
 type jwtClaims struct {
-	UserID int64 `json:"sub"`
 	jwt.RegisteredClaims
 }
 
@@ -59,8 +59,8 @@ func (u *LoginUsecase) Execute(ctx context.Context, input LoginInput) (*LoginOut
 
 	now := time.Now().UTC()
 	claims := jwtClaims{
-		UserID: user.ID,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   strconv.FormatInt(user.ID, 10),
 			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(now),
 		},

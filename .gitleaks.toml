@@ -13,9 +13,12 @@ paths = [
   '''docker-compose''',
   '''helm/values\.yaml''',
   '''helm/templates/''',
+  '''helm/README\.md''',
+  '''lib/.*\.test\.(ts|tsx)$''',
 ]
 regexes = [
   '''your_.*_here''',
+  '''your-[\w-]+''',
   '''changeme''',
   '''change-me-in-production''',
   '''ghp_xxx''',
