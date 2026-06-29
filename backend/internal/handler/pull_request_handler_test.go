@@ -118,6 +118,14 @@ type prHandlerAuditLogRepo struct{}
 
 func (prHandlerAuditLogRepo) Create(_ context.Context, _ *entity.AuditLog) error { return nil }
 
+func (prHandlerAuditLogRepo) List(_ context.Context, _ uuid.UUID, _ string, _, _ int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
+func (prHandlerAuditLogRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID, string, string, uuid.UUID, json.RawMessage) error {
+	return nil
+}
+
 type prHandlerGitService struct {
 	diffs []service.FileDiff
 }
@@ -183,7 +191,7 @@ func prTestRepo() *entity.Repository {
 
 func prTestAuth(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		middleware.SetAuthContext(c, prTestUserID, []string{"repo"})
+		middleware.SetActorContext(c, prTestUserID, prTestOrgUUID, []string{"repo"})
 		return next(c)
 	}
 }
@@ -220,6 +228,7 @@ func newPullRequestHandlerEcho(t *testing.T, opts prHandlerOptions) *echo.Echo {
 		gitSvc,
 		prHandlerTxManager{},
 		prHandlerMembershipRepo{},
+		nil,
 	)
 	mergePRUC := prusecase.NewMergePRUsecase(
 		pr,
@@ -231,10 +240,22 @@ func newPullRequestHandlerEcho(t *testing.T, opts prHandlerOptions) *echo.Echo {
 		prHandlerTxManager{},
 		prHandlerMembershipRepo{},
 	)
+	createReviewUC := prusecase.NewCreateReviewUsecase(
+		pr,
+		prHandlerReviewRepo{},
+		prHandlerAuditLogRepo{},
+		prHandlerMembershipRepo{},
+	)
+	listReviewsUC := prusecase.NewListReviewsUsecase(
+		pr,
+		prHandlerReviewRepo{},
+	)
 
 	h := handler.NewPullRequestHandler(
 		createPRUC,
 		mergePRUC,
+		createReviewUC,
+		listReviewsUC,
 		pr,
 		prHandlerReviewRepo{},
 		prHandlerReviewCommentRepo{},
@@ -314,6 +335,42 @@ func TestGetPullRequestFiles(t *testing.T) {
 	}
 	if resp.Files[0]["filename"] != "main.go" {
 		t.Fatalf("filename = %v, want main.go", resp.Files[0]["filename"])
+	}
+}
+
+func TestPostReviewValidBodyReturns201(t *testing.T) {
+	e := newPullRequestHandlerEcho(t, prHandlerOptions{})
+
+	body := `{"event":"APPROVE","body":"looks good"}`
+	req := httptest.NewRequest(http.MethodPost, "/repos/alice/demo/pulls/1/reviews", bytes.NewBufferString(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Host = "git.example.com"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+}
+
+func TestGetReviewsReturns200Array(t *testing.T) {
+	e := newPullRequestHandlerEcho(t, prHandlerOptions{})
+
+	req := httptest.NewRequest(http.MethodGet, "/repos/alice/demo/pulls/1/reviews", nil)
+	req.Host = "git.example.com"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp []any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected JSON array, got null")
 	}
 }
 

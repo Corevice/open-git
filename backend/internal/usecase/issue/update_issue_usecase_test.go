@@ -110,6 +110,14 @@ func (m *updateAuditLogRepo) InsertAuditLog(
 	return nil
 }
 
+func (m *updateAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (m *updateAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 func TestUpdateIssueTitleTooLong(t *testing.T) {
 	repoID := uuid.New()
 	issue := &entity.Issue{

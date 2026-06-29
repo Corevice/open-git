@@ -13,7 +13,7 @@ func GoldenPath(method, path string) string {
 	escaped = strings.ReplaceAll(escaped, "/", "_")
 	escaped = strings.ReplaceAll(escaped, "{", "")
 	escaped = strings.ReplaceAll(escaped, "}", "")
-	return fmt.Sprintf("testdata/golden/%s_%s.json", strings.ToUpper(method), escaped)
+	return fmt.Sprintf("../../testdata/golden/%s_%s.json", strings.ToUpper(method), escaped)
 }
 
 // LoadGolden reads the golden fixture for method and path.
