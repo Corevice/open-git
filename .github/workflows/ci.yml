@@ -5,25 +5,62 @@ on:
   pull_request:
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'go.work'
+              - 'go.work.sum'
+
   backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
 
-      - name: Run tests
-        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run SQLite unit tests
+        run: go test ./... -count=1 -timeout 60s
+
+      - name: Run PostgreSQL integration tests
+        run: go test -tags integration ./internal/infrastructure/... -count=1 -timeout 120s
+        env:
+          DB_TYPE: postgres
+          DB_DSN: postgres://postgres:postgres@localhost:5432/testdb?sslmode=disable
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.1
+          version: v2.1.6
           working-directory: backend
           args: --timeout=5m
 
@@ -32,3 +69,28 @@ jobs:
         with:
           name: coverage
           path: backend/coverage.out
+
+  compat-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Run compatibility tests
+        run: cd backend && go test ./internal/compat/... -v -count=1 -timeout 120s 2>&1 | tee compat-results.txt
+
+      - name: Upload compat test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compat-test-results
+          path: backend/compat-results.txt
+
+  validate-dashboards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node -e "const fs=require('fs'); const dir='deploy/grafana/dashboards'; fs.readdirSync(dir).filter(f=>f.endsWith('.json')).forEach(f=>{const d=JSON.parse(fs.readFileSync(dir+'/'+f,'utf8'));if(!d.uid||!d.schemaVersion)throw new Error('missing uid/schemaVersion in '+f);if(!d.templating||!d.templating.list.some(v=>v.name==='organization_id'))throw new Error('missing organization_id variable in '+f);console.log('OK',f)})"

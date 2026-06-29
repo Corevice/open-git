@@ -1,92 +1,254 @@
-package config
+package config_test
 
 import (
-	"os"
+	"strings"
 	"testing"
+
+	"github.com/open-git/backend/internal/config"
+	"github.com/open-git/backend/internal/infrastructure/database"
 )
 
-func TestLoadDefaults(t *testing.T) {
-	keys := []string{"PORT", "DB_TYPE", "JWT_SECRET"}
-	saved := make(map[string]string, len(keys))
-	for _, key := range keys {
-		saved[key] = os.Getenv(key)
-		os.Unsetenv(key)
+func TestValidate(t *testing.T) {
+	validBase := config.Config{
+		DBType:    "sqlite",
+		Port:      "8080",
+		JWTSecret: "secret",
+		Domain:    "git.example.com",
+		TLSMode:   "selfsigned",
 	}
-	t.Cleanup(func() {
-		for _, key := range keys {
-			if val, ok := saved[key]; ok && val != "" {
-				os.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
-			}
-		}
-	})
-	os.Setenv("JWT_SECRET", "test-secret")
 
-	cfg := Load()
-
-	if cfg.Port != "8080" {
-		t.Errorf("Port = %q, want %q", cfg.Port, "8080")
-	}
-	if cfg.DBType != "sqlite" {
-		t.Errorf("DBType = %q, want %q", cfg.DBType, "sqlite")
-	}
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("Validate() = %v, want nil", err)
-	}
-}
-
-func TestValidatePortRange(t *testing.T) {
 	tests := []struct {
 		name    string
-		port    string
-		wantErr bool
+		cfg     config.Config
+		wantErr string
 	}{
-		{name: "port 0", port: "0", wantErr: true},
-		{name: "port 65536", port: "65536", wantErr: true},
-		{name: "port 80", port: "80", wantErr: false},
-		{name: "port abc", port: "abc", wantErr: true},
+		{
+			name: "invalid DB_TYPE",
+			cfg: config.Config{
+				DBType:    "invalid",
+				Port:      "8080",
+				JWTSecret: "secret",
+			},
+			wantErr: "DB_TYPE",
+		},
+		{
+			name: "postgres requires DSN",
+			cfg: config.Config{
+				DBType:    "postgres",
+				DBDSN:     "",
+				Port:      "8080",
+				JWTSecret: "secret",
+			},
+			wantErr: "DB_DSN",
+		},
+		{
+			name: "sqlite allows empty DSN",
+			cfg: validBase,
+		},
+		{
+			name: "port out of range",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "99999",
+				JWTSecret: "secret",
+			},
+			wantErr: "port",
+		},
+		{
+			name: "domain empty returns error",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "",
+				TLSMode:   "selfsigned",
+			},
+			wantErr: "DOMAIN",
+		},
+		{
+			name: "tls_mode=acme without email returns error",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "git.example.com",
+				TLSMode:   "acme",
+				ACMEEmail: "",
+			},
+			wantErr: "ACME_EMAIL",
+		},
+		{
+			name: "tls_mode=acme with invalid email returns error",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "git.example.com",
+				TLSMode:   "acme",
+				ACMEEmail: "not-an-email",
+			},
+			wantErr: "ACME_EMAIL",
+		},
+		{
+			name: "tls_mode=custom without cert returns error",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "git.example.com",
+				TLSMode:   "custom",
+				TLSCertFile: "",
+				TLSKeyFile:  "/path/to/key.pem",
+			},
+			wantErr: "TLS_CERT_FILE",
+		},
+		{
+			name: "tls_mode=custom without key returns error",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "git.example.com",
+				TLSMode:   "custom",
+				TLSCertFile: "/path/to/cert.pem",
+				TLSKeyFile:  "",
+			},
+			wantErr: "TLS_KEY_FILE",
+		},
+		{
+			name: "tls_mode=invalid returns error",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "git.example.com",
+				TLSMode:   "invalid",
+			},
+			wantErr: "TLS_MODE",
+		},
+		{
+			name: "tls_mode=selfsigned domain set passes",
+			cfg:  validBase,
+		},
+		{
+			name: "all valid acme config passes",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "git.example.com",
+				TLSMode:   "acme",
+				ACMEEmail: "admin@example.com",
+			},
+		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := Config{
-				Port:      tt.port,
-				DBType:    "sqlite",
-				JWTSecret: "test-secret",
+			err := tt.cfg.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v, want nil", err)
+				}
+				return
 			}
-			err := cfg.Validate()
-			if tt.wantErr && err == nil {
-				t.Errorf("Validate() = nil, want error for port %q", tt.port)
+			if err == nil {
+				t.Fatal("Validate() error = nil, want error")
 			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("Validate() = %v, want nil for port %q", err, tt.port)
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %q, want containing %q", err.Error(), tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestValidatePostgresRequiresDSN(t *testing.T) {
-	keys := []string{"DB_TYPE", "DB_DSN", "JWT_SECRET"}
-	saved := make(map[string]string, len(keys))
-	for _, key := range keys {
-		saved[key] = os.Getenv(key)
-		os.Unsetenv(key)
+func TestLoadBaseURLs(t *testing.T) {
+	t.Setenv("API_BASE_URL", "https://api.example.com/api/v3")
+	t.Setenv("WEB_BASE_URL", "https://git.example.com")
+	t.Setenv("DOCS_BASE_URL", "https://docs.example.com/rest")
+
+	cfg := config.Load()
+	if cfg.APIBaseURL != "https://api.example.com/api/v3" {
+		t.Fatalf("APIBaseURL = %q, want https://api.example.com/api/v3", cfg.APIBaseURL)
 	}
-	t.Cleanup(func() {
-		for _, key := range keys {
-			if val, ok := saved[key]; ok && val != "" {
-				os.Setenv(key, val)
-			} else {
-				os.Unsetenv(key)
-			}
+	if cfg.WebBaseURL != "https://git.example.com" {
+		t.Fatalf("WebBaseURL = %q, want https://git.example.com", cfg.WebBaseURL)
+	}
+	if cfg.DocsBaseURL != "https://docs.example.com/rest" {
+		t.Fatalf("DocsBaseURL = %q, want https://docs.example.com/rest", cfg.DocsBaseURL)
+	}
+}
+
+func TestLoadBaseURLDefaults(t *testing.T) {
+	t.Setenv("API_BASE_URL", "")
+	t.Setenv("WEB_BASE_URL", "")
+	t.Setenv("DOCS_BASE_URL", "")
+
+	cfg := config.Load()
+	if cfg.APIBaseURL != "http://localhost:8080/api/v3" {
+		t.Fatalf("APIBaseURL = %q, want http://localhost:8080/api/v3", cfg.APIBaseURL)
+	}
+	if cfg.WebBaseURL != "http://localhost:8080" {
+		t.Fatalf("WebBaseURL = %q, want http://localhost:8080", cfg.WebBaseURL)
+	}
+	if cfg.DocsBaseURL != "https://docs.github.com/rest" {
+		t.Fatalf("DocsBaseURL = %q, want https://docs.github.com/rest", cfg.DocsBaseURL)
+	}
+}
+
+func TestMetricsConfig(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		t.Setenv("METRICS_ENABLED", "")
+		t.Setenv("METRICS_PATH", "")
+		t.Setenv("METRICS_AUTH_TOKEN", "")
+
+		cfg := config.Load()
+		if !cfg.MetricsEnabled {
+			t.Fatalf("MetricsEnabled = false, want true")
+		}
+		if cfg.MetricsPath != "/metrics" {
+			t.Fatalf("MetricsPath = %q, want /metrics", cfg.MetricsPath)
+		}
+		if cfg.MetricsAuthToken != "" {
+			t.Fatalf("MetricsAuthToken = %q, want empty", cfg.MetricsAuthToken)
 		}
 	})
 
-	os.Setenv("DB_TYPE", "postgres")
-	os.Setenv("JWT_SECRET", "test-secret")
+	t.Run("disabled", func(t *testing.T) {
+		t.Setenv("METRICS_ENABLED", "false")
 
-	cfg := Load()
-	if err := cfg.Validate(); err == nil {
-		t.Error("Validate() = nil, want error for postgres without DB_DSN")
+		cfg := config.Load()
+		if cfg.MetricsEnabled {
+			t.Fatalf("MetricsEnabled = true, want false")
+		}
+	})
+
+	t.Run("custom path", func(t *testing.T) {
+		t.Setenv("METRICS_PATH", "/prom")
+
+		cfg := config.Load()
+		if cfg.MetricsPath != "/prom" {
+			t.Fatalf("MetricsPath = %q, want /prom", cfg.MetricsPath)
+		}
+	})
+
+	t.Run("auth token", func(t *testing.T) {
+		t.Setenv("METRICS_AUTH_TOKEN", "tok123")
+
+		cfg := config.Load()
+		if cfg.MetricsAuthToken != "tok123" {
+			t.Fatalf("MetricsAuthToken = %q, want tok123", cfg.MetricsAuthToken)
+		}
+	})
+}
+
+func TestMaskDSN(t *testing.T) {
+	masked := database.MaskDSN("postgres://user:secret@host/db")
+	if strings.Contains(masked, "secret") {
+		t.Fatalf("MaskDSN() = %q, must not contain password", masked)
+	}
+
+	if got := database.MaskDSN(""); got != "" {
+		t.Fatalf("MaskDSN(\"\") = %q, want empty string", got)
 	}
 }

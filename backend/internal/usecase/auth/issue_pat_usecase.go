@@ -13,6 +13,7 @@ import (
 
 type IssuePATInput struct {
 	UserID    int64
+	Note      string
 	Scopes    []string
 	ExpiresAt *time.Time
 }
@@ -44,6 +45,7 @@ func (u *IssuePATUsecase) Execute(ctx context.Context, input IssuePATInput) (*Is
 
 	token := &domain.AccessToken{
 		UserID:    input.UserID,
+		Note:      input.Note,
 		TokenHash: hashToken(raw),
 		Scopes:    input.Scopes,
 		ExpiresAt: input.ExpiresAt,
