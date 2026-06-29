@@ -162,6 +162,10 @@ func (m *wfStreamWorkflowJobRepo) ListQueued(_ context.Context, _ uuid.UUID) ([]
 	return nil, nil
 }
 
+func (m *wfStreamWorkflowJobRepo) ListByRunID(_ context.Context, _, _ uuid.UUID) ([]*entity.WorkflowJob, error) {
+	return nil, nil
+}
+
 func newWorkflowRunStreamHandler(t *testing.T, logRepo handler.IJobLogRepository, jobRepo *wfStreamWorkflowJobRepo) *handler.WorkflowRunHandler {
 	t.Helper()
 

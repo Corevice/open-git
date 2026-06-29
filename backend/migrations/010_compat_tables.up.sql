@@ -1,5 +1,5 @@
 CREATE TABLE compat_test_run (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    id uuid PRIMARY KEY,
     suite varchar NOT NULL,
     status varchar NOT NULL DEFAULT 'queued',
     triggered_by uuid REFERENCES users(id),
@@ -11,11 +11,11 @@ CREATE TABLE compat_test_run (
     coverage_rate numeric(5,4) NOT NULL DEFAULT 0,
     started_at timestamptz,
     finished_at timestamptz,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE compat_endpoint_result (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    id uuid PRIMARY KEY,
     run_id uuid NOT NULL REFERENCES compat_test_run(id) ON DELETE CASCADE,
     method varchar NOT NULL,
     path varchar NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE compat_endpoint_result (
 );
 
 CREATE TABLE compat_golden_fixture (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    id uuid PRIMARY KEY,
     method varchar NOT NULL,
     path varchar NOT NULL,
     response_schema jsonb,
