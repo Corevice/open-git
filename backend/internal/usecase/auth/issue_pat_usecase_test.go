@@ -37,6 +37,10 @@ func (m *mockTokenRepo) FindByTokenHash(_ context.Context, tokenHash string) (*d
 	return nil, nil
 }
 
+func (m *mockTokenRepo) UpdateLastUsedAt(_ context.Context, _ int64) error {
+	return nil
+}
+
 func sha256Hex(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])

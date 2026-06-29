@@ -40,6 +40,10 @@ func (m *mockAccessTokenRepo) FindByTokenHash(_ context.Context, tokenHash strin
 	return m.byHash[tokenHash], nil
 }
 
+func (m *mockAccessTokenRepo) UpdateLastUsedAt(_ context.Context, _ int64) error {
+	return nil
+}
+
 func newAuthTestEcho(repo interface {
 	FindByTokenHash(ctx context.Context, tokenHash string) (*domain.AccessToken, error)
 }) *echo.Echo {
