@@ -1,3 +1,4 @@
+import type { Contributor, DocSection, DocSectionContent } from "./api-types";
 import { env } from "./env";
 
 export interface ApiError {
@@ -19,6 +20,14 @@ export interface ApiClient {
     opts?: { token?: string },
   ): Promise<T>;
   delete(path: string, opts?: { token?: string }): Promise<void>;
+  getDocTree(): Promise<{ sections: DocSection[] }>;
+  getDocSection(slug: string): Promise<DocSectionContent>;
+  getContributors(
+    owner: string,
+    repo: string,
+    page?: number,
+    perPage?: number,
+  ): Promise<Contributor[]>;
 }
 
 export interface CommitsResult<T> {
@@ -284,6 +293,25 @@ export function createApiClient(baseUrl: string): ApiClient {
         headers: buildHeaders(opts?.token),
       });
       await handleResponse<void>(res);
+    },
+
+    async getDocTree() {
+      return this.get<{ sections: DocSection[] }>("/api/v1/docs/contributing");
+    },
+
+    async getDocSection(slug: string) {
+      return this.get<DocSectionContent>(`/api/v1/docs/contributing/${slug}`);
+    },
+
+    async getContributors(
+      owner: string,
+      repo: string,
+      page?: number,
+      perPage?: number,
+    ) {
+      return this.get<Contributor[]>(
+        `/api/v1/repos/${owner}/${repo}/contributors?page=${page ?? 1}&per_page=${perPage ?? 30}`,
+      );
     },
   };
 }

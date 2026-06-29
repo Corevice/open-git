@@ -185,6 +185,28 @@ export interface ScanJob {
   error: string | null;
 }
 
+export interface DocSection {
+  slug: string;
+  title: string;
+  order: number;
+}
+
+export interface DocSectionContent {
+  slug: string;
+  title: string;
+  content_markdown: string;
+  updated_at: string;
+  edit_url: string;
+}
+
+export interface Contributor {
+  login: string;
+  id: number;
+  avatar_url: string;
+  contributions: number;
+  type: string;
+}
+
 export interface AppMeta {
   app_name: string;
   version: string;
