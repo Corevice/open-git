@@ -344,10 +344,8 @@ func (uc *TriggerWorkflowUsecase) createQueuedRun(
 	}
 
 	if len(jobs) > 0 {
-		for _, job := range jobs {
-			if err := uc.jobRepo.Create(ctx, job); err != nil {
-				return uuid.Nil, err
-			}
+		if err := uc.jobRepo.CreateBatch(ctx, jobs); err != nil {
+			return uuid.Nil, err
 		}
 	}
 	if len(steps) > 0 {

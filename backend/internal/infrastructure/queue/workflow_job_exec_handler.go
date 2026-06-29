@@ -124,7 +124,7 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 		return fmt.Errorf("job run mismatch: %w", asynq.SkipRetry)
 	}
 
-	steps, err := h.stepRepo.ListByJobID(ctx, payload.OrgID, payload.JobID)
+	steps, err := h.stepRepo.ListByJobID(ctx, orgID.String(), jobID.String())
 	if err != nil {
 		return fmt.Errorf("load workflow steps: %w", err)
 	}
@@ -139,7 +139,7 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 
 	secretMap := map[string]string{}
 	if h.secrets != nil {
-		secretMap, err = h.secrets.GetSecrets(ctx, payload.OrgID, job.RepositoryID.String())
+		secretMap, err = h.secrets.GetSecrets(ctx, orgID.String(), job.RepositoryID.String())
 		if err != nil {
 			return fmt.Errorf("load secrets: %w", err)
 		}

@@ -6,8 +6,15 @@ import (
 	"github.com/open-git/backend/internal/domain/entity"
 )
 
+type SLOOverallStatus string
+
+const (
+	SLOOverallPass SLOOverallStatus = "pass"
+	SLOOverallFail SLOOverallStatus = "fail"
+)
+
 type SLOStatusSummary struct {
-	Overall    string
+	Overall    SLOOverallStatus
 	Violations []string
 }
 
@@ -29,13 +36,13 @@ func (uc *GetSummaryUseCase) Execute(ctx context.Context) (*SummaryResult, error
 	}
 
 	sloStatus := SLOStatusSummary{
-		Overall:    "pass",
+		Overall:    SLOOverallPass,
 		Violations: []string{},
 	}
 
 	for _, benchmark := range latest {
 		if benchmark.SLOResult == entity.SLOFail {
-			sloStatus.Overall = "fail"
+			sloStatus.Overall = SLOOverallFail
 			sloStatus.Violations = append(sloStatus.Violations, benchmark.ScenarioName)
 		}
 	}

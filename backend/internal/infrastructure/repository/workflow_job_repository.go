@@ -26,6 +26,30 @@ func NewWorkflowJobRepository(db *sqlx.DB) domainrepo.IWorkflowJobRepository {
 }
 
 func (r *sqlxWorkflowJobRepository) Create(ctx context.Context, job *entity.WorkflowJob) error {
+	return r.createJob(ctx, r.db, job)
+}
+
+func (r *sqlxWorkflowJobRepository) CreateBatch(ctx context.Context, jobs []*entity.WorkflowJob) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, job := range jobs {
+		if err := r.createJob(ctx, tx, job); err != nil {
+			return err
+		}
+	}
+
+	return dbErrors.MapDBError(tx.Commit())
+}
+
+func (r *sqlxWorkflowJobRepository) createJob(ctx context.Context, exec sqlx.ExtContext, job *entity.WorkflowJob) error {
 	if job.ID == uuid.Nil {
 		job.ID = uuid.New()
 	}
@@ -54,7 +78,7 @@ func (r *sqlxWorkflowJobRepository) Create(ctx context.Context, job *entity.Work
 		)
 	`
 
-	_, err = r.db.NamedExecContext(ctx, query, map[string]any{
+	_, err = sqlx.NamedExecContext(ctx, exec, query, map[string]any{
 		"id":                   job.ID,
 		"workflow_run_id":      runID,
 		"organization_id":      job.OrganizationID,

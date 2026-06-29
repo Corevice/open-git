@@ -84,6 +84,15 @@ func (f *fakeWorkflowJobRepo) Create(_ context.Context, job *entity.WorkflowJob)
 	return nil
 }
 
+func (f *fakeWorkflowJobRepo) CreateBatch(_ context.Context, jobs []*entity.WorkflowJob) error {
+	for _, job := range jobs {
+		if err := f.Create(context.Background(), job); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (f *fakeWorkflowJobRepo) GetByID(_ context.Context, id uuid.UUID) (*entity.WorkflowJob, error) {
 	if f.jobs == nil {
 		return nil, domain.ErrNotFound

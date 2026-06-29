@@ -10,11 +10,20 @@ import (
 	"github.com/open-git/backend/internal/domain/entity"
 )
 
-var allowedEnvironments = map[string]struct{}{
-	"docker-compose": {},
-	"k8s":            {},
-	"ci":             {},
+// AllowedBenchmarkEnvironments lists valid benchmark execution targets.
+var AllowedBenchmarkEnvironments = []string{
+	"docker-compose",
+	"k8s",
+	"ci",
 }
+
+var allowedEnvironments = func() map[string]struct{} {
+	allowed := make(map[string]struct{}, len(AllowedBenchmarkEnvironments))
+	for _, env := range AllowedBenchmarkEnvironments {
+		allowed[env] = struct{}{}
+	}
+	return allowed
+}()
 
 const defaultRegressionPctMax = 20.0
 
@@ -53,7 +62,7 @@ func (uc *CreateBenchmarkUseCase) Execute(ctx context.Context, input CreateBench
 	}
 
 	if _, ok := allowedEnvironments[input.Environment]; !ok {
-		return nil, fmt.Errorf("invalid environment: %s", input.Environment)
+		return nil, fmt.Errorf("invalid environment")
 	}
 
 	threshold, err := uc.SLOThresholdRepo.GetByScenario(ctx, input.ScenarioName)

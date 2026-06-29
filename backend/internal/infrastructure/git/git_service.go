@@ -527,7 +527,7 @@ func GetDiff(repoPath, baseRef, headRef string) ([]FileDiff, error) {
 			case diff.Delete:
 				status = "delete"
 			default:
-				if status != "delete" {
+				if status != "delete" && status != "add" {
 					status = "modify"
 				}
 			}

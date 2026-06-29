@@ -50,6 +50,21 @@ func TestDetectRegression(t *testing.T) {
 		}
 	})
 
+	t.Run("zero baseline p95 returns nil", func(t *testing.T) {
+		zeroBaseline := &entity.PerfBenchmark{
+			ID:           uuid.New(),
+			ScenarioName: "rest-repos-read",
+			Metrics: entity.PerfMetrics{
+				P95Ms: 0,
+			},
+			CreatedAt: time.Now().UTC(),
+		}
+		got := perf.DetectRegression(entity.PerfMetrics{P95Ms: 250}, zeroBaseline, 20.0)
+		if got != nil {
+			t.Fatalf("DetectRegression() = %+v, want nil", got)
+		}
+	})
+
 	t.Run("negative delta improvement not flagged", func(t *testing.T) {
 		got := perf.DetectRegression(entity.PerfMetrics{P95Ms: 150}, baseline, 20.0)
 		if got == nil {

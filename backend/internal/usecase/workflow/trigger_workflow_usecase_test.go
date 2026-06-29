@@ -72,6 +72,14 @@ func (m *mockWorkflowJobRepo) Create(_ context.Context, job *entity.WorkflowJob)
 	return nil
 }
 
+func (m *mockWorkflowJobRepo) CreateBatch(_ context.Context, jobs []*entity.WorkflowJob) error {
+	for _, job := range jobs {
+		copyJob := *job
+		m.created = append(m.created, &copyJob)
+	}
+	return nil
+}
+
 func (m *mockWorkflowJobRepo) GetByID(context.Context, uuid.UUID) (*entity.WorkflowJob, error) {
 	return nil, domain.ErrNotFound
 }

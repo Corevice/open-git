@@ -10,6 +10,7 @@ import (
 
 type IWorkflowJobRepository interface {
 	Create(ctx context.Context, job *entity.WorkflowJob) error
+	CreateBatch(ctx context.Context, jobs []*entity.WorkflowJob) error
 	GetByID(ctx context.Context, id uuid.UUID) (*entity.WorkflowJob, error)
 	AcquireForRunner(ctx context.Context, jobID uuid.UUID, runnerID uuid.UUID, lockVersion int) (bool, error)
 	UpdateStatus(ctx context.Context, jobID uuid.UUID, status, conclusion string) error

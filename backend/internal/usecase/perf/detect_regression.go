@@ -10,6 +10,9 @@ func DetectRegression(current entity.PerfMetrics, baseline *entity.PerfBenchmark
 	if baseline == nil {
 		return nil
 	}
+	if baseline.Metrics.P95Ms <= 0 {
+		return nil
+	}
 
 	p95DeltaPct := (float64(current.P95Ms)-float64(baseline.Metrics.P95Ms)) / float64(baseline.Metrics.P95Ms) * 100
 	flagged := p95DeltaPct > maxPct

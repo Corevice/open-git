@@ -22,6 +22,8 @@ type mockExecJobRepo struct {
 
 func (m *mockExecJobRepo) Create(context.Context, *entity.WorkflowJob) error { return nil }
 
+func (m *mockExecJobRepo) CreateBatch(context.Context, []*entity.WorkflowJob) error { return nil }
+
 func (m *mockExecJobRepo) GetByID(_ context.Context, jobID uuid.UUID) (*entity.WorkflowJob, error) {
 	if m.job == nil || m.job.ID != jobID {
 		return nil, errors.New("not found")
