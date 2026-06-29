@@ -1,0 +1,29 @@
+name: Chart Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  helm-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: Update chart dependencies
+        run: helm dependency update helm/
+
+      - name: Package chart
+        run: helm package helm/ --version ${{ github.ref_name }} --app-version ${{ github.ref_name }} --destination dist/
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+
+      - name: Push chart to OCI registry
+        run: helm push dist/*.tgz oci://ghcr.io/${{ github.repository }}/charts
