@@ -1,0 +1,26 @@
+{{- if and .Values.ingress.enabled .Values.ingress.traefikCRD }}
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ include "open-git.fullname" . }}
+  labels:
+    {{- include "open-git.labels" . | nindent 4 }}
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`{{ .Values.ingress.host }}`) && PathPrefix(`/api`)
+      kind: Rule
+      services:
+        - name: {{ include "open-git.fullname" . }}-backend
+          port: {{ .Values.service.backend.port }}
+    - match: Host(`{{ .Values.ingress.host }}`)
+      kind: Rule
+      services:
+        - name: {{ include "open-git.fullname" . }}-frontend
+          port: {{ .Values.service.frontend.port }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    certResolver: {{ .Values.ingress.certResolver }}
+  {{- end }}
+{{- end }}

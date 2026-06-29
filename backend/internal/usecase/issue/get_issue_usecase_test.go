@@ -36,6 +36,18 @@ func (m *getIssueRepo) Update(_ context.Context, _ *entity.Issue) error {
 	return nil
 }
 
+func (m *getIssueRepo) GetByID(_ context.Context, _ uuid.UUID) (*entity.Issue, error) {
+	return m.issue, nil
+}
+
+func (m *getIssueRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *getIssueRepo) Count(_ context.Context, _ repository.ListIssuesFilter) (int, error) {
+	return 0, nil
+}
+
 func TestGetIssueNotFoundWhenNil(t *testing.T) {
 	uc := issueusecase.NewGetIssueUsecase(&getIssueRepo{issue: nil})
 
