@@ -34,8 +34,7 @@ func ParseSections(markdown string) []DocSection {
 	sections := make([]DocSection, 0, len(parts))
 	order := 1
 	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
+		if strings.TrimSpace(part) == "" {
 			continue
 		}
 
