@@ -472,7 +472,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	updateIssueUC := issueusecase.NewUpdateIssueUsecase(issueRepo, labelRepo, milestoneRepo, issueAuditRepo)
 	createCommentUC := issueusecase.NewCreateCommentUsecase(issueRepo, commentRepo, issueAuditRepo)
 	listIssuesUC := issueusecase.NewListIssuesUsecase(issueRepo)
-	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, createCommentUC, updateIssueUC, resolveRepo)
+	getIssueUC := issueusecase.NewGetIssueUsecase(issueRepo)
+	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, getIssueUC, updateIssueUC, createCommentUC, resolveRepo)
 
 	gitSvc := infragit.NewGitServiceAdapter()
 	prRepo := infrarepo.NewPullRequestRepository(sqlxDB)
