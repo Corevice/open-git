@@ -88,3 +88,14 @@ Container-level security context
 allowPrivilegeEscalation: false
 readOnlyRootFilesystem: true
 {{- end }}
+
+{{/*
+Validated Git repository mount path from values.
+*/}}
+{{- define "open-git.repositoriesMountPath" -}}
+{{- $path := .Values.persistence.repositories.mountPath | default "/data/repositories" -}}
+{{- if or (not (hasPrefix "/" $path)) (contains ".." $path) (contains "\n" $path) -}}
+{{- fail (printf "invalid persistence.repositories.mountPath %q: must be an absolute path without .. or newlines" $path) -}}
+{{- end -}}
+{{- $path -}}
+{{- end }}

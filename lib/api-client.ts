@@ -1,3 +1,4 @@
+import type { Contributor, DocSection, DocSectionContent } from "./api-types";
 import { env } from "./env";
 
 export interface ApiError {
@@ -13,6 +14,20 @@ export interface ApiClient {
     body: unknown,
     opts?: { token?: string },
   ): Promise<T>;
+  patch<T>(
+    path: string,
+    body: unknown,
+    opts?: { token?: string },
+  ): Promise<T>;
+  delete(path: string, opts?: { token?: string }): Promise<void>;
+  getDocTree(): Promise<{ sections: DocSection[] }>;
+  getDocSection(slug: string): Promise<DocSectionContent>;
+  getContributors(
+    owner: string,
+    repo: string,
+    page?: number,
+    perPage?: number,
+  ): Promise<Contributor[]>;
 }
 
 export interface CommitsResult<T> {
@@ -53,14 +68,41 @@ export interface MCPLatestResult {
 }
 
 export interface RepoApiClient extends ApiClient {
-  getRepo<T>(owner: string, repo: string): Promise<T>;
+  getRepo<T>(
+    owner: string,
+    repo: string,
+    opts?: { token?: string },
+  ): Promise<T>;
   getContents<T>(
     owner: string,
     repo: string,
     path?: string,
     ref?: string,
   ): Promise<T>;
-  getBranches<T>(owner: string, repo: string): Promise<T>;
+  getBranches<T>(
+    owner: string,
+    repo: string,
+    opts?: { token?: string },
+  ): Promise<T>;
+  createRef(
+    owner: string,
+    repo: string,
+    ref: string,
+    sha: string,
+    opts?: { token?: string },
+  ): Promise<void>;
+  deleteBranch(
+    owner: string,
+    repo: string,
+    branch: string,
+    opts?: { token?: string },
+  ): Promise<void>;
+  updateDefaultBranch(
+    owner: string,
+    repo: string,
+    branch: string,
+    opts?: { token?: string },
+  ): Promise<void>;
   getCommits<T>(
     owner: string,
     repo: string,
@@ -83,6 +125,12 @@ export interface RepoApiClient extends ApiClient {
     token?: string;
   }): Promise<MCPVerificationRun[]>;
   deleteMCPRun(runId: string, opts?: { token?: string }): Promise<void>;
+  createRepo<T>(
+    name: string,
+    visibility: "public" | "private",
+    options?: { autoInit?: boolean; description?: string },
+  ): Promise<T>;
+  listRepos<T>(opts?: { token?: string }): Promise<T>;
 }
 
 export function isApiError(err: unknown): err is ApiError {
@@ -150,6 +198,17 @@ function encodeRepoPath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
+function repoApiPath(owner: string, repo: string, suffix = ""): string {
+  return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${suffix}`;
+}
+
+const SIGN_IN_PATH = "/sign-in";
+
+function redirectToSignIn(): void {
+  if (typeof window === "undefined") return;
+  window.location.assign(new URL(SIGN_IN_PATH, window.location.origin).pathname);
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let body: { code?: string; message?: string } = {};
@@ -163,12 +222,25 @@ async function handleResponse<T>(res: Response): Promise<T> {
       code: body.code ?? String(res.status),
       message: body.message ?? res.statusText,
     };
-    if (res.status === 401 && typeof window !== "undefined") {
-      window.location.href = "/sign-in";
+    if (res.status === 401) {
+      redirectToSignIn();
+    }
+    if (res.status === 403) {
+      error.code = "forbidden";
+    }
+    if (res.status === 409) {
+      error.code = "conflict";
     }
     throw error;
   }
-  return res.json() as Promise<T>;
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  const text = await res.text();
+  if (!text) {
+    return undefined as T;
+  }
+  return JSON.parse(text) as T;
 }
 
 export function createApiClient(baseUrl: string): ApiClient {
@@ -198,6 +270,49 @@ export function createApiClient(baseUrl: string): ApiClient {
       });
       return handleResponse<T>(res);
     },
+
+    async patch<T>(
+      path: string,
+      body: unknown,
+      opts?: { token?: string },
+    ): Promise<T> {
+      const res = await fetch(`${base}${path}`, {
+        method: "PATCH",
+        headers: {
+          ...buildHeaders(opts?.token),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      return handleResponse<T>(res);
+    },
+
+    async delete(path: string, opts?: { token?: string }): Promise<void> {
+      const res = await fetch(`${base}${path}`, {
+        method: "DELETE",
+        headers: buildHeaders(opts?.token),
+      });
+      await handleResponse<void>(res);
+    },
+
+    async getDocTree() {
+      return this.get<{ sections: DocSection[] }>("/api/v1/docs/contributing");
+    },
+
+    async getDocSection(slug: string) {
+      return this.get<DocSectionContent>(`/api/v1/docs/contributing/${slug}`);
+    },
+
+    async getContributors(
+      owner: string,
+      repo: string,
+      page?: number,
+      perPage?: number,
+    ) {
+      return this.get<Contributor[]>(
+        `/api/v1/repos/${owner}/${repo}/contributors?page=${page ?? 1}&per_page=${perPage ?? 30}`,
+      );
+    },
   };
 }
 
@@ -207,8 +322,8 @@ export function createRepoApiClient(baseUrl: string): RepoApiClient {
 
   return {
     ...base,
-    getRepo(owner, repo) {
-      return base.get(`/repos/${owner}/${repo}`);
+    getRepo(owner, repo, opts) {
+      return base.get(repoApiPath(owner, repo), opts);
     },
     getContents(owner, repo, path = "", ref?) {
       const encodedPath = encodeRepoPath(path);
@@ -216,10 +331,28 @@ export function createRepoApiClient(baseUrl: string): RepoApiClient {
       const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
       return base.get(`/repos/${owner}/${repo}/contents${pathSegment}${query}`);
     },
-    getBranches(owner, repo) {
-      return base.get(`/repos/${owner}/${repo}/branches?per_page=100`);
+    getBranches(owner, repo, opts) {
+      return base.get(`${repoApiPath(owner, repo)}/branches?per_page=100`, opts);
     },
-    async getCommits(owner, repo, sha, page, perPage = 30) {
+    async createRef(owner, repo, ref, sha, opts) {
+      await base.post(`${repoApiPath(owner, repo)}/git/refs`, { ref, sha }, opts);
+    },
+    async deleteBranch(owner, repo, branch, opts) {
+      await base.delete(
+        `${repoApiPath(owner, repo)}/git/refs/heads/${encodeURIComponent(branch)}`,
+        opts,
+      );
+    },
+    async updateDefaultBranch(owner, repo, branch, opts) {
+      await base.patch(repoApiPath(owner, repo), { default_branch: branch }, opts);
+    },
+    async getCommits<T>(
+      owner: string,
+      repo: string,
+      sha: string,
+      page: number,
+      perPage = 30,
+    ) {
       const url = `${apiBase}/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(sha)}&per_page=${perPage}&page=${page}`;
       const res = await fetch(url, {
         method: "GET",
@@ -269,30 +402,21 @@ export function createRepoApiClient(baseUrl: string): RepoApiClient {
       return base.get(path, { token: opts?.token });
     },
     async deleteMCPRun(runId, opts) {
-      const res = await fetch(
-        `${apiBase}/api/v1/mcp/verification/runs/${encodeURIComponent(runId)}`,
-        {
-          method: "DELETE",
-          headers: buildHeaders(opts?.token),
-        },
+      await base.delete(
+        `/api/v1/mcp/verification/runs/${encodeURIComponent(runId)}`,
+        opts,
       );
-      if (!res.ok) {
-        let body: { code?: string; message?: string } = {};
-        try {
-          body = await res.json();
-        } catch {
-          // ignore non-JSON error bodies
-        }
-        const error: ApiError = {
-          status: res.status,
-          code: body.code ?? String(res.status),
-          message: body.message ?? res.statusText,
-        };
-        if (res.status === 401 && typeof window !== "undefined") {
-          window.location.href = "/sign-in";
-        }
-        throw error;
-      }
+    },
+    createRepo(name, visibility, options) {
+      return base.post("/api/v1/user/repos", {
+        name,
+        private: visibility === "private",
+        ...(options?.description ? { description: options.description } : {}),
+        auto_init: options?.autoInit ?? false,
+      });
+    },
+    listRepos(opts) {
+      return base.get("/user/repos?per_page=100", opts);
     },
   };
 }

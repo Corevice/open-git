@@ -33,10 +33,17 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if (.Values.persistence.repositories.enabled | default true) }}
+            - name: repositories
+              mountPath: {{ include "open-git.repositoriesMountPath" . | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8080
               protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ printf "%s-config" (include "open-git.fullname" .) | quote }}
           env:
             - name: PORT
               value: "8080"
@@ -109,6 +116,11 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if (.Values.persistence.repositories.enabled | default true) }}
+        - name: repositories
+          persistentVolumeClaim:
+            claimName: {{ include "open-git.fullname" . }}-repositories
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
