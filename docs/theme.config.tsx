@@ -1,10 +1,14 @@
 import type { DocsThemeConfig } from 'nextra-theme-docs';
+import Search from './components/Search';
 import { DocHeader } from './components/DocHeader';
 import { EditPageLink } from './components/EditPageLink';
 
 const config: DocsThemeConfig = {
   logo: <span>open-git</span>,
   docsRepositoryBase: 'https://github.com/Corevice/open-git/blob/main/docs',
+  search: {
+    component: Search,
+  },
   navbar: {
     component: <DocHeader />,
   },
