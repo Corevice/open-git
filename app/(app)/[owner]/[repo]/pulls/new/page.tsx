@@ -3,11 +3,28 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 
-import { ApiError, createPullRequest, listBranches } from "@/lib/api";
-import { renderMarkdown } from "@/lib/markdown";
+import { apiClient, isApiError } from "@/lib/api-client";
 
-type Branch = { name: string };
+const pullSchema = z
+  .object({
+    title: z
+      .string()
+      .min(1, "Title is required")
+      .max(256, "Title must be 256 chars or fewer"),
+    body: z.string().max(65536).optional(),
+    head: z.string().min(1, "Head branch is required"),
+    base: z.string().min(1, "Base branch is required"),
+  })
+  .refine((data) => data.head !== data.base, {
+    message: "Head branch must differ from base branch",
+    path: ["head"],
+  });
+
+type PullFormValues = z.infer<typeof pullSchema>;
 
 type Props = {
   params: Promise<{ owner: string; repo: string }>;
@@ -17,14 +34,14 @@ export default function NewPullRequestPage({ params }: Props) {
   const router = useRouter();
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [base, setBase] = useState("");
-  const [head, setHead] = useState("");
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [showPreview, setShowPreview] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const { register, handleSubmit, formState, watch } = useForm<PullFormValues>({
+    resolver: zodResolver(pullSchema),
+    defaultValues: { title: "", body: "", head: "", base: "" },
+  });
+
+  const title = watch("title") ?? "";
 
   useEffect(() => {
     params.then(({ owner: o, repo: r }) => {
@@ -33,58 +50,27 @@ export default function NewPullRequestPage({ params }: Props) {
     });
   }, [params]);
 
-  useEffect(() => {
-    if (!owner || !repo) return;
-    listBranches(owner, repo)
-      .then((data) => {
-        setBranches(data);
-        if (data.length > 0) {
-          const defaultBranch = data.find((b) => b.name === "main") ?? data[0];
-          setBase(defaultBranch.name);
-          setHead(data.length > 1 ? data[1].name : defaultBranch.name);
-        }
-      })
-      .catch(() => setBranches([]));
-  }, [owner, repo]);
-
-  const branchError = base && head && base === head ? "Base and head branches must be different" : null;
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) {
-      setError("Title is required");
-      return;
-    }
-    if (branchError) {
-      setError(branchError);
-      return;
-    }
-
-    const allowedBranches = new Set(branches.map((branch) => branch.name));
-    if (!allowedBranches.has(base) || !allowedBranches.has(head)) {
-      setError("Selected branches are not valid for this repository");
-      return;
-    }
-
-    setSubmitting(true);
-    setError(null);
+  const onSubmit = handleSubmit(async (data) => {
+    setSubmitError(null);
     try {
-      const created = await createPullRequest(owner, repo, {
-        title: title.trim(),
-        head,
-        base,
-        body,
-      });
-      router.push(`/${owner}/${repo}/pull/${created.number}`);
+      const pr = await apiClient.post<{ number: number }>(
+        `/api/v3/repos/${owner}/${repo}/pulls`,
+        {
+          title: data.title,
+          body: data.body ?? "",
+          head: data.head,
+          base: data.base,
+        },
+      );
+      router.push(`/${owner}/${repo}/pull/${pr.number}`);
     } catch (err) {
-      if (err instanceof ApiError) {
-        setError(err.message);
+      if (isApiError(err)) {
+        setSubmitError(err.message ?? "Failed to create pull request");
       } else {
-        setError(err instanceof Error ? err.message : "Failed to create pull request");
+        setSubmitError("Failed to create pull request");
       }
-      setSubmitting(false);
     }
-  };
+  });
 
   if (!owner || !repo) return null;
 
@@ -98,53 +84,56 @@ export default function NewPullRequestPage({ params }: Props) {
         </div>
 
         <h1 className="text-2xl font-semibold mb-6">
-          Open a pull request in{" "}
+          New Pull Request in{" "}
           <span className="text-[#0969da]">
             {owner}/{repo}
           </span>
         </h1>
 
-        <form onSubmit={handleSubmit} className="bg-white border border-[#d0d7de] rounded-md p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <form onSubmit={onSubmit} className="bg-white border border-[#d0d7de] rounded-md p-6">
+          {submitError && (
+            <div className="mb-4 px-3 py-2 text-sm text-[#d1242f] bg-[#ffebe9] border border-[#ff8182] rounded-md">
+              {submitError}
+            </div>
+          )}
+
+          <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label htmlFor="base" className="block text-sm font-semibold mb-1">
-                Base branch
+                Base branch <span className="text-[#d1242f]">*</span>
               </label>
-              <select
+              <input
                 id="base"
-                value={base}
-                onChange={(e) => setBase(e.target.value)}
-                className="w-full px-3 py-2 border border-[#d0d7de] rounded-md text-sm bg-white"
-              >
-                {branches.map((branch) => (
-                  <option key={branch.name} value={branch.name}>
-                    {branch.name}
-                  </option>
-                ))}
-              </select>
+                type="text"
+                {...register("base")}
+                className={`w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#0969da] ${
+                  formState.errors.base ? "border-[#d1242f]" : "border-[#d0d7de]"
+                }`}
+                placeholder="main"
+              />
+              {formState.errors.base?.message && (
+                <span className="text-xs text-[#d1242f] mt-1 block">{formState.errors.base.message}</span>
+              )}
             </div>
+
             <div>
               <label htmlFor="head" className="block text-sm font-semibold mb-1">
-                Compare branch
+                Head branch <span className="text-[#d1242f]">*</span>
               </label>
-              <select
+              <input
                 id="head"
-                value={head}
-                onChange={(e) => setHead(e.target.value)}
-                className="w-full px-3 py-2 border border-[#d0d7de] rounded-md text-sm bg-white"
-              >
-                {branches.map((branch) => (
-                  <option key={branch.name} value={branch.name}>
-                    {branch.name}
-                  </option>
-                ))}
-              </select>
+                type="text"
+                {...register("head")}
+                className={`w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#0969da] ${
+                  formState.errors.head ? "border-[#d1242f]" : "border-[#d0d7de]"
+                }`}
+                placeholder="feature/my-branch"
+              />
+              {formState.errors.head?.message && (
+                <span className="text-xs text-[#d1242f] mt-1 block">{formState.errors.head.message}</span>
+              )}
             </div>
           </div>
-
-          {branchError && (
-            <p className="mb-4 text-sm text-[#d1242f]">{branchError}</p>
-          )}
 
           <div className="mb-4">
             <label htmlFor="title" className="block text-sm font-semibold mb-1">
@@ -153,48 +142,36 @@ export default function NewPullRequestPage({ params }: Props) {
             <input
               id="title"
               type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3 py-2 border border-[#d0d7de] rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#0969da]"
+              {...register("title")}
+              className={`w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#0969da] ${
+                formState.errors.title ? "border-[#d1242f]" : "border-[#d0d7de]"
+              }`}
               placeholder="Pull request title"
               maxLength={256}
             />
+            <div className="flex justify-between mt-1">
+              {formState.errors.title?.message ? (
+                <span className="text-xs text-[#d1242f]">{formState.errors.title.message}</span>
+              ) : (
+                <span className="text-xs text-[#656d76]">Required</span>
+              )}
+              <span className={`text-xs ${title.length > 256 ? "text-[#d1242f]" : "text-[#656d76]"}`}>
+                {title.length}/256
+              </span>
+            </div>
           </div>
 
           <div className="mb-4">
-            <div className="flex justify-between items-center mb-1">
-              <label htmlFor="body" className="text-sm font-semibold">
-                Body
-              </label>
-              <button
-                type="button"
-                onClick={() => setShowPreview((p) => !p)}
-                className="text-sm text-[#0969da] hover:underline"
-              >
-                {showPreview ? "Edit" : "Preview"}
-              </button>
-            </div>
-            {showPreview ? (
-              <div
-                className="min-h-[200px] p-3 border border-[#d0d7de] rounded-md prose prose-sm max-w-none"
-                dangerouslySetInnerHTML={{
-                  __html: body.trim()
-                    ? renderMarkdown(body)
-                    : "<p class='text-[#656d76]'>Nothing to preview</p>",
-                }}
-              />
-            ) : (
-              <textarea
-                id="body"
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                className="w-full min-h-[200px] px-3 py-2 border border-[#d0d7de] rounded-md text-sm resize-y focus:outline-none focus:ring-2 focus:ring-[#0969da]"
-                placeholder="Describe your changes in GitHub Flavored Markdown"
-              />
-            )}
+            <label htmlFor="body" className="block text-sm font-semibold mb-1">
+              Body
+            </label>
+            <textarea
+              id="body"
+              {...register("body")}
+              className="w-full min-h-[200px] px-3 py-2 border border-[#d0d7de] rounded-md text-sm resize-y focus:outline-none focus:ring-2 focus:ring-[#0969da]"
+              placeholder="Describe your changes"
+            />
           </div>
-
-          {error && <p className="mb-4 text-sm text-[#d1242f]">{error}</p>}
 
           <div className="flex gap-2 justify-end">
             <Link
@@ -205,10 +182,11 @@ export default function NewPullRequestPage({ params }: Props) {
             </Link>
             <button
               type="submit"
-              disabled={!title.trim() || !!branchError || submitting}
-              className="px-4 py-1.5 text-sm bg-[#1f883d] text-white rounded-md font-semibold border border-black/10 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={formState.isSubmitting}
+              className="inline-flex items-center gap-2 px-4 py-1.5 text-sm bg-[#1f883d] text-white rounded-md font-semibold border border-black/10 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {submitting ? "Creating…" : "Create pull request"}
+              {formState.isSubmitting && <span className="animate-spin">⟳</span>}
+              {formState.isSubmitting ? "Creating…" : "Create pull request"}
             </button>
           </div>
         </form>
