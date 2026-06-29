@@ -1,2 +1,2 @@
-DROP TABLE IF EXISTS ssh_keys;
 DROP TABLE IF EXISTS host_keys;
+DROP TABLE IF EXISTS ssh_keys;

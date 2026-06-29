@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type Visibility string
 
@@ -21,6 +25,7 @@ type User struct {
 type AccessToken struct {
 	ID        int64
 	UserID    int64
+	UserUUID  uuid.UUID
 	TokenHash string
 	Scopes    []string
 	ExpiresAt *time.Time
