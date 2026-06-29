@@ -29,12 +29,16 @@ func (uc *RerunRunUsecase) Execute(ctx context.Context, input RerunRunInput) (*e
 	if run == nil {
 		return nil, domain.ErrNotFound
 	}
+	if run.OrganizationID != input.OrganizationID {
+		return nil, domain.ErrNotFound
+	}
 
 	if run.Status != "completed" {
 		return nil, domain.ErrConflict
 	}
 
 	newRun := &entity.WorkflowRun{
+		ID:             uuid.New(),
 		OrganizationID: run.OrganizationID,
 		RepositoryID:   run.RepositoryID,
 		WorkflowID:     run.WorkflowID,

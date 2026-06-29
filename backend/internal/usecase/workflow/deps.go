@@ -27,7 +27,11 @@ type WorkflowRunRepository interface {
 	Create(ctx context.Context, run *entity.WorkflowRun) error
 }
 
-type Artifact struct {
+type WorkflowJobRepository interface {
+	ListByRunID(ctx context.Context, orgID, runID uuid.UUID) ([]*entity.WorkflowJob, error)
+}
+
+type WorkflowArtifact struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID
 	RunID          uuid.UUID
@@ -37,5 +41,5 @@ type Artifact struct {
 }
 
 type ArtifactRepository interface {
-	ListByRunID(ctx context.Context, runID, orgID uuid.UUID) ([]*Artifact, error)
+	ListByRunID(ctx context.Context, runID, orgID uuid.UUID) ([]*WorkflowArtifact, error)
 }

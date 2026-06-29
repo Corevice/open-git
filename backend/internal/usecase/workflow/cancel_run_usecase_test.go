@@ -45,6 +45,19 @@ func (m *mockCancelRunRepo) Create(_ context.Context, _ *entity.WorkflowRun) err
 	return nil
 }
 
+func TestCancelRunUsecase_ErrNotFoundWhenRunNil(t *testing.T) {
+	repo := &mockCancelRunRepo{run: nil}
+	uc := NewCancelRunUsecase(repo)
+
+	err := uc.Execute(context.Background(), CancelRunInput{
+		OrganizationID: uuid.New(),
+		RunID:          uuid.New(),
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
 func TestCancelRunUsecase_ErrConflictWhenCompleted(t *testing.T) {
 	runID := uuid.New()
 	repo := &mockCancelRunRepo{
