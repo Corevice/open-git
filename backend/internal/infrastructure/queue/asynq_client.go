@@ -9,8 +9,19 @@ import (
 )
 
 const (
-	TypeWebhookDeliver = "webhook:deliver"
+	TypeWebhookDeliver  = "webhook:deliver"
+	TypeMCPVerification = "mcp:verification"
+	TypeArtifactCleanup = "artifact:cleanup"
+	TypeDispatchJob     = "actions:dispatch_job"
+	TypeCancelJob       = "actions:cancel_job"
 )
+
+type MCPVerificationPayload struct {
+	RunID              string   `json:"run_id"`
+	OrganizationID     string   `json:"organization_id"`
+	RepositoryFullName string   `json:"repository_full_name"`
+	Targets            []string `json:"targets"`
+}
 
 type WebhookDeliveryPayload struct {
 	DeliveryID     string `json:"delivery_id"`
@@ -20,6 +31,16 @@ type WebhookDeliveryPayload struct {
 	Event          string `json:"event"`
 	Body           []byte `json:"body"`
 	Attempt        int    `json:"attempt"`
+}
+
+type DispatchJobPayload struct {
+	JobID          string `json:"job_id"`
+	OrganizationID string `json:"organization_id"`
+	RunsOn         string `json:"runs_on"`
+}
+
+type CancelJobPayload struct {
+	JobID string `json:"job_id"`
 }
 
 func NewAsynqClient(addr string) *asynq.Client {
@@ -33,6 +54,15 @@ func NewAsynqServer(addr string, concurrency int) *asynq.Server {
 	)
 }
 
+func EnqueueMCPVerification(ctx context.Context, client *asynq.Client, payload MCPVerificationPayload) (*asynq.TaskInfo, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal mcp verification payload: %w", err)
+	}
+	task := asynq.NewTask(TypeMCPVerification, data, asynq.MaxRetry(3))
+	return client.EnqueueContext(ctx, task)
+}
+
 func EnqueueWebhookDelivery(ctx context.Context, client *asynq.Client, payload WebhookDeliveryPayload) (*asynq.TaskInfo, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -40,4 +70,27 @@ func EnqueueWebhookDelivery(ctx context.Context, client *asynq.Client, payload W
 	}
 	task := asynq.NewTask(TypeWebhookDeliver, data)
 	return client.EnqueueContext(ctx, task, asynq.MaxRetry(5))
+}
+
+func EnqueueArtifactCleanup(ctx context.Context, client *asynq.Client) (*asynq.TaskInfo, error) {
+	task := asynq.NewTask(TypeArtifactCleanup, nil)
+	return client.EnqueueContext(ctx, task, asynq.Queue("default"))
+}
+
+func EnqueueDispatchJob(ctx context.Context, client *asynq.Client, payload DispatchJobPayload) (*asynq.TaskInfo, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal dispatch job payload: %w", err)
+	}
+	task := asynq.NewTask(TypeDispatchJob, data)
+	return client.EnqueueContext(ctx, task)
+}
+
+func EnqueueCancelJob(ctx context.Context, client *asynq.Client, payload CancelJobPayload) (*asynq.TaskInfo, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal cancel job payload: %w", err)
+	}
+	task := asynq.NewTask(TypeCancelJob, data)
+	return client.EnqueueContext(ctx, task)
 }

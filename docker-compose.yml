@@ -15,7 +15,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -92,6 +92,18 @@ services:
       retries: 3
     restart: unless-stopped
 
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-minioadmin};
+      mc mb --ignore-existing myminio/artifacts;
+      exit 0;
+      "
+
   traefik:
     image: traefik:v3
     command:
@@ -134,8 +146,19 @@ services:
       - "3100:3100"
     volumes:
       - open-git-loki:/loki
-      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
-    command: -config.file=/etc/loki/local-config.yaml
+      - ./deploy/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+    command: -config.file=/etc/loki/loki-config.yaml
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./deploy/promtail-config.yaml:/etc/promtail/config.yaml:ro
+    command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      - loki
     restart: unless-stopped
 
   grafana:

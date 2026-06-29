@@ -22,6 +22,7 @@ describe("ThemeToggle", () => {
       theme: "light",
       setTheme: mockSetTheme,
       resolvedTheme: "light",
+      themes: ["light", "dark"],
     });
   });
 
@@ -39,6 +40,7 @@ describe("ThemeToggle", () => {
       theme: "dark",
       setTheme: mockSetTheme,
       resolvedTheme: "dark",
+      themes: ["light", "dark"],
     });
 
     const { container } = render(<ThemeToggle />);

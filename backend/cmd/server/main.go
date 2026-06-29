@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"database/sql"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -14,38 +15,58 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	gossh "github.com/gliderlabs/ssh"
 	"github.com/google/uuid"
+	cryptossh "golang.org/x/crypto/ssh"
+	"github.com/hibiken/asynq"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+	echoMiddleware "github.com/labstack/echo/v4/middleware"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/redis/go-redis/v9"
 
+	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/compat"
 	"github.com/open-git/backend/internal/config"
+	"github.com/open-git/backend/graph"
 	obs "github.com/open-git/backend/observability"
-	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/handler"
-	appmiddleware "github.com/open-git/backend/internal/middleware"
 	"github.com/open-git/backend/internal/infrastructure/crypto"
 	infraDB "github.com/open-git/backend/internal/infrastructure/database"
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
-	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
+	"github.com/open-git/backend/internal/infrastructure/queue"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
+	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
+	"github.com/open-git/backend/internal/logger"
+	"github.com/open-git/backend/internal/middleware"
+	repo "github.com/open-git/backend/internal/repository"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
+	docsuc "github.com/open-git/backend/internal/usecase/docs"
+	importUC "github.com/open-git/backend/internal/usecase/import"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
+	labelusecase "github.com/open-git/backend/internal/usecase/label"
+	mcpusecase "github.com/open-git/backend/internal/usecase/mcp"
+	milestoneusecase "github.com/open-git/backend/internal/usecase/milestone"
 	orgUC "github.com/open-git/backend/internal/usecase/org"
 	prusecase "github.com/open-git/backend/internal/usecase/pr"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
+	securityUC "github.com/open-git/backend/internal/usecase/security"
 	userUC "github.com/open-git/backend/internal/usecase/user"
+	userpreferencesUC "github.com/open-git/backend/internal/usecase/user_preferences"
 	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
+	"github.com/open-git/backend/internal/worker"
+	artifactusecase "github.com/open-git/backend/internal/usecase/artifact"
+	secretusecase "github.com/open-git/backend/internal/usecase/secret"
 )
 
 var (
@@ -54,11 +75,25 @@ var (
 	buildTime = "unknown"
 )
 
+func validateRequiredEnv(vars []string) error {
+	for _, v := range vars {
+		if os.Getenv(v) == "" {
+			return fmt.Errorf("missing required environment variable: %s", v)
+		}
+	}
+	return nil
+}
+
 func main() {
+	if err := validateRequiredEnv([]string{"JWT_SECRET", "DB_DSN"}); err != nil {
+		log.Fatalf("%v", err)
+	}
+
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("invalid config: %v", err)
 	}
+	middleware.InitLogging(os.Getenv("LOG_LEVEL"))
 
 	db, err := infraDB.Connect(cfg)
 	if err != nil {
@@ -69,7 +104,7 @@ func main() {
 	if err := infraDB.Ping(context.Background(), db); err != nil {
 		log.Fatalf("ping database: %v", err)
 	}
-	log.Printf("database connected (%s): %s", cfg.DBType, infraDB.MaskDSN(cfg.DBDSN))
+	middleware.Log().Info("database connected", "db_type", cfg.DBType, "dsn", infraDB.MaskDSN(cfg.DBDSN))
 
 	if cfg.DBAutoMigrate {
 		if err := infraDB.RunMigrations(db, cfg.DBType, "./migrations"); err != nil {
@@ -81,23 +116,21 @@ func main() {
 	e.HideBanner = true
 	e.HTTPErrorHandler = newHTTPErrorHandler()
 
-	e.Use(middleware.RequestID())
-	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
-		Format: `{"time":"${time_rfc3339_nano}","method":"${method}","path":"${path}","status":${status},"latency_ms":"${latency}","request_id":"${id}"}` + "\n",
-	}))
-	e.Use(middleware.RecoverWithConfig(middleware.RecoverConfig{
-		LogErrorFunc: func(c echo.Context, err error, stack []byte) error {
-			c.Logger().Errorf("panic recovered: %v\n%s", err, stack)
-			return nil
-		},
-	}))
-	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+	if err := middleware.SetupProxyTrust(e, cfg.TrustedProxyCIDRs); err != nil {
+		log.Printf("warning: setup proxy trust: %v", err)
+	}
+
+	e.Use(echoMiddleware.RequestID())
+	e.Use(middleware.SecurityHeadersMiddleware())
+	e.Use(middleware.RequestLogger())
+	e.Use(middleware.StructuredRecover())
+	e.Use(echoMiddleware.CORSWithConfig(echoMiddleware.CORSConfig{
 		AllowOrigins: corsAllowedOrigins(),
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderXRequestID},
 	}))
-	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(20)))
-	e.Use(middleware.TimeoutWithConfig(middleware.TimeoutConfig{Timeout: 30 * time.Second}))
+	e.Use(echoMiddleware.RateLimiter(echoMiddleware.NewRateLimiterMemoryStore(20)))
+	e.Use(echoMiddleware.TimeoutWithConfig(echoMiddleware.TimeoutConfig{Timeout: 30 * time.Second}))
 	e.Use(requestContextMiddleware())
 	if cfg.MetricsEnabled {
 		e.Use(obs.EchoPrometheusMiddleware)
@@ -127,7 +160,7 @@ func main() {
 	defer cancel()
 	if sshServer != nil {
 		if err := sshServer.Close(); err != nil {
-			log.Printf("shutdown ssh server: %v", err)
+			middleware.Log().Info("shutdown ssh server", "error", err)
 		}
 	}
 	if err := e.Shutdown(ctx); err != nil {
@@ -156,7 +189,7 @@ func (r *gitResolver) Resolve(ctx context.Context, ownerLogin, repoName string) 
 	return &handler.ResolvedGitRepository{
 		ID:             repository.ID,
 		OrganizationID: repository.OrganizationID,
-		OwnerID:        appmiddleware.UUIDToInt64(repository.OwnerID),
+		OwnerID:        middleware.UUIDToInt64(repository.OwnerID),
 		Name:           repository.Name,
 		Visibility:     repository.Visibility,
 		DiskPath:       filepath.Join(r.gitRoot, ownerLogin, repoName+".git"),
@@ -172,7 +205,7 @@ type membershipRoleLookup interface {
 }
 
 func (a *gitMembershipAdapter) HasReadAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error) {
-	_, err := a.memberships.GetRole(ctx, organizationID, appmiddleware.Int64ToUUID(userID))
+	_, err := a.memberships.GetRole(ctx, organizationID, middleware.Int64ToUUID(userID))
 	if errors.Is(err, domain.ErrNotFound) {
 		return false, nil
 	}
@@ -183,7 +216,7 @@ func (a *gitMembershipAdapter) HasReadAccess(ctx context.Context, userID int64, 
 }
 
 func (a *gitMembershipAdapter) HasWriteAccess(ctx context.Context, userID int64, organizationID uuid.UUID) (bool, error) {
-	role, err := a.memberships.GetRole(ctx, organizationID, appmiddleware.Int64ToUUID(userID))
+	role, err := a.memberships.GetRole(ctx, organizationID, middleware.Int64ToUUID(userID))
 	if errors.Is(err, domain.ErrNotFound) {
 		return false, nil
 	}
@@ -228,12 +261,12 @@ func (a *legacyUserRepoAdapter) Create(ctx context.Context, user *domain.User) e
 	if err := a.users.Create(ctx, entityUser); err != nil {
 		return err
 	}
-	user.ID = uuidToInt64(entityUser.ID)
+	user.ID = middleware.UUIDToInt64(entityUser.ID)
 	return nil
 }
 
 func (a *legacyUserRepoAdapter) GetByID(ctx context.Context, id int64) (*domain.User, error) {
-	entityUser, err := a.users.GetByID(ctx, appmiddleware.Int64ToUUID(id))
+	entityUser, err := a.users.GetByID(ctx, middleware.Int64ToUUID(id))
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +298,7 @@ func (r *gitSSHInfraResolver) Resolve(ctx context.Context, ownerLogin, repoName 
 	if err != nil {
 		return "", uuid.Nil, err
 	}
-	return resolved.DiskPath, appmiddleware.Int64ToUUID(resolved.OwnerID), nil
+	return resolved.DiskPath, middleware.Int64ToUUID(resolved.OwnerID), nil
 }
 
 func entityUserToDomain(user *entity.User) *domain.User {
@@ -273,7 +306,7 @@ func entityUserToDomain(user *entity.User) *domain.User {
 		return nil
 	}
 	return &domain.User{
-		ID:           appmiddleware.UUIDToInt64(user.ID),
+		ID:           middleware.UUIDToInt64(user.ID),
 		Login:        user.Login,
 		Email:        user.Email,
 		PasswordHash: user.PasswordHash,
@@ -289,14 +322,14 @@ func domainUserToEntity(user *domain.User) *entity.User {
 		CreatedAt:    user.CreatedAt,
 	}
 	if user.ID != 0 {
-		entityUser.ID = appmiddleware.Int64ToUUID(user.ID)
+		entityUser.ID = middleware.Int64ToUUID(user.ID)
 	}
 	return entityUser
 }
 
 func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
 	if data, err := os.ReadFile(path); err == nil {
-		signer, err := gossh.ParsePrivateKey(data)
+		signer, err := cryptossh.ParsePrivateKey(data)
 		if err != nil {
 			return nil, fmt.Errorf("parse host key: %w", err)
 		}
@@ -322,7 +355,7 @@ func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
 		return nil, fmt.Errorf("write host key: %w", err)
 	}
 
-	return gossh.NewSignerFromKey(privateKey)
+	return cryptossh.NewSignerFromKey(privateKey)
 }
 
 func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SSHServer, error) {
@@ -332,6 +365,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	entityUserRepo := infrarepo.NewUserRepository(sqlxDB)
 	userRepo := &legacyUserRepoAdapter{users: entityUserRepo}
 	repoRepo := infrarepo.NewRepositoryRepository(sqlxDB)
+	collaboratorRepo := infrarepo.NewRepositoryCollaboratorRepository(sqlxDB)
 	membershipRepo := infrarepo.NewMembershipRepository(sqlxDB)
 	legacyMembershipRepo := &legacyMembershipRepoAdapter{inner: membershipRepo}
 	orgRepo := infraDB.NewOrganizationRepository(db)
@@ -344,9 +378,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	milestoneRepo := infrarepo.NewMilestoneRepository(sqlxDB)
 	txManager := infraDB.NewDomainTxManager(sqlxDB)
 
-	authMiddleware := appmiddleware.AuthMiddleware(tokenRepo)
-	realGitBasicAuth := appmiddleware.GitBasicAuthMiddleware(tokenRepo)
-	realOptionalGitAuth := appmiddleware.OptionalGitAuth(tokenRepo)
+	authMiddleware := middleware.AuthMiddleware(tokenRepo)
+	realGitBasicAuth := middleware.GitBasicAuthMiddleware(tokenRepo)
+	realOptionalGitAuth := middleware.OptionalGitAuth(tokenRepo)
 
 	repoGitResolver := &gitResolver{repos: repoRepo, gitRoot: cfg.GitDataRoot}
 	membershipAdapter := &gitMembershipAdapter{memberships: membershipRepo}
@@ -362,12 +396,20 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	)
 	getRepoUC := repoUC.NewGetRepositoryUsecase(repoRepo, userRepo, legacyMembershipRepo)
 	listReposUC := repoUC.NewListRepositoriesUsecase(repoRepo, legacyMembershipRepo, userRepo)
-	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, listReposUC, repoRepo, orgRepo, auditLogRepo)
+	auditListRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	listAuditLogsUC := repoUC.NewListAuditLogsUsecase(auditListRepo)
+	searchAuditLogsUC := securityUC.NewSearchAuditLogsUsecase(auditListRepo)
+	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, listReposUC, repoRepo, orgRepo, auditLogRepo, listAuditLogsUC)
 
 	getCurrentUserUC := userUC.NewGetCurrentUserUsecase(userRepo)
 	getUserByLoginUC := userUC.NewGetUserByLoginUsecase(userRepo)
 	updateUserUC := userUC.NewUpdateUserUsecase(entityUserRepo)
 	userHandler := handler.NewUserHandler(getCurrentUserUC, getUserByLoginUC, updateUserUC)
+
+	userPrefsRepo := infrarepo.NewUserPreferencesRepository(sqlxDB)
+	getUserPrefsUC := userpreferencesUC.NewGetUserPreferencesUsecase(userPrefsRepo)
+	updateUserPrefsUC := userpreferencesUC.NewUpdateUserPreferencesUsecase(userPrefsRepo)
+	userPreferencesHandler := handler.NewUserPreferencesHandler(getUserPrefsUC, updateUserPrefsUC)
 
 	getOrgUC := orgUC.NewGetOrgUsecase(orgRepo)
 	listUserOrgsUC := orgUC.NewListUserOrgsUsecase(orgRepo)
@@ -390,24 +432,62 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	)
 
 	contentHandler := handler.NewContentHandler(repoGitResolver)
+	branchHandler := handler.NewBranchHandler(repoGitResolver, repoRepo, membershipAdapter)
 
 	issuePATUC := authUC.NewIssuePATUsecase(tokenRepo)
 	revokePATUC := authUC.NewRevokePATUsecase(tokenRepo)
-	tokenHandler := handler.NewTokenHandler(tokenRepo, issuePATUC, revokePATUC)
+	tokenAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	tokenHandler := handler.NewTokenHandler(tokenRepo, issuePATUC, revokePATUC, tokenAuditRepo, entityUserRepo)
 
 	resolveRepo := func(c echo.Context, owner, name string) (*entity.Repository, error) {
 		return getRepoUC.Execute(c.Request().Context(), repoUC.GetRepositoryInput{
-			RequestUserID: appmiddleware.UserUUIDFromContext(c),
+			RequestUserID: middleware.UserUUIDFromContext(c),
 			OwnerLogin:    owner,
 			Name:          name,
 		})
 	}
 
+	listLabelsUC := labelusecase.NewListLabelsUsecase(labelRepo)
+	createLabelUC := labelusecase.NewCreateLabelUsecase(labelRepo)
+	updateLabelUC := labelusecase.NewUpdateLabelUsecase(labelRepo)
+	deleteLabelUC := labelusecase.NewDeleteLabelUsecase(labelRepo, issueAuditRepo)
+	addIssueLabelsUC := labelusecase.NewAddIssueLabelsUsecase(labelRepo)
+	removeIssueLabelUC := labelusecase.NewRemoveIssueLabelUsecase(labelRepo)
+	labelHandler := handler.NewLabelHandler(
+		createLabelUC,
+		listLabelsUC,
+		updateLabelUC,
+		deleteLabelUC,
+		addIssueLabelsUC,
+		removeIssueLabelUC,
+		resolveRepo,
+	)
+
+	listMilestonesUC := milestoneusecase.NewListMilestonesUsecase(milestoneRepo)
+	createMilestoneUC := milestoneusecase.NewCreateMilestoneUsecase(milestoneRepo, issueAuditRepo)
+	updateMilestoneUC := milestoneusecase.NewUpdateMilestoneUsecase(milestoneRepo)
+	deleteMilestoneUC := milestoneusecase.NewDeleteMilestoneUsecase(milestoneRepo, issueAuditRepo)
+	milestoneHandler := handler.NewMilestoneHandler(
+		listMilestonesUC,
+		createMilestoneUC,
+		updateMilestoneUC,
+		deleteMilestoneUC,
+		resolveRepo,
+	)
+
 	createIssueUC := issueusecase.NewCreateIssueUsecase(issueRepo, issueAuditRepo, txManager)
 	updateIssueUC := issueusecase.NewUpdateIssueUsecase(issueRepo, labelRepo, milestoneRepo, issueAuditRepo)
 	createCommentUC := issueusecase.NewCreateCommentUsecase(issueRepo, commentRepo, issueAuditRepo)
 	listIssuesUC := issueusecase.NewListIssuesUsecase(issueRepo)
-	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, createCommentUC, updateIssueUC, resolveRepo)
+	getIssueUC := issueusecase.NewGetIssueUsecase(issueRepo)
+	issueHandler := handler.NewIssueHandler(
+		createIssueUC,
+		listIssuesUC,
+		getIssueUC,
+		updateIssueUC,
+		createCommentUC,
+		resolveRepo,
+	)
 
 	gitSvc := infragit.NewGitServiceAdapter()
 	prRepo := infrarepo.NewPullRequestRepository(sqlxDB)
@@ -418,24 +498,16 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	wfRepo := infrarepo.NewWorkflowRunRepository(sqlxDB)
 	prAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
 	prTxManager := infrarepo.NewTransactionManager(sqlxDB)
-	createPRUC := prusecase.NewCreatePRUsecase(prRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo)
 	mergePRUC := prusecase.NewMergePRUsecase(prRepo, bpRepo, prReviewRepo, wfRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo)
-	pullRequestHandler := handler.NewPullRequestHandler(
-		createPRUC,
-		mergePRUC,
-		prRepo,
-		prReviewRepo,
-		prReviewCommentRepo,
-		gitSvc,
-		resolveRepo,
-	)
+	createReviewUC := prusecase.NewCreateReviewUsecase(prRepo, prReviewRepo, prAuditRepo, membershipRepo)
+	listReviewsUC := prusecase.NewListReviewsUsecase(prRepo, prReviewRepo)
 
 	bpReadRepo := &branchProtectionReadRepo{db: sqlxDB}
 	bpWriteRepo := &branchProtectionWriteRepo{db: sqlxDB}
 	bpUpsertUC := repoUC.NewUpsertBranchProtectionUsecase(bpWriteRepo, auditLogRepo)
 	bpDeleteUC := repoUC.NewDeleteBranchProtectionUsecase(bpWriteRepo, auditLogRepo)
 	checkRepoAdmin := func(c echo.Context, repo *entity.Repository) error {
-		userID := appmiddleware.UserUUIDFromContext(c)
+		userID := middleware.UserUUIDFromContext(c)
 		if repo.OwnerID == userID {
 			return nil
 		}
@@ -471,33 +543,238 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		resolveRepo,
 	)
 
+	actionSecretEnc := newActionSecretEncryptorFromEnv()
+	actionSecretRepo := infrarepo.NewActionSecretRepository(sqlxDB, actionSecretEnc.SecretEncryptor)
+	actionSecretAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	listRepoSecretsUC := secretusecase.NewListRepoSecretsUsecase(actionSecretRepo)
+	listOrgSecretsUC := secretusecase.NewListOrgSecretsUsecase(actionSecretRepo)
+	getActionSecretUC := secretusecase.NewGetActionSecretUsecase(actionSecretRepo)
+	upsertActionSecretUC := secretusecase.NewUpsertActionSecretUsecase(actionSecretRepo, actionSecretAuditRepo, actionSecretEnc)
+	deleteActionSecretUC := secretusecase.NewDeleteActionSecretUsecase(actionSecretRepo, actionSecretAuditRepo)
+	getActionSecretPublicKeyUC := secretusecase.NewGetPublicKeyUsecase(actionSecretEnc)
+	resolveOrg := func(c echo.Context, orgLogin string) (uuid.UUID, error) {
+		org, err := entityOrgRepo.GetByLogin(c.Request().Context(), orgLogin)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		if org == nil {
+			return uuid.Nil, apperror.ErrNotFound
+		}
+		return org.ID, nil
+	}
+	secretHandler := handler.NewSecretHandler(
+		listRepoSecretsUC,
+		listOrgSecretsUC,
+		getActionSecretUC,
+		upsertActionSecretUC,
+		deleteActionSecretUC,
+		getActionSecretPublicKeyUC,
+		actionSecretRepo,
+		repoRepo,
+		actionSecretEnc,
+		resolveRepo,
+		resolveOrg,
+	)
+
 	compatRepo := infrarepo.NewCompatRepository(sqlxDB)
 	compatRunner := &compat.Runner{}
 	getReportUC := compatusecase.NewGetReportUsecase(compatRepo)
 	triggerRunUC := compatusecase.NewTriggerRunUsecase(compatRepo, compatRunner)
 	compatHandler := handler.NewCompatHandler(getReportUC, triggerRunUC, compatRepo)
 
+	minioBucket := getenv("MINIO_BUCKET", "artifacts")
+	var artifactStorage artifactusecase.ArtifactStorage
+	if cfg.MinioEndpoint != "" {
+		minioStorage, err := newArtifactMinioStorage(
+			cfg.MinioEndpoint,
+			os.Getenv("MINIO_ACCESS_KEY"),
+			os.Getenv("MINIO_SECRET_KEY"),
+			getenvBool("MINIO_USE_TLS", false),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("init artifact storage: %w", err)
+		}
+		if err := minioStorage.EnsureBucket(context.Background(), minioBucket); err != nil {
+			return nil, fmt.Errorf("ensure artifact bucket: %w", err)
+		}
+		artifactStorage = minioStorage
+	}
+
+	artifactRepo := infrarepo.NewArtifactRepository(sqlxDB)
+	createArtifactUC := artifactusecase.NewCreateArtifactUsecase(artifactRepo, artifactStorage, minioBucket)
+	completeArtifactUC := artifactusecase.NewCompleteArtifactUsecase(artifactRepo)
+	listArtifactsUC := artifactusecase.NewListArtifactsUsecase(artifactRepo)
+	getArtifactDownloadURLUC := artifactusecase.NewGetArtifactDownloadURLUsecase(artifactRepo, artifactStorage, minioBucket)
+	deleteArtifactUC := artifactusecase.NewDeleteArtifactUsecase(artifactRepo, artifactStorage, minioBucket)
+	artifactHandler := handler.NewArtifactHandler(
+		createArtifactUC,
+		completeArtifactUC,
+		listArtifactsUC,
+		getArtifactDownloadURLUC,
+		deleteArtifactUC,
+		resolveRepo,
+	)
+
+	mcpVerificationRepo := infrarepo.NewSQLxMCPVerificationRepository(sqlxDB)
+	mcpAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	getLatestVerificationUC := mcpusecase.NewGetLatestVerificationUsecase(mcpVerificationRepo)
+	listHistoryVerificationUC := mcpusecase.NewListVerificationHistoryUsecase(mcpVerificationRepo)
+	getJobStatusUC := mcpusecase.NewGetJobStatusUsecase(mcpVerificationRepo)
+	deleteVerificationUC := mcpusecase.NewDeleteVerificationUsecase(mcpVerificationRepo, mcpAuditRepo)
+
+	var runVerificationUC *mcpusecase.RunVerificationUsecase
+	var asynqClient *asynq.Client
+	if cfg.RedisAddr != "" {
+		asynqClient = queue.NewAsynqClient(cfg.RedisAddr)
+		runVerificationUC = mcpusecase.NewRunVerificationUsecase(mcpVerificationRepo, mcpAuditRepo, asynqClient)
+
+		asynqServer := queue.NewAsynqServer(cfg.RedisAddr, 10)
+		mux := asynq.NewServeMux()
+		mcpWorker := worker.NewMCPVerificationWorker(mcpVerificationRepo, cfg.WebBaseURL)
+		mux.HandleFunc(queue.TypeMCPVerification, mcpWorker.HandleMCPVerification)
+		artifactCleanupWorker := worker.NewArtifactCleanupWorker(artifactRepo, artifactStorage, minioBucket)
+		mux.HandleFunc(queue.TypeArtifactCleanup, artifactCleanupWorker.HandleCleanup)
+		scheduler := asynq.NewScheduler(asynq.RedisClientOpt{Addr: cfg.RedisAddr}, nil)
+		if _, err := scheduler.Register("@hourly", asynq.NewTask(queue.TypeArtifactCleanup, nil)); err != nil {
+			return nil, fmt.Errorf("register artifact cleanup scheduler: %w", err)
+		}
+		go func() {
+			if err := scheduler.Run(); err != nil {
+				middleware.Log().Info("asynq scheduler stopped", "error", err)
+			}
+		}()
+		prMergeableWorker := queue.NewPRMergeableWorker(prRepo, repoRepo, gitSvc)
+		mux.HandleFunc(queue.TypePRMergeableCheck, prMergeableWorker.HandlePRMergeableCheck)
+		go func() {
+			middleware.Log().Info("asynq server starting")
+			if err := asynqServer.Run(mux); err != nil {
+				middleware.Log().Info("asynq server stopped", "error", err)
+			}
+		}()
+	} else {
+		runVerificationUC = mcpusecase.NewRunVerificationUsecaseWithDeps(
+			mcpVerificationRepo,
+			mcpAuditRepo,
+			noopMCPEnqueuer{},
+		)
+	}
+
+	var prMergeableEnqueuer prusecase.PRMergeableEnqueuer = prusecase.NoopPRMergeableEnqueuer{}
+	if asynqClient != nil {
+		prMergeableEnqueuer = asynqPRMergeableEnqueuer{client: asynqClient}
+	}
+	createPRUC := prusecase.NewCreatePRUsecase(prRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo, prMergeableEnqueuer)
+	pullRequestHandler := handler.NewPullRequestHandler(
+		createPRUC,
+		mergePRUC,
+		createReviewUC,
+		listReviewsUC,
+		prRepo,
+		prReviewRepo,
+		prReviewCommentRepo,
+		gitSvc,
+		resolveRepo,
+	)
+
+	mcpVerificationHandler := handler.NewMCPVerificationHandler(
+		runVerificationUC,
+		getLatestVerificationUC,
+		listHistoryVerificationUC,
+		getJobStatusUC,
+		deleteVerificationUC,
+	)
+
+	importJobRepo := infrarepo.NewImportJobRepository(sqlxDB)
+	getImportUC := importUC.NewGetImportJobUsecase(importJobRepo)
+	listImportUC := importUC.NewListImportJobsUsecase(importJobRepo)
+	cancelImportUC := importUC.NewCancelImportJobUsecase(importJobRepo, membershipRepo)
+
+	var createImportUC *importUC.CreateImportJobUsecase
+	var retryImportUC *importUC.RetryImportJobUsecase
+	if cfg.RedisAddr != "" {
+		importAsynqClient := queue.NewAsynqClient(cfg.RedisAddr)
+		createImportUC = importUC.NewCreateImportJobUsecase(importJobRepo, membershipRepo, repoRepo, entityOrgRepo, importAsynqClient)
+		retryImportUC = importUC.NewRetryImportJobUsecase(importJobRepo, importJobRepo, membershipRepo, importAsynqClient)
+	} else {
+		noopImport := noopImportEnqueuer{}
+		createImportUC = importUC.NewCreateImportJobUsecaseWithDeps(importJobRepo, membershipRepo, repoRepo, entityOrgRepo, nil, noopImport)
+		retryImportUC = importUC.NewRetryImportJobUsecaseWithEnqueuer(importJobRepo, importJobRepo, membershipRepo, noopImport)
+	}
+	importHandler := handler.NewImportHandler(
+		createImportUC,
+		getImportUC,
+		listImportUC,
+		cancelImportUC,
+		retryImportUC,
+		orgRepo,
+		legacyMembershipRepo,
+	)
+
+	exportAuditLogsUC := securityUC.NewExportAuditLogsUsecase(asynqClient)
+	orgAuditLogHandler := handler.NewOrgAuditLogHandler(
+		getOrgUC,
+		membershipRepo,
+		searchAuditLogsUC,
+		exportAuditLogsUC,
+	)
+
+	securityAdvisoryRepo := infrarepo.NewSecurityAdvisoryRepository(sqlxDB)
+	dependabotAlertRepo := infrarepo.NewDependabotAlertRepository(sqlxDB)
+	listAdvisoriesUC := securityUC.NewListAdvisoriesUsecase(securityAdvisoryRepo)
+	getAdvisoryUC := securityUC.NewGetAdvisoryUsecase(securityAdvisoryRepo)
+	updateAdvisoryStateUC := securityUC.NewUpdateAdvisoryStateUsecase(securityAdvisoryRepo)
+	listDependabotAlertsUC := securityUC.NewListDependabotAlertsUsecase(dependabotAlertRepo)
+	updateDependabotAlertUC := securityUC.NewUpdateDependabotAlertUsecase(dependabotAlertRepo)
+	securityAdvisoryHandler := handler.NewSecurityAdvisoryHandler(
+		getOrgUC,
+		membershipRepo,
+		listAdvisoriesUC,
+		getAdvisoryUC,
+		updateAdvisoryStateUC,
+		resolveRepo,
+	)
+	dependabotAlertHandler := handler.NewDependabotAlertHandler(
+		membershipRepo,
+		listDependabotAlertsUC,
+		updateDependabotAlertUC,
+		dependabotAlertRepo,
+		resolveRepo,
+	)
+
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 	rateLimitHandler := handler.NewRateLimitHandler()
 	rootHandler := handler.NewRootHandler()
+
+	thirdPartyLicenses := loadLicensesFromFile(cfg.LicensesFilePath)
+	metaHandler := handler.NewMetaHandler(handler.BuildInfo{
+		AppName:     cfg.AppName,
+		Version:     version,
+		GitCommit:   commit,
+		BuildDate:   buildTime,
+		LicenseName: cfg.LicenseName,
+		SourceURL:   cfg.SourceURL,
+	}, thirdPartyLicenses)
+	metaHandler.RegisterRoutes(e)
 
 	gitHTTPHandler := handler.NewGitHTTPHandler(
 		cfg.GitDataRoot,
 		repoGitResolver,
 		membershipAdapter,
 		nil,
+		collaboratorRepo,
 		realGitBasicAuth,
 	)
 	sshKeyHandler := handler.NewSSHKeyHandler(sshKeyRepo)
+	collaboratorHandler := handler.NewCollaboratorHandler(repoGitResolver, repoRepo, collaboratorRepo, entityUserRepo)
 
 	api := e.Group("")
-	e.POST("/register", authHandler.Register)
-	e.POST("/login", authHandler.Login)
+	e.POST("/register", authHandler.Register, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
+	e.POST("/login", authHandler.Login, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
 
 	tokens := api.Group("/user/tokens", authMiddleware)
 	tokens.GET("", tokenHandler.List)
-	tokens.POST("", tokenHandler.Create)
 	tokens.DELETE("/:id", tokenHandler.Revoke)
+	api.Group("", authMiddleware, middleware.RequireScope("repo")).POST("/user/tokens", tokenHandler.Create)
 
 	keys := api.Group("/user/keys", authMiddleware)
 	keys.GET("", sshKeyHandler.List)
@@ -505,8 +782,12 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	repositoryHandler.RegisterRoutes(api, authMiddleware)
+	branchHandler.RegisterRoutes(api, authMiddleware)
+	collaboratorHandler.RegisterRoutes(api, authMiddleware)
 	contentHandler.RegisterRoutes(api)
 	issueHandler.RegisterRoutes(api, authMiddleware)
+	labelHandler.RegisterRoutes(api, authMiddleware)
+	milestoneHandler.RegisterRoutes(api, authMiddleware)
 	pullRequestHandler.RegisterRoutes(api, authMiddleware)
 	oauthHandler.RegisterRoutes(api, authMiddleware)
 	api.GET("/rate_limit", rateLimitHandler.Get)
@@ -516,25 +797,36 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	e.POST("/:owner/:repo.git/git-receive-pack", gitHTTPHandler.ReceivePack, realGitBasicAuth)
 
 	v3 := e.Group("/api/v3")
-	v3.Use(appmiddleware.GitHubCompatHeaders())
-	v3.Use(appmiddleware.RateLimitMiddleware(5000))
-	v3.Use(appmiddleware.GitHubCommonHeadersMiddleware())
+	v3.Use(middleware.GitHubCompatHeaders())
+	v3.Use(middleware.RateLimitMiddleware(5000, 60))
+	v3.Use(middleware.GitHubCommonHeadersMiddleware())
 
 	userHandler.RegisterRoutes(v3, authMiddleware)
+	userPreferencesHandler.RegisterRoutes(v3, authMiddleware)
+	v3.Group("", authMiddleware, middleware.RequireScope("admin:org")).PUT("/orgs/:org/memberships/:username", orgHandler.UpdateMembership)
 	orgHandler.RegisterRoutes(v3, authMiddleware)
+	orgAuditLogHandler.RegisterRoutes(v3, authMiddleware)
+	securityAdvisoryHandler.RegisterRoutes(v3, authMiddleware)
+	dependabotAlertHandler.RegisterRoutes(v3, authMiddleware)
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
+	branchHandler.RegisterRoutes(v3, authMiddleware)
+	collaboratorHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
 	issueHandler.RegisterRoutes(v3, authMiddleware)
+	labelHandler.RegisterRoutes(v3, authMiddleware)
+	milestoneHandler.RegisterRoutes(v3, authMiddleware)
 	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
 	branchProtectionHandler.RegisterRoutes(v3, authMiddleware)
 	webhookHandler.RegisterRoutes(v3, authMiddleware)
+	secretHandler.RegisterRoutes(v3, authMiddleware)
+	artifactHandler.RegisterRoutes(v3, authMiddleware)
 	v3.GET("/rate_limit", rateLimitHandler.Get)
 	v3.GET("", rootHandler.Get)
 
 	v3Tokens := v3.Group("/user/tokens", authMiddleware)
 	v3Tokens.GET("", tokenHandler.List)
-	v3Tokens.POST("", tokenHandler.Create)
 	v3Tokens.DELETE("/:id", tokenHandler.Revoke)
+	v3.Group("", authMiddleware, middleware.RequireScope("repo")).POST("/user/tokens", tokenHandler.Create)
 
 	v3Keys := v3.Group("/user/keys", authMiddleware)
 	v3Keys.GET("", sshKeyHandler.List)
@@ -542,8 +834,89 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3Keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	v1 := e.Group("/api/v1")
+
+	docsRoot := getenv("DOCS_ROOT", ".")
+	editBaseURL := getenv("DOCS_EDIT_BASE_URL", "")
+	docsTreeUC := docsuc.NewGetDocTreeUsecase(docsRoot)
+	docsSectionUC := docsuc.NewGetDocSectionUsecase(docsTreeUC)
+	docsHandler := handler.NewDocsHandler(docsTreeUC, docsSectionUC, editBaseURL)
+	docsHandler.RegisterRoutes(v1)
+
+	contributorsHandler := handler.NewContributorsHandler(repoGitResolver, membershipAdapter)
+	contributorsHandler.RegisterRoutes(v1)
+
+	var healthMinioClient *minio.Client
+	if cfg.MinioEndpoint != "" {
+		client, minioErr := minio.New(cfg.MinioEndpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(os.Getenv("MINIO_ACCESS_KEY"), os.Getenv("MINIO_SECRET_KEY"), ""),
+			Secure: getenvBool("MINIO_USE_TLS", false),
+		})
+		if minioErr != nil {
+			return nil, fmt.Errorf("init health minio client: %w", minioErr)
+		}
+		healthMinioClient = client
+	}
+
+	var healthRedisClient *redis.Client
+	if cfg.RedisAddr != "" {
+		healthRedisClient = redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+	}
+
+	apiV1HealthHandler := handler.NewAPIV1HealthHandler(sqlxDB, healthMinioClient, healthRedisClient)
+	apiV1VersionHandler := handler.NewAPIV1VersionHandler()
+	v1.GET("/health", apiV1HealthHandler.Handle)
+	v1.GET("/version", apiV1VersionHandler.Handle)
+
+	var asynqInspector *asynq.Inspector
+	if cfg.RedisAddr != "" {
+		asynqInspector = asynq.NewInspector(asynq.RedisClientOpt{Addr: cfg.RedisAddr})
+	}
+	adminStatusHandler := handler.NewAPIV1AdminStatusHandler(
+		sqlxDB,
+		healthMinioClient,
+		healthRedisClient,
+		asynqInspector,
+		getenv("MINIO_DATA_PATH", "/"),
+	)
+	v1Ops := v1.Group("", authMiddleware)
+	v1Ops.GET("/admin/status", adminStatusHandler.Handle)
+
 	compatHandler.RegisterRoutes(v1, authMiddleware)
+	mcpVerificationHandler.RegisterRoutes(v1, authMiddleware)
+	importHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
+
+	gqlResolver := &graph.Resolver{
+		UserRepo:         entityUserRepo,
+		LabelRepo:        labelRepo,
+		MilestoneRepo:    milestoneRepo,
+		RepositoryRepo:   repoRepo,
+		GetCurrentUserUC: getCurrentUserUC,
+		GetUserByLoginUC: getUserByLoginUC,
+		GetRepositoryUC:  getRepoUC,
+		GetOrgUC:         getOrgUC,
+		CreateIssueUC:    createIssueUC,
+		UpdateIssueUC:    updateIssueUC,
+		CreateCommentUC:  createCommentUC,
+		ListIssuesUC:     listIssuesUC,
+		CreatePRUC:       createPRUC,
+		MergePRUC:        mergePRUC,
+	}
+	gqlHandler := graph.NewHandler(gqlResolver, &cfg)
+	e.POST("/api/graphql", gqlHandler, authMiddleware)
+	e.GET("/api/graphql", gqlHandler)
+
+	workflowJobRepo := infrarepo.NewWorkflowJobRepository(sqlxDB)
+	var jobLogRepo domainrepo.IJobLogRepository
+	var jobLogSub *queue.JobLogSubscriber
+	if cfg.RedisAddr != "" {
+		jobLogSub = queue.NewJobLogSubscriber(cfg.RedisAddr)
+	}
+	actionsLogHandler := handler.NewActionsLogHandler(jobLogRepo, workflowJobRepo, jobLogSub, repoRepo)
+	actionsLogHandler.RegisterRoutes(v1, authMiddleware)
+
+	apiActions := e.Group("/api")
+	actionsLogHandler.RegisterRoutes(apiActions, authMiddleware)
 
 	var sshServer *sshinfra.SSHServer
 	if cfg.SSHEnabled {
@@ -564,13 +937,120 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 			hostKey,
 		)
 		go func() {
-			log.Printf("ssh server listening on %s", sshListenAddr)
+			middleware.Log().Info("ssh server listening", "addr", sshListenAddr)
 			if err := sshServer.Start(sshListenAddr); err != nil && !errors.Is(err, gossh.ErrServerClosed) {
-				log.Printf("ssh server stopped: %v", err)
+				middleware.Log().Info("ssh server stopped", "error", err)
 			}
 		}()
 	}
 	return sshServer, nil
+}
+
+func loadLicensesFromFile(path string) []handler.LicenseEntry {
+	log := logger.Global()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Warn().Err(err).Str("path", path).Msg("failed to load licenses file")
+		return []handler.LicenseEntry{}
+	}
+
+	var entries []handler.LicenseEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		log.Warn().Err(err).Str("path", path).Msg("failed to parse licenses file")
+		return []handler.LicenseEntry{}
+	}
+	return entries
+}
+
+type noopMCPEnqueuer struct{}
+
+func (noopMCPEnqueuer) EnqueueMCPVerification(context.Context, queue.MCPVerificationPayload) error {
+	return errors.New("redis not configured")
+}
+
+type noopImportEnqueuer struct{}
+
+func (noopImportEnqueuer) EnqueueGitHubImport(context.Context, uuid.UUID, uuid.UUID) error {
+	return errors.New("redis not configured")
+}
+
+type asynqPRMergeableEnqueuer struct {
+	client *asynq.Client
+}
+
+func (e asynqPRMergeableEnqueuer) Enqueue(ctx context.Context, payload prusecase.PRMergeableEnqueuePayload) error {
+	_, err := queue.EnqueuePRMergeableCheck(ctx, e.client, queue.PRMergeableCheckPayload{
+		GitPath: payload.GitPath,
+		HeadRef: payload.HeadRef,
+		BaseRef: payload.BaseRef,
+		PRID:    payload.PRID,
+	})
+	return err
+}
+
+type artifactMinioStorage struct {
+	client *minio.Client
+}
+
+func newArtifactMinioStorage(endpoint, accessKey, secretKey string, useTLS bool) (*artifactMinioStorage, error) {
+	client, err := minio.New(endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: useTLS,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &artifactMinioStorage{client: client}, nil
+}
+
+func (s *artifactMinioStorage) EnsureBucket(ctx context.Context, bucket string) error {
+	exists, err := s.client.BucketExists(ctx, bucket)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	return s.client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{})
+}
+
+func (s *artifactMinioStorage) PresignedPutURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
+	u, err := s.client.PresignedPutObject(ctx, bucket, key, expiry)
+	if err != nil {
+		return "", err
+	}
+	return u.String(), nil
+}
+
+func (s *artifactMinioStorage) PresignedGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
+	u, err := s.client.PresignedGetObject(ctx, bucket, key, expiry, nil)
+	if err != nil {
+		return "", err
+	}
+	return u.String(), nil
+}
+
+func (s *artifactMinioStorage) DeleteObject(ctx context.Context, bucket, key string) error {
+	return s.client.RemoveObject(ctx, bucket, key, minio.RemoveObjectOptions{})
+}
+
+func getenv(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultVal
+}
+
+func getenvBool(key string, defaultVal bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return defaultVal
+	}
+	return b
 }
 
 func corsAllowedOrigins() []string {
@@ -619,10 +1099,18 @@ func newHTTPErrorHandler() echo.HTTPErrorHandler {
 			requestID = c.Request().Header.Get(echo.HeaderXRequestID)
 		}
 
+		logAttrs := []any{
+			"request_id", requestID,
+			"http_method", c.Request().Method,
+			"path", c.Request().URL.Path,
+			"request_headers", logger.MaskHeaders(c.Request().Header),
+		}
+
 		var he *echo.HTTPError
 		if errors.As(err, &he) {
 			message := httpErrorMessage(he)
 			code := httpStatusToCode(he.Code)
+			middleware.Log().Error("request error", append(logAttrs, "status", he.Code, "error", message)...)
 			if writeErr := handler.RespondError(c, he.Code, code, message, requestID); writeErr != nil {
 				c.Logger().Error(writeErr)
 			}
@@ -630,6 +1118,7 @@ func newHTTPErrorHandler() echo.HTTPErrorHandler {
 		}
 
 		status, code := handler.DomainErrorToHTTP(err)
+		middleware.Log().Error("request error", append(logAttrs, "status", status, "error", err.Error())...)
 		if writeErr := handler.RespondError(c, status, code, err.Error(), requestID); writeErr != nil {
 			c.Logger().Error(writeErr)
 		}
@@ -770,6 +1259,28 @@ func (r *branchProtectionWriteRepo) DeleteByPattern(ctx context.Context, orgID, 
 		return apperror.ErrNotFound
 	}
 	return nil
+}
+
+// actionSecretEncryptor adapts SecretEncryptor for GitHub-compatible secrets API wiring.
+type actionSecretEncryptor struct {
+	*crypto.SecretEncryptor
+}
+
+func newActionSecretEncryptorFromEnv() *actionSecretEncryptor {
+	return &actionSecretEncryptor{SecretEncryptor: crypto.NewSecretEncryptorFromEnv()}
+}
+
+func (e *actionSecretEncryptor) KeyID() string {
+	return "open-git-action-secrets-v1"
+}
+
+func (e *actionSecretEncryptor) PublicKeyBase64() string {
+	// Placeholder public key for GitHub API shape compatibility.
+	return "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+}
+
+func (e *actionSecretEncryptor) DecryptSealedBox(ciphertext []byte) ([]byte, error) {
+	return e.Decrypt(ciphertext)
 }
 
 func httpStatusToCode(status int) string {

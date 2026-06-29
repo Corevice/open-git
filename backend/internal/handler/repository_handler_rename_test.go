@@ -65,6 +65,22 @@ func (m *renameMockRepositoryRepo) CountByOwner(context.Context, uuid.UUID) (int
 
 func (m *renameMockRepositoryRepo) UpdateVisibility(context.Context, uuid.UUID, string) error { return nil }
 
+func (m *renameMockRepositoryRepo) UpdateDefaultBranch(_ context.Context, id uuid.UUID, branch string) error {
+	for _, repo := range m.byLoginName {
+		if repo.ID == id {
+			repo.DefaultBranch = branch
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *listMockRepositoryRepo) UpdateName(context.Context, uuid.UUID, string) error { return nil }
+
+func (m *listMockRepositoryRepo) UpdateDefaultBranch(context.Context, uuid.UUID, string) error { return nil }
+
+func (f *fakeRepoLookup) UpdateDefaultBranch(context.Context, uuid.UUID, string) error { return nil }
+
 func (m *renameMockRepositoryRepo) UpdateName(_ context.Context, id uuid.UUID, newName string) error {
 	for key, repo := range m.byLoginName {
 		if repo.ID != id {
@@ -95,8 +111,9 @@ func newRenameTestEcho(t *testing.T, repos *renameMockRepositoryRepo, userID int
 	listRepos := repoUC.NewListRepositoriesUsecase(repos, memberships, nil)
 	create := repoUC.NewCreateRepositoryUsecase(repos)
 	get := repoUC.NewGetRepositoryUsecase(repos, nil, memberships)
+	listAuditLogs := repoUC.NewListAuditLogsUsecase(&mockListAuditLogsUsecase{})
 
-	h := handler.NewRepositoryHandler(create, get, listRepos, repos, &listMockOrgRepo{}, &listMockAuditLogRepo{})
+	h := handler.NewRepositoryHandler(create, get, listRepos, repos, &listMockOrgRepo{}, &listMockAuditLogRepo{}, listAuditLogs)
 
 	e := echo.New()
 	g := e.Group("")
@@ -176,6 +193,90 @@ func TestUpdateRepositoryRenameInvalidName(t *testing.T) {
 
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
+	}
+}
+
+func TestCreateRepositoryDuplicateName(t *testing.T) {
+	existing := seedRenameRepo(renameTestOwnerID, renameTestOwnerLogin, "my-repo")
+	repos := &renameMockRepositoryRepo{
+		byOwnerName: map[uuid.UUID]map[string]*entity.Repository{
+			renameTestOwnerID: {"my-repo": existing},
+		},
+	}
+	e := newRenameTestEcho(t, repos, listTestUserID)
+
+	body, err := json.Marshal(map[string]string{"name": "my-repo"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/user/repos", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusUnprocessableEntity, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["message"] != "Validation Failed" {
+		t.Fatalf("message = %v, want Validation Failed", resp["message"])
+	}
+	errors, ok := resp["errors"].([]any)
+	if !ok || len(errors) == 0 {
+		t.Fatalf("errors = %v, want non-empty array", resp["errors"])
+	}
+	first, ok := errors[0].(map[string]any)
+	if !ok {
+		t.Fatalf("errors[0] = %v, want object", errors[0])
+	}
+	if first["code"] != "already_exists" {
+		t.Fatalf("errors[0].code = %v, want already_exists", first["code"])
+	}
+	if first["resource"] != "Repository" {
+		t.Fatalf("errors[0].resource = %v, want Repository", first["resource"])
+	}
+	if first["field"] != "name" {
+		t.Fatalf("errors[0].field = %v, want name", first["field"])
+	}
+}
+
+func TestUpdateRepositoryDefaultBranchOK(t *testing.T) {
+	repo := seedRenameRepo(renameTestOwnerID, "alice", "myrepo")
+	repos := &renameMockRepositoryRepo{
+		byLoginName: map[string]*entity.Repository{
+			renameRepoKey("alice", "myrepo"): repo,
+		},
+		byOwnerName: map[uuid.UUID]map[string]*entity.Repository{
+			renameTestOwnerID: {"myrepo": repo},
+		},
+	}
+	e := newRenameTestEcho(t, repos, listTestUserID)
+
+	body, err := json.Marshal(map[string]string{"default_branch": "dev"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/repos/alice/myrepo", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["default_branch"] != "dev" {
+		t.Fatalf("default_branch = %v, want dev", resp["default_branch"])
 	}
 }
 
