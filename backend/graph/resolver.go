@@ -15,19 +15,23 @@ import (
 // here.
 
 type Resolver struct {
-	UserRepo       domainrepo.IUserRepository
-	LabelRepo      domainrepo.ILabelRepository
-	MilestoneRepo  domainrepo.IMilestoneRepository
-	RepositoryRepo domainrepo.IRepositoryRepository
+	UserRepo        domainrepo.IUserRepository
+	LabelRepo       domainrepo.ILabelRepository
+	MilestoneRepo   domainrepo.IMilestoneRepository
+	RepositoryRepo  domainrepo.IRepositoryRepository
+	IssueRepo       domainrepo.IIssueRepository
+	CommentRepo     domainrepo.ICommentRepository
+	PullRequestRepo domainrepo.IPullRequestRepository
 
 	GetCurrentUserUC *userUC.GetCurrentUserUsecase
 	GetUserByLoginUC *userUC.GetUserByLoginUsecase
 	GetRepositoryUC  *repoUC.GetRepositoryUsecase
 	GetOrgUC         *orgUC.GetOrgUsecase
+	ListIssuesUC     *issueusecase.ListIssuesUsecase
+	GetIssueUC       *issueusecase.GetIssueUsecase
 	CreateIssueUC    *issueusecase.CreateIssueUsecase
 	UpdateIssueUC    *issueusecase.UpdateIssueUsecase
 	CreateCommentUC  *issueusecase.CreateCommentUsecase
-	ListIssuesUC     *issueusecase.ListIssuesUsecase
 	CreatePRUC       *prusecase.CreatePRUsecase
 	MergePRUC        *prusecase.MergePRUsecase
 }
