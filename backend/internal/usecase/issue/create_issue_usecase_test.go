@@ -45,6 +45,27 @@ func (m *mockIssueRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) 
 	return m.nextNumber, nil
 }
 
+func (m *mockIssueRepo) GetByID(_ context.Context, id uuid.UUID) (*entity.Issue, error) {
+	for _, issue := range m.issues {
+		if issue.ID == id {
+			return issue, nil
+		}
+	}
+	return nil, errors.New("issue not found")
+}
+
+func (m *mockIssueRepo) Update(context.Context, *entity.Issue) error {
+	return nil
+}
+
+func (m *mockIssueRepo) Delete(context.Context, uuid.UUID) error {
+	return nil
+}
+
+func (m *mockIssueRepo) Count(_ context.Context, _ repository.ListIssuesFilter) (int, error) {
+	return len(m.issues), nil
+}
+
 type mockAuditLogRepo struct {
 	calls []auditLogCall
 }
@@ -72,6 +93,14 @@ func (m *mockAuditLogRepo) InsertAuditLog(
 		targetID:   targetID,
 	})
 	return nil
+}
+
+func (m *mockAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (m *mockAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
 }
 
 type mockTxManager struct{}

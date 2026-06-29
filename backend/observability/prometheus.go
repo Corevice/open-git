@@ -5,14 +5,59 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// maxPrometheusLabelLen caps label values to stay within Prometheus' recommended
+// 64-character limit and avoid unbounded cardinality from long user input.
+const maxPrometheusLabelLen = 64
+
 var (
+	allowedDBQueryNames = map[string]struct{}{
+		"select_users":         {},
+		"select_repositories":  {},
+		"select_organizations": {},
+		"select_memberships":   {},
+		"select_issues":        {},
+		"select_pull_requests": {},
+		"select_workflow_runs": {},
+		"select_webhooks":      {},
+		"insert_audit_log":     {},
+		"update_repository":    {},
+	}
+
+	metricsMu sync.RWMutex
+
+	metricsRegistry *prometheus.Registry
+	metricsGatherer prometheus.Gatherer
+
+	httpRequestsTotal   *prometheus.CounterVec
+	httpRequestDuration *prometheus.HistogramVec
+	gitOperationsTotal  *prometheus.CounterVec
+	workflowRunsTotal   *prometheus.CounterVec
+	dbQueryDuration     *prometheus.HistogramVec
+)
+
+func init() {
+	reg := prometheus.NewRegistry()
+	setMetricsState(reg, reg)
+	initCollectors(reg)
+}
+
+func setMetricsState(reg *prometheus.Registry, gatherer prometheus.Gatherer) {
+	metricsMu.Lock()
+	defer metricsMu.Unlock()
+	metricsRegistry = reg
+	metricsGatherer = gatherer
+}
+
+func initCollectors(reg prometheus.Registerer) {
 	httpRequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "githost_http_requests_total",
@@ -29,19 +74,133 @@ var (
 		},
 		[]string{"method", "path"},
 	)
-)
 
-func init() {
-	if err := prometheus.Register(httpRequestsTotal); err != nil {
-		if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
-			log.Printf("metrics: already registered, reusing existing collector: %v", err)
+	gitOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "git_operations_total",
+			Help: "Total git operations.",
+		},
+		[]string{"type", "protocol", "organization_id"},
+	)
+
+	workflowRunsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "workflow_runs_total",
+			Help: "Total workflow runs.",
+		},
+		[]string{"status", "organization_id"},
+	)
+
+	dbQueryDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "db_query_duration_seconds",
+			Help:    "DB query duration.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"query_name"},
+	)
+
+	reg.MustRegister(
+		httpRequestsTotal,
+		httpRequestDuration,
+		gitOperationsTotal,
+		workflowRunsTotal,
+		dbQueryDuration,
+	)
+}
+
+type testCleanupper interface {
+	Helper()
+	Cleanup(func())
+}
+
+// InitTestMetrics reinitializes collectors on a fresh registry for isolated tests.
+func InitTestMetrics(t testCleanupper) prometheus.Gatherer {
+	t.Helper()
+
+	reg := prometheus.NewRegistry()
+	initCollectors(reg)
+	setMetricsState(reg, reg)
+
+	t.Cleanup(func() {
+		defaultReg := prometheus.NewRegistry()
+		initCollectors(defaultReg)
+		setMetricsState(defaultReg, defaultReg)
+	})
+
+	return reg
+}
+
+// RegisterAllowedDBQueryName adds a query name to the allowlist used for db_query_duration_seconds.
+func RegisterAllowedDBQueryName(name string) {
+	sanitized := sanitizePrometheusLabel(name)
+	if sanitized == "unknown" {
+		return
+	}
+	allowedDBQueryNames[sanitized] = struct{}{}
+}
+
+// MetricsGatherer returns the active Prometheus gatherer for this package.
+func MetricsGatherer() prometheus.Gatherer {
+	metricsMu.RLock()
+	defer metricsMu.RUnlock()
+	return metricsGatherer
+}
+
+func sanitizePrometheusLabel(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+
+	var b strings.Builder
+	runeCount := 0
+	for _, r := range value {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+		runeCount++
+		if runeCount >= maxPrometheusLabelLen {
+			break
 		}
 	}
-	if err := prometheus.Register(httpRequestDuration); err != nil {
-		if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
-			log.Printf("metrics: already registered, reusing existing collector: %v", err)
-		}
+
+	if b.Len() == 0 {
+		return "unknown"
 	}
+	return b.String()
+}
+
+func sanitizeDBQueryName(name string) string {
+	sanitized := sanitizePrometheusLabel(name)
+	if _, ok := allowedDBQueryNames[sanitized]; ok {
+		return sanitized
+	}
+	return "other"
+}
+
+// ObserveGitOperation increments the git operations counter.
+func ObserveGitOperation(opType, protocol, organizationID string) {
+	gitOperationsTotal.WithLabelValues(
+		sanitizePrometheusLabel(opType),
+		sanitizePrometheusLabel(protocol),
+		sanitizePrometheusLabel(organizationID),
+	).Inc()
+}
+
+// ObserveWorkflowRun increments the workflow runs counter.
+func ObserveWorkflowRun(status, organizationID string) {
+	workflowRunsTotal.WithLabelValues(
+		sanitizePrometheusLabel(status),
+		sanitizePrometheusLabel(organizationID),
+	).Inc()
+}
+
+// ObserveDBQuery records a DB query duration observation.
+func ObserveDBQuery(queryName string, duration float64) {
+	dbQueryDuration.WithLabelValues(sanitizeDBQueryName(queryName)).Observe(duration)
 }
 
 // EchoPrometheusMiddleware records request count and latency for each route.
@@ -108,7 +267,11 @@ func NewMetricsHandler(authToken string) echo.HandlerFunc {
 			}
 		}
 
-		return echo.WrapHandler(promhttp.Handler())(c)
+		metricsMu.RLock()
+		gatherer := metricsGatherer
+		metricsMu.RUnlock()
+
+		return echo.WrapHandler(promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{}))(c)
 	}
 }
 
