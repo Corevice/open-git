@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { stripAnsi } from "@/components/actions/JobLogViewer";
 import { RunStatusBadge } from "@/components/actions/RunStatusBadge";
 import { API_TOKEN_KEY } from "@/lib/api";
 import { env } from "@/lib/env";
@@ -103,7 +104,8 @@ export function JobLogsPageContent() {
         setJob(jobData);
         setSteps(jobData.steps ?? []);
 
-        const lines = logsText.length > 0 ? logsText.split("\n") : [];
+        const lines =
+          logsText.length > 0 ? logsText.split("\n").map(stripAnsi) : [];
         if (logsText.endsWith("\n") && lines.length > 0) {
           lines.pop();
         }
@@ -139,7 +141,7 @@ export function JobLogsPageContent() {
     eventSourceRef.current = source;
 
     source.onmessage = (event) => {
-      setLogLines((prev) => [...prev, event.data]);
+      setLogLines((prev) => [...prev, stripAnsi(event.data)]);
     };
 
     source.addEventListener("done", () => {
@@ -247,7 +249,7 @@ export function JobLogsPageContent() {
                 ? "No log output."
                 : logLines.map((line, index) => (
                     <span key={index} className="block whitespace-pre-wrap break-all">
-                      {line}
+                      {stripAnsi(line)}
                     </span>
                   ))}
             </pre>
