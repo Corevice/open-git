@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RepoRefSelector } from "@/components/repo/BranchSelector";
 import CloneUrlCopy from "@/components/repo/CloneUrlCopy";
+import EmptyRepoState from "@/components/repo/EmptyRepoState";
 import FileTree, { type TreeEntry } from "@/components/repo/FileTree";
 import {
   apiClient,
@@ -18,6 +19,7 @@ interface RepoMetadata {
   private: boolean;
   visibility?: string;
   default_branch: string;
+  clone_url?: string;
   stargazers_count: number;
   watchers_count: number;
   forks_count: number;
@@ -110,7 +112,12 @@ export default async function RepoPage({
   const branches = branchesRaw.length > 0 ? branchesRaw : [{ name: metadata.default_branch ?? "main" }];
   const branch = resolveBranchRef(refParam, branches, metadata.default_branch ?? "main");
 
+  const cloneUrl =
+    metadata.clone_url ??
+    `${process.env.NEXT_PUBLIC_API_URL ?? ""}/${owner}/${repo}.git`;
+
   let contentsRaw: ContentItem[] | ContentItem | null = null;
+  let contentsNotFound = false;
   try {
     contentsRaw = await apiClient.getContents<ContentItem[] | ContentItem>(
       owner,
@@ -119,7 +126,11 @@ export default async function RepoPage({
       branch,
     );
   } catch (err) {
-    if (!isApiError(err) || err.status !== 404) throw err;
+    if (isApiError(err) && err.status === 404) {
+      contentsNotFound = true;
+    } else {
+      throw err;
+    }
   }
 
   const [readmeRaw] = await Promise.all([fetchReadme(owner, repo, branch)]);
@@ -130,6 +141,7 @@ export default async function RepoPage({
       ? [contentsRaw]
       : [];
   const entries = mapContents(contents);
+  const isEmptyRepo = contentsNotFound || entries.length === 0;
   const readmeHtml = readmeRaw ? renderMarkdown(readmeRaw) : null;
 
   return (
@@ -200,6 +212,12 @@ export default async function RepoPage({
               📄 Code
             </Link>
             <Link
+              href={`/${owner}/${repo}/branches`}
+              className="px-4 py-2 text-sm text-[#24292f] rounded-t-md hover:bg-gray-100 inline-flex items-center gap-1.5"
+            >
+              Branches
+            </Link>
+            <Link
               href={`/${owner}/${repo}/issues`}
               className="px-4 py-2 text-sm text-[#24292f] rounded-t-md hover:bg-gray-100 inline-flex items-center gap-1.5"
             >
@@ -263,13 +281,16 @@ export default async function RepoPage({
                 </div>
               </div>
 
-              <FileTree
-                entries={entries}
-                owner={owner}
-                repo={repo}
-                branch={branch}
-                currentPath=""
-              />
+              {isEmptyRepo ? (
+                <EmptyRepoState cloneUrl={cloneUrl} />
+              ) : (
+                <FileTree
+                  entries={entries}
+                  owner={owner}
+                  repo={repo}
+                  treeRef={branch}
+                />
+              )}
             </div>
 
             {readmeHtml && (

@@ -1,13 +1,23 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
-import nextCoreWebVitals from 'eslint-config-next/core-web-vitals';
+import { FlatCompat } from '@eslint/eslintrc';
+
+const compat = new FlatCompat({ baseDirectory: import.meta.dirname });
 
 export default tseslint.config(
   {
-    ignores: ['.next/**', 'node_modules/**', 'coverage/**'],
+    ignores: [
+      '.next/**',
+      'node_modules/**',
+      'coverage/**',
+      'next-env.d.ts',
+      'docs/**',
+      'test/load/**',
+    ],
   },
   js.configs.recommended,
-  ...nextCoreWebVitals,
+  ...compat.extends('next/core-web-vitals'),
+  ...tseslint.configs.recommended,
   {
     files: ['**/*.{ts,tsx}'],
     rules: {

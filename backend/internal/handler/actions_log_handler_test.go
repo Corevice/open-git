@@ -84,6 +84,15 @@ func (f *fakeWorkflowJobRepo) Create(_ context.Context, job *entity.WorkflowJob)
 	return nil
 }
 
+func (f *fakeWorkflowJobRepo) CreateBatch(_ context.Context, jobs []*entity.WorkflowJob) error {
+	for _, job := range jobs {
+		if err := f.Create(context.Background(), job); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (f *fakeWorkflowJobRepo) GetByID(_ context.Context, id uuid.UUID) (*entity.WorkflowJob, error) {
 	if f.jobs == nil {
 		return nil, domain.ErrNotFound
@@ -112,6 +121,10 @@ func (f *fakeWorkflowJobRepo) Cancel(_ context.Context, _ uuid.UUID) error {
 }
 
 func (f *fakeWorkflowJobRepo) ListQueued(_ context.Context, _ uuid.UUID) ([]*entity.WorkflowJob, error) {
+	return nil, nil
+}
+
+func (f *fakeWorkflowJobRepo) ListByRunID(_ context.Context, _, _ uuid.UUID) ([]*entity.WorkflowJob, error) {
 	return nil, nil
 }
 
