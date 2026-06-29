@@ -18,9 +18,16 @@ import (
 )
 
 const (
-	userIDContextKey = "user_id"
-	scopesContextKey = "scopes"
+	userIDContextKey         = "user_id"
+	scopesContextKey         = "scopes"
+	organizationIDContextKey = "organization_id"
 )
+
+// Actor identifies the authenticated user and their active organization scope.
+type Actor struct {
+	UserID         uuid.UUID
+	OrganizationID uuid.UUID
+}
 
 type jwtClaims struct {
 	UserID int64 `json:"sub"`
@@ -172,6 +179,27 @@ func GetScopes(c echo.Context) []string {
 func SetAuthContext(c echo.Context, userID int64, scopes []string) {
 	c.Set(userIDContextKey, userID)
 	c.Set(scopesContextKey, scopes)
+}
+
+func SetActorContext(c echo.Context, userID int64, organizationID uuid.UUID, scopes []string) {
+	c.Set(userIDContextKey, userID)
+	c.Set(organizationIDContextKey, organizationID)
+	c.Set(scopesContextKey, scopes)
+}
+
+func GetActor(c echo.Context) (Actor, error) {
+	userID, err := GetUserID(c)
+	if err != nil {
+		return Actor{}, err
+	}
+
+	actor := Actor{UserID: Int64ToUUID(userID)}
+	if v := c.Get(organizationIDContextKey); v != nil {
+		if organizationID, ok := v.(uuid.UUID); ok {
+			actor.OrganizationID = organizationID
+		}
+	}
+	return actor, nil
 }
 
 func bearerToken(header string) (string, bool) {

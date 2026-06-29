@@ -25,7 +25,7 @@ describe("JobLogViewer", () => {
   it("strips ANSI escape codes from displayed text", () => {
     mockUseJobLogStream.mockReturnValue({
       lines: ["\x1b[32mHello\x1b[0m"],
-      streaming: false,
+      status: "done",
     });
 
     render(<JobLogViewer {...defaultProps} />);
@@ -37,7 +37,7 @@ describe("JobLogViewer", () => {
     const lines = Array.from({ length: 2001 }, (_, index) => `line ${index}`);
     mockUseJobLogStream.mockReturnValue({
       lines,
-      streaming: false,
+      status: "done",
     });
 
     const { container } = render(<JobLogViewer {...defaultProps} />);

@@ -3,7 +3,7 @@ name: open-git
 description: Open Git Platform
 type: application
 version: 0.1.0
-appVersion: latest
+appVersion: "0.1.0"
 dependencies:
   - name: postgresql
     version: ">=15.0.0"

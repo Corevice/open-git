@@ -15,6 +15,7 @@ import (
 const (
 	rateLimitLimitHeader     = "X-RateLimit-Limit"
 	rateLimitRemainingHeader = "X-RateLimit-Remaining"
+	rateLimitUsedHeader      = "X-RateLimit-Used"
 	rateLimitResetHeader     = "X-RateLimit-Reset"
 	retryAfterHeader         = "Retry-After"
 	bucketEvictionInterval   = 5 * time.Minute
@@ -126,6 +127,7 @@ func RateLimitMiddleware(authenticatedLimit, unauthenticatedLimit int) echo.Midd
 				bucket.mu.Unlock()
 				c.Response().Header().Set(rateLimitLimitHeader, strconv.Itoa(limitVal))
 				c.Response().Header().Set(rateLimitRemainingHeader, "0")
+				c.Response().Header().Set(rateLimitUsedHeader, strconv.Itoa(bucket.limit))
 				c.Response().Header().Set(rateLimitResetHeader, strconv.FormatInt(reset, 10))
 				c.Response().Header().Set(retryAfterHeader, strconv.FormatInt(reset, 10))
 				return echo.NewHTTPError(http.StatusForbidden, map[string]string{
@@ -141,6 +143,7 @@ func RateLimitMiddleware(authenticatedLimit, unauthenticatedLimit int) echo.Midd
 
 			c.Response().Header().Set(rateLimitLimitHeader, strconv.Itoa(limitVal))
 			c.Response().Header().Set(rateLimitRemainingHeader, strconv.Itoa(remaining))
+			c.Response().Header().Set(rateLimitUsedHeader, strconv.Itoa(bucket.limit-remaining))
 			c.Response().Header().Set(rateLimitResetHeader, strconv.FormatInt(reset, 10))
 			return next(c)
 		}

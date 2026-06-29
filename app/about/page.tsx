@@ -32,7 +32,10 @@ export default function AboutPage() {
   }, []);
 
   const version = loading ? "dev" : (meta?.version ?? "dev");
+  const commit = meta?.git_commit ?? "unknown";
+  const buildDate = meta?.build_date ?? "unknown";
   const licenseName = meta?.license ?? BRANDING.licenseName;
+  const sourceUrl = meta?.source_url ?? BRANDING.sourceUrl;
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-12">
@@ -46,6 +49,16 @@ export default function AboutPage() {
           <dd>{version}</dd>
         </div>
         <div>
+          <dt className="text-sm font-medium text-muted-foreground">Commit</dt>
+          <dd className="font-mono text-sm">{commit}</dd>
+        </div>
+        <div>
+          <dt className="text-sm font-medium text-muted-foreground">
+            Build Date
+          </dt>
+          <dd>{buildDate}</dd>
+        </div>
+        <div>
           <dt className="text-sm font-medium text-muted-foreground">License</dt>
           <dd>
             <Link href="/licenses" className="text-primary underline">
@@ -57,12 +70,12 @@ export default function AboutPage() {
           <dt className="text-sm font-medium text-muted-foreground">Source</dt>
           <dd>
             <a
-              href={BRANDING.sourceUrl}
+              href={sourceUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary underline"
             >
-              {BRANDING.sourceUrl}
+              {sourceUrl}
             </a>
           </dd>
         </div>
