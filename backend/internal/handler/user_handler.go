@@ -32,7 +32,9 @@ func NewUserHandler(
 
 type userResponse struct {
 	ID        int64  `json:"id"`
+	NodeID    string `json:"node_id"`
 	Login     string `json:"login"`
+	HTMLURL   string `json:"html_url"`
 	Email     string `json:"email,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Bio       string `json:"bio,omitempty"`
@@ -81,7 +83,7 @@ func (h *UserHandler) GetCurrentUser(c echo.Context) error {
 		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
 	}
 
-	return RespondGitHubOK(c, toUserResponse(user, true))
+	return RespondGitHubOK(c, toUserResponse(user, true, c.Request().Host))
 }
 
 func (h *UserHandler) GetUserByLogin(c echo.Context) error {
@@ -94,7 +96,7 @@ func (h *UserHandler) GetUserByLogin(c echo.Context) error {
 	}
 
 	includeEmail := middleware.UserIDFromContext(c) != 0
-	return RespondGitHubOK(c, toUserResponse(user, includeEmail))
+	return RespondGitHubOK(c, toUserResponse(user, includeEmail, c.Request().Host))
 }
 
 func (h *UserHandler) UpdateCurrentUser(c echo.Context) error {
@@ -124,14 +126,16 @@ func (h *UserHandler) UpdateCurrentUser(c echo.Context) error {
 		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
 	}
 
-	return RespondGitHubOK(c, entityToUserResponse(user, true))
+	return RespondGitHubOK(c, entityToUserResponse(user, true, c.Request().Host))
 }
 
-func toUserResponse(u *domain.User, includeEmail bool) userResponse {
+func toUserResponse(u *domain.User, includeEmail bool, host string) userResponse {
 	resp := userResponse{
-		ID:    u.ID,
-		Login: u.Login,
-		Type:  "User",
+		ID:      u.ID,
+		NodeID:  UserNodeID(u.ID),
+		Login:   u.Login,
+		HTMLURL: "https://" + host + "/" + u.Login,
+		Type:    "User",
 	}
 	if includeEmail {
 		resp.Email = u.Email
@@ -139,10 +143,13 @@ func toUserResponse(u *domain.User, includeEmail bool) userResponse {
 	return resp
 }
 
-func entityToUserResponse(u *entity.User, includeEmail bool) userResponse {
+func entityToUserResponse(u *entity.User, includeEmail bool, host string) userResponse {
+	id := middleware.UUIDToInt64(u.ID)
 	resp := userResponse{
-		ID:        middleware.UUIDToInt64(u.ID),
+		ID:        id,
+		NodeID:    UserNodeID(id),
 		Login:     u.Login,
+		HTMLURL:   "https://" + host + "/" + u.Login,
 		Name:      u.Name,
 		Bio:       u.Bio,
 		AvatarURL: u.AvatarURL,
