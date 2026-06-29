@@ -200,6 +200,12 @@ export default async function RepoPage({
               📄 Code
             </Link>
             <Link
+              href={`/${owner}/${repo}/branches`}
+              className="px-4 py-2 text-sm text-[#24292f] rounded-t-md hover:bg-gray-100 inline-flex items-center gap-1.5"
+            >
+              Branches
+            </Link>
+            <Link
               href={`/${owner}/${repo}/issues`}
               className="px-4 py-2 text-sm text-[#24292f] rounded-t-md hover:bg-gray-100 inline-flex items-center gap-1.5"
             >
@@ -209,6 +215,18 @@ export default async function RepoPage({
                   {metadata.open_issues_count}
                 </span>
               )}
+            </Link>
+            <a
+              href={`/${owner}/${repo}/labels`}
+              className="px-4 py-2 text-sm text-[#24292f] rounded-t-md hover:bg-gray-100 inline-flex items-center gap-1.5"
+            >
+              Labels
+            </a>
+            <Link
+              href={`/${owner}/${repo}/milestones`}
+              className="px-4 py-2 text-sm text-[#24292f] rounded-t-md hover:bg-gray-100 inline-flex items-center gap-1.5"
+            >
+              Milestones
             </Link>
             <Link
               href={`/${owner}/${repo}/pulls`}

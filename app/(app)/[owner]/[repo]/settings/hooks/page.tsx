@@ -12,6 +12,10 @@ import {
   type Webhook,
 } from "@/lib/api/webhooks";
 
+type WebhookWithDeliveryCount = Webhook & {
+  deliveries_count_24h?: number;
+};
+
 function ActiveSwitch({ active }: { active: boolean }) {
   return (
     <span
@@ -35,7 +39,7 @@ export default function WebhooksListPage({
   params: Promise<{ owner: string; repo: string }>;
 }) {
   const { owner, repo } = use(params);
-  const [webhooks, setWebhooks] = useState<Webhook[]>([]);
+  const [webhooks, setWebhooks] = useState<WebhookWithDeliveryCount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Webhook | null>(null);
@@ -187,6 +191,11 @@ export default function WebhooksListPage({
                             Edit
                           </Link>
                         </Button>
+                        {hook.deliveries_count_24h !== undefined && (
+                          <Badge variant="secondary">
+                            {hook.deliveries_count_24h} in 24h
+                          </Badge>
+                        )}
                         <Button
                           variant="destructive"
                           size="sm"
