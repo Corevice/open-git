@@ -10,41 +10,41 @@ import (
 	"testing"
 )
 
-func validateTestdataName(name string) error {
+func resolveTestdataPath(name string) (string, error) {
 	if name == "" || strings.Contains(name, "..") || filepath.IsAbs(name) {
-		return fmt.Errorf("invalid testdata name: %q", name)
+		return "", fmt.Errorf("invalid testdata name: %q", name)
 	}
 
 	cleanName := filepath.Clean(name)
 	if cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("invalid testdata name: %q", name)
+		return "", fmt.Errorf("invalid testdata name: %q", name)
 	}
 
 	baseDir, err := filepath.Abs("testdata")
 	if err != nil {
-		return fmt.Errorf("resolve testdata dir: %w", err)
+		return "", fmt.Errorf("resolve testdata dir: %w", err)
 	}
 	targetPath, err := filepath.Abs(filepath.Join(baseDir, cleanName))
 	if err != nil {
-		return fmt.Errorf("resolve testdata path: %w", err)
+		return "", fmt.Errorf("resolve testdata path: %w", err)
 	}
 	if targetPath != baseDir && !strings.HasPrefix(targetPath, baseDir+string(filepath.Separator)) {
-		return fmt.Errorf("invalid testdata name: %q", name)
+		return "", fmt.Errorf("invalid testdata name: %q", name)
 	}
-	return nil
+	return targetPath, nil
+}
+
+func validateTestdataName(name string) error {
+	_, err := resolveTestdataPath(name)
+	return err
 }
 
 func readTestdata(t *testing.T, name string) []byte {
 	t.Helper()
 
-	if err := validateTestdataName(name); err != nil {
-		t.Fatal(err)
-	}
-
-	cleanName := filepath.Clean(name)
-	targetPath, err := filepath.Abs(filepath.Join("testdata", cleanName))
+	targetPath, err := resolveTestdataPath(name)
 	if err != nil {
-		t.Fatalf("resolve testdata path: %v", err)
+		t.Fatal(err)
 	}
 
 	content, err := os.ReadFile(targetPath)
@@ -288,6 +288,30 @@ func TestParsePackageJSONStripsSemverPrefix(t *testing.T) {
 				{Name: "express", Version: "4.18.2", Ecosystem: "npm"},
 			},
 			absent: []string{"lodash"},
+		},
+		{
+			name:    "lower bound range omitted",
+			content: `{"dependencies": {"lodash": ">=1.0", "express": "4.18.2"}}`,
+			want: []Dependency{
+				{Name: "express", Version: "4.18.2", Ecosystem: "npm"},
+			},
+			absent: []string{"lodash"},
+		},
+		{
+			name:    "invalid scoped package name omitted",
+			content: `{"dependencies": {"@scope/name/extra": "1.0.0", "express": "4.18.2"}}`,
+			want: []Dependency{
+				{Name: "express", Version: "4.18.2", Ecosystem: "npm"},
+			},
+			absent: []string{"@scope/name/extra"},
+		},
+		{
+			name:    "unscoped slash package name omitted",
+			content: `{"dependencies": {"foo/bar": "1.0.0", "express": "4.18.2"}}`,
+			want: []Dependency{
+				{Name: "express", Version: "4.18.2", Ecosystem: "npm"},
+			},
+			absent: []string{"foo/bar"},
 		},
 	}
 

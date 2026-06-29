@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"golang.org/x/mod/modfile"
@@ -68,18 +69,21 @@ func isValidPackageName(name string) bool {
 	if name == "" || strings.ContainsAny(name, " \t\n\r\f") {
 		return false
 	}
+	if strings.HasPrefix(name, "@") {
+		slashIdx := strings.Index(name, "/")
+		if slashIdx <= 1 || strings.Contains(name[slashIdx+1:], "/") {
+			return false
+		}
+	} else if strings.Contains(name, "/") {
+		return false
+	}
 	for _, r := range name {
 		if r < 0x20 || r == 0x7f {
 			return false
 		}
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case r == '-', r == '_', r == '.', r == '@':
-		case r == '/':
-			// Slash is only valid in scoped package names (@scope/name).
-			if !strings.HasPrefix(name, "@") {
-				return false
-			}
+		case r == '-', r == '_', r == '.', r == '@', r == '/':
 		default:
 			return false
 		}
@@ -135,6 +139,9 @@ func parsePackageJSON(content []byte) ([]Dependency, error) {
 			Ecosystem: "npm",
 		})
 	}
+	sort.Slice(deps, func(i, j int) bool {
+		return deps[i].Name < deps[j].Name
+	})
 	return deps, nil
 }
 
@@ -291,19 +298,28 @@ func splitRequirementSpecifiers(line string) []string {
 	return parts
 }
 
-// npmVersionPrefixes lists npm semver range prefixes in longest-match-first order.
-// Exclusion (!=) and compound ranges are intentionally excluded: they do not denote
-// a single concrete version suitable for OSV queries.
-var npmVersionPrefixes = []string{">=", "<=", "^", "~", ">", "<", "="}
+// npmExactVersionPrefixes lists npm prefixes that can be stripped to yield a
+// concrete version for OSV queries. Range operators (>=, <=, >, <) are excluded
+// because they denote constraints, not installed versions.
+var npmExactVersionPrefixes = []string{"^", "~", "="}
 
 func stripSemverPrefix(version string) string {
 	version = strings.TrimSpace(version)
 	if version == "" || strings.Contains(version, ",") || strings.HasPrefix(version, "!=") {
 		return ""
 	}
-	for _, prefix := range npmVersionPrefixes {
+	for _, rangePrefix := range []string{">=", "<=", ">", "<"} {
+		if strings.HasPrefix(version, rangePrefix) {
+			return ""
+		}
+	}
+	for _, prefix := range npmExactVersionPrefixes {
 		if strings.HasPrefix(version, prefix) {
-			return strings.TrimSpace(version[len(prefix):])
+			stripped := strings.TrimSpace(version[len(prefix):])
+			if stripped == "" {
+				return ""
+			}
+			return stripped
 		}
 	}
 	if strings.HasPrefix(version, "v") && len(version) > 1 && version[1] >= '0' && version[1] <= '9' {
@@ -341,6 +357,10 @@ func parseRequirementsTxt(content []byte) ([]Dependency, error) {
 		}
 
 		if isRequirementsTxtOptionLine(line) {
+			continue
+		}
+
+		if strings.Contains(line, "://") {
 			continue
 		}
 
