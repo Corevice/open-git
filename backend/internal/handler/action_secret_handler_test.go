@@ -23,7 +23,7 @@ var (
 	secretTestOrgID  = uuid.MustParse("00000000-0000-0000-0000-000000000030")
 	secretTestRepoID = uuid.MustParse("00000000-0000-0000-0000-000000000031")
 	secretTestUserID = int64(31)
-	secretTestActor  = uuid.MustParse("00000000-0000-0000-0000-000000000031")
+	secretTestActor  = uuid.MustParse("00000000-0000-0000-0000-00000000001f")
 )
 
 type mockActionSecretRepo struct {

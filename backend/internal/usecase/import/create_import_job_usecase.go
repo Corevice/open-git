@@ -16,8 +16,9 @@ import (
 	"github.com/open-git/backend/internal/domain/entity"
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	repo "github.com/open-git/backend/internal/repository"
-	"github.com/open-git/backend/internal/worker"
 )
+
+const typeGitHubImport = "import:github"
 
 var (
 	githubSourceURLRegex = regexp.MustCompile(`^https://github\.com/[^/]+/[^/]+(/.*)?$`)
@@ -60,7 +61,7 @@ func (e *asynqGitHubImportEnqueuer) EnqueueGitHubImport(ctx context.Context, job
 	if err != nil {
 		return fmt.Errorf("marshal import task payload: %w", err)
 	}
-	task := asynq.NewTask(worker.TypeGitHubImport, data)
+	task := asynq.NewTask(typeGitHubImport, data)
 	_, err = e.client.EnqueueContext(ctx, task)
 	return err
 }

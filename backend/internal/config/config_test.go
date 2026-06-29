@@ -242,6 +242,27 @@ func TestMetricsConfig(t *testing.T) {
 	})
 }
 
+func TestLoadBrandingDefaults(t *testing.T) {
+	t.Setenv("APP_NAME", "")
+	t.Setenv("LICENSE_NAME", "")
+	t.Setenv("SOURCE_URL", "")
+	t.Setenv("LICENSES_FILE_PATH", "")
+
+	cfg := config.Load()
+	if cfg.AppName != "OpenGit" {
+		t.Fatalf("AppName = %q, want OpenGit", cfg.AppName)
+	}
+	if cfg.LicenseName != "Apache-2.0" {
+		t.Fatalf("LicenseName = %q, want Apache-2.0", cfg.LicenseName)
+	}
+	if cfg.SourceURL != "" {
+		t.Fatalf("SourceURL = %q, want empty", cfg.SourceURL)
+	}
+	if cfg.LicensesFilePath != "./licenses.json" {
+		t.Fatalf("LicensesFilePath = %q, want ./licenses.json", cfg.LicensesFilePath)
+	}
+}
+
 func TestMaskDSN(t *testing.T) {
 	masked := database.MaskDSN("postgres://user:secret@host/db")
 	if strings.Contains(masked, "secret") {

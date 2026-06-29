@@ -206,3 +206,25 @@ export interface Contributor {
   contributions: number;
   type: string;
 }
+
+export type ActionCompatibilityStatus =
+  | "supported"
+  | "partial"
+  | "unsupported"
+  | "unknown";
+
+export interface ActionCompatibilityResult {
+  action: string;
+  version: string;
+  status: ActionCompatibilityStatus;
+  note: string | null;
+  last_verified_at: string | null;
+}
+
+export interface Review {
+  id: number;
+  state: string;
+  body: string;
+  user: { login: string };
+  submitted_at: string;
+}
