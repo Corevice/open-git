@@ -769,6 +769,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	v1 := e.Group("/api/v1")
 
+	contributorsHandler := handler.NewContributorsHandler(repoGitResolver, membershipAdapter)
+	contributorsHandler.RegisterRoutes(v1)
+
 	var healthMinioClient *minio.Client
 	if cfg.MinioEndpoint != "" {
 		client, minioErr := minio.New(cfg.MinioEndpoint, &minio.Options{
