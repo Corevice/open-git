@@ -25,7 +25,6 @@ type WorkflowJob struct {
 	OrganizationID     uuid.UUID
 	RepositoryID       uuid.UUID
 	Name               string
-	Needs              []string
 	RunsOn             []string
 	AssignedRunnerID   *uuid.UUID
 	AcquireLockVersion int

@@ -246,9 +246,6 @@ func workflowJobNeeds(job *entity.WorkflowJob) []string {
 	if job == nil {
 		return nil
 	}
-	if len(job.Needs) > 0 {
-		return append([]string(nil), job.Needs...)
-	}
 	field := reflect.ValueOf(job).Elem().FieldByName("Needs")
 	if !field.IsValid() || field.Kind() != reflect.Slice {
 		return nil
