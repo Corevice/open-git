@@ -81,7 +81,7 @@ type repositoryResponse struct {
 }
 
 func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
-	userID, ownerLogin, err := h.resolveAuthenticatedOwner(c)
+	userID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return err
 	}
@@ -92,12 +92,10 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 	}
 
 	result, err := h.create.Execute(c.Request().Context(), repoUC.CreateRepositoryInput{
-		OwnerID:        userID,
-		OwnerLogin:     ownerLogin,
-		OrganizationID: userID,
-		Name:           req.Name,
-		Private:        req.Private,
-		Description:    req.Description,
+		OwnerID:     userID,
+		Name:        req.Name,
+		Private:     req.Private,
+		Description: req.Description,
 	})
 	if err != nil {
 		if errors.Is(err, repoUC.ErrDuplicateName) {
@@ -113,7 +111,7 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 }
 
 func (h *RepositoryHandler) ListRepositories(c echo.Context) error {
-	userID, ownerLogin, err := h.resolveAuthenticatedOwner(c)
+	userID, err := middleware.GetUserUUID(c)
 	if err != nil {
 		return err
 	}
@@ -121,11 +119,9 @@ func (h *RepositoryHandler) ListRepositories(c echo.Context) error {
 	page, perPage := parseRepositoryPagination(c)
 
 	result, err := h.list.Execute(c.Request().Context(), repoUC.ListRepositoriesInput{
-		RequestUserID:  userID,
-		OwnerLogin:     ownerLogin,
-		OrganizationID: userID,
-		Page:           page,
-		PerPage:        perPage,
+		RequestUserID: userID,
+		Page:          page,
+		PerPage:       perPage,
 	})
 	if err != nil {
 		if errors.Is(err, repoUC.ErrOwnerNotFound) {
@@ -228,11 +224,8 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
 	}
 
-	diskPath := repository.DiskPath
-	if diskPath != "" && isSafeRepositoryDiskPath(h.gitRoot, diskPath, repository.Name) {
-		if err := os.RemoveAll(diskPath); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository files"})
-		}
+	if err := removeRepositoryDiskFiles(h.gitRoot, repository.DiskPath, repository.Name); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository files"})
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -262,50 +255,61 @@ func parseRepositoryPagination(c echo.Context) (int, int) {
 	return repoUC.NormalizeRepositoryPagination(page, perPage)
 }
 
-func isSafeRepositoryDiskPath(gitRoot, diskPath, repoName string) bool {
+func validatedRepositoryDiskPath(gitRoot, diskPath, repoName string) (string, bool) {
 	if diskPath == "" || repoName == "" {
-		return false
+		return "", false
+	}
+
+	cleanRoot := filepath.Clean(gitRoot)
+	cleanPath := filepath.Clean(diskPath)
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	if filepath.Base(cleanPath) != repoName+".git" {
+		return "", false
+	}
+	return cleanPath, true
+}
+
+func removeRepositoryDiskFiles(gitRoot, diskPath, repoName string) error {
+	safePath, ok := validatedRepositoryDiskPath(gitRoot, diskPath, repoName)
+	if !ok {
+		return nil
+	}
+
+	fi, err := os.Lstat(safePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return errors.New("unsafe repository disk path")
 	}
 
 	resolvedRoot, err := filepath.EvalSymlinks(filepath.Clean(gitRoot))
 	if err != nil {
-		return false
+		return err
 	}
-	resolvedPath, err := filepath.EvalSymlinks(filepath.Clean(diskPath))
+	resolvedPath, err := filepath.EvalSymlinks(safePath)
 	if err != nil {
-		return false
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 
 	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
-	if err != nil {
-		return false
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return errors.New("unsafe repository disk path")
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return false
-	}
-	return filepath.Base(resolvedPath) == repoName+".git"
-}
-
-func (h *RepositoryHandler) resolveAuthenticatedOwner(c echo.Context) (uuid.UUID, string, error) {
-	userIDInt, err := middleware.GetUserID(c)
-	if err != nil {
-		return uuid.Nil, "", err
+	if filepath.Base(resolvedPath) != repoName+".git" {
+		return errors.New("unsafe repository disk path")
 	}
 
-	userID := middleware.Int64ToUUID(userIDInt)
-	if h.users == nil {
-		return uuid.Nil, "", echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to resolve owner"})
-	}
-
-	user, err := h.users.GetByID(c.Request().Context(), userIDInt)
-	if err != nil {
-		return uuid.Nil, "", echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to resolve owner"})
-	}
-	if user == nil || user.Login == "" {
-		return uuid.Nil, "", echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to resolve owner"})
-	}
-
-	return userID, user.Login, nil
+	return os.RemoveAll(resolvedPath)
 }
 
 func toRepositoryResponses(repositories []*entity.Repository, ownerLogin string) []repositoryResponse {

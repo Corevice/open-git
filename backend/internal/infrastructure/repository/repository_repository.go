@@ -95,6 +95,101 @@ func (r *sqlxRepositoryRepository) ListByOrg(ctx context.Context, orgID uuid.UUI
 	}
 	defer rows.Close()
 
+	return scanRepositories(rows)
+}
+
+func (r *sqlxRepositoryRepository) CountByOrg(ctx context.Context, orgID uuid.UUID) (int, error) {
+	const query = `SELECT COUNT(*) FROM repositories WHERE organization_id = $1`
+	var count int
+	if err := r.DB.GetContext(ctx, &count, query, orgID); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *sqlxRepositoryRepository) CountVisibleByOrg(ctx context.Context, orgID, viewerID uuid.UUID) (int, error) {
+	if viewerID == uuid.Nil {
+		const query = `
+			SELECT COUNT(*)
+			FROM repositories
+			WHERE organization_id = $1 AND visibility != 'private'
+		`
+		var count int
+		if err := r.DB.GetContext(ctx, &count, query, orgID); err != nil {
+			return 0, err
+		}
+		return count, nil
+	}
+
+	const query = `
+		SELECT COUNT(*)
+		FROM repositories r
+		WHERE r.organization_id = $1
+		AND (
+			r.visibility != 'private'
+			OR r.owner_id = $2
+			OR EXISTS (
+				SELECT 1 FROM memberships m
+				WHERE m.organization_id = r.organization_id AND m.user_id = $2
+			)
+		)
+	`
+	var count int
+	if err := r.DB.GetContext(ctx, &count, query, orgID, viewerID); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *sqlxRepositoryRepository) ListVisibleByOrg(ctx context.Context, orgID, viewerID uuid.UUID, page, perPage int) ([]*entity.Repository, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 30
+	}
+	offset := (page - 1) * perPage
+
+	if viewerID == uuid.Nil {
+		const query = `
+			SELECT id, organization_id, owner_id, name, visibility, default_branch, created_at
+			FROM repositories
+			WHERE organization_id = $1 AND visibility != 'private'
+			ORDER BY created_at DESC
+			LIMIT $2 OFFSET $3
+		`
+		rows, err := r.DB.QueryxContext(ctx, query, orgID, perPage, offset)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return scanRepositories(rows)
+	}
+
+	const query = `
+		SELECT r.id, r.organization_id, r.owner_id, r.name, r.visibility, r.default_branch, r.created_at
+		FROM repositories r
+		WHERE r.organization_id = $1
+		AND (
+			r.visibility != 'private'
+			OR r.owner_id = $2
+			OR EXISTS (
+				SELECT 1 FROM memberships m
+				WHERE m.organization_id = r.organization_id AND m.user_id = $2
+			)
+		)
+		ORDER BY r.created_at DESC
+		LIMIT $3 OFFSET $4
+	`
+	rows, err := r.DB.QueryxContext(ctx, query, orgID, viewerID, perPage, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRepositories(rows)
+}
+
+func scanRepositories(rows *sqlx.Rows) ([]*entity.Repository, error) {
 	var repos []*entity.Repository
 	for rows.Next() {
 		var repo entity.Repository

@@ -90,8 +90,11 @@ func (m *mockUserRepo) Create(context.Context, *domain.User) error {
 	return nil
 }
 
-func (m *mockUserRepo) GetByID(context.Context, int64) (*domain.User, error) {
-	return nil, errors.New("not found")
+func (m *mockUserRepo) GetByID(_ context.Context, id int64) (*domain.User, error) {
+	if id == 1 {
+		return &domain.User{ID: 1, Login: "alice"}, nil
+	}
+	return nil, domain.ErrNotFound
 }
 
 func (m *mockUserRepo) GetByLogin(_ context.Context, login string) (*domain.User, error) {
@@ -114,10 +117,8 @@ func TestDuplicateName(t *testing.T) {
 	uc := repository.NewCreateRepositoryUsecase(repos, &mockUserRepo{}, t.TempDir())
 
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
-		OwnerID:        testOwnerID,
-		OwnerLogin:     "alice",
-		OrganizationID: testOrgID,
-		Name:           "existing",
+		OwnerID: testOwnerID,
+		Name:    "existing",
 	})
 	if !errors.Is(err, repository.ErrDuplicateName) {
 		t.Fatalf("expected ErrDuplicateName, got %v", err)
@@ -129,10 +130,8 @@ func TestInvalidName(t *testing.T) {
 	uc := repository.NewCreateRepositoryUsecase(repos, &mockUserRepo{}, t.TempDir())
 
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
-		OwnerID:        testOwnerID,
-		OwnerLogin:     "alice",
-		OrganizationID: testOrgID,
-		Name:           "invalid name!",
+		OwnerID: testOwnerID,
+		Name:    "invalid name!",
 	})
 	if !errors.Is(err, repository.ErrInvalidName) {
 		t.Fatalf("expected ErrInvalidName, got %v", err)
@@ -145,12 +144,10 @@ func TestValidCreate(t *testing.T) {
 	uc := repository.NewCreateRepositoryUsecase(repos, &mockUserRepo{}, gitRoot)
 
 	result, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
-		OwnerID:        testOwnerID,
-		OwnerLogin:     "alice",
-		OrganizationID: testOrgID,
-		Name:           "my-repo",
-		Private:        true,
-		Description:    "test repo",
+		OwnerID:     testOwnerID,
+		Name:        "my-repo",
+		Private:     true,
+		Description: "test repo",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -183,10 +180,8 @@ func TestCreateRepositoryInitsBareRepo(t *testing.T) {
 
 	ownerLogin := "alice"
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
-		OwnerID:        testOwnerID,
-		OwnerLogin:     ownerLogin,
-		OrganizationID: testOrgID,
-		Name:           "my-repo",
+		OwnerID: testOwnerID,
+		Name:    "my-repo",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -202,19 +197,17 @@ func TestCreateRepositoryInitsBareRepo(t *testing.T) {
 	}
 }
 
-func TestOwnerLoginMismatch(t *testing.T) {
+func TestOwnerNotFound(t *testing.T) {
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
 	uc := repository.NewCreateRepositoryUsecase(repos, &mockUserRepo{}, t.TempDir())
 
-	wrongOwnerID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	unknownOwnerID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
-		OwnerID:        wrongOwnerID,
-		OwnerLogin:     "alice",
-		OrganizationID: testOrgID,
-		Name:           "my-repo",
+		OwnerID: unknownOwnerID,
+		Name:    "my-repo",
 	})
-	if !errors.Is(err, repository.ErrOwnerLoginMismatch) {
-		t.Fatalf("expected ErrOwnerLoginMismatch, got %v", err)
+	if err == nil {
+		t.Fatal("expected error for unknown owner")
 	}
 }
 
@@ -233,10 +226,8 @@ func TestCreateRepositoryRollbackOnInitBareFailure(t *testing.T) {
 	uc := repository.NewCreateRepositoryUsecase(repos, &mockUserRepo{}, gitRoot)
 
 	_, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
-		OwnerID:        testOwnerID,
-		OwnerLogin:     ownerLogin,
-		OrganizationID: testOrgID,
-		Name:           "my-repo",
+		OwnerID: testOwnerID,
+		Name:    "my-repo",
 	})
 	if err == nil {
 		t.Fatal("expected error when bare repo init fails")

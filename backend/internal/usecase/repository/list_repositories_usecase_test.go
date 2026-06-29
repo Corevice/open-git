@@ -46,6 +46,47 @@ func (m *listMockRepositoryRepo) ListByOrg(_ context.Context, _ uuid.UUID, page,
 	return m.repos[start:end], nil
 }
 
+func (m *listMockRepositoryRepo) CountByOrg(_ context.Context, _ uuid.UUID) (int, error) {
+	return len(m.repos), nil
+}
+
+func (m *listMockRepositoryRepo) visibleRepos(viewerID uuid.UUID) []*entity.Repository {
+	visible := make([]*entity.Repository, 0, len(m.repos))
+	for _, r := range m.repos {
+		if r.Visibility != entity.VisibilityPrivate {
+			visible = append(visible, r)
+			continue
+		}
+		if viewerID != uuid.Nil && viewerID == r.OwnerID {
+			visible = append(visible, r)
+		}
+	}
+	return visible
+}
+
+func (m *listMockRepositoryRepo) CountVisibleByOrg(_ context.Context, _ uuid.UUID, viewerID uuid.UUID) (int, error) {
+	return len(m.visibleRepos(viewerID)), nil
+}
+
+func (m *listMockRepositoryRepo) ListVisibleByOrg(_ context.Context, _ uuid.UUID, viewerID uuid.UUID, page, perPage int) ([]*entity.Repository, error) {
+	visible := m.visibleRepos(viewerID)
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 30
+	}
+	start := (page - 1) * perPage
+	if start >= len(visible) {
+		return []*entity.Repository{}, nil
+	}
+	end := start + perPage
+	if end > len(visible) {
+		end = len(visible)
+	}
+	return visible[start:end], nil
+}
+
 func (m *listMockRepositoryRepo) UpdateVisibility(context.Context, uuid.UUID, string) error {
 	return nil
 }
@@ -66,7 +107,10 @@ func (m *listMockUserRepo) Create(context.Context, *domain.User) error {
 	return nil
 }
 
-func (m *listMockUserRepo) GetByID(context.Context, int64) (*domain.User, error) {
+func (m *listMockUserRepo) GetByID(_ context.Context, id int64) (*domain.User, error) {
+	if id == 1 {
+		return &domain.User{ID: 1, Login: "alice"}, nil
+	}
 	return nil, errors.New("not found")
 }
 
