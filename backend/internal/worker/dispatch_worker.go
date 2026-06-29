@@ -18,6 +18,11 @@ import (
 	"github.com/open-git/backend/internal/usecase/actions"
 )
 
+const (
+	maxRunsOnJSONLen    = 4096
+	dispatchRetryDelay  = 30 * time.Second
+)
+
 type DispatchWorker struct {
 	runnerRepo  domainrepo.IRunnerRepository
 	jobRepo     domainrepo.IWorkflowJobRepository
@@ -37,6 +42,39 @@ func NewDispatchWorker(
 		actAdapter:  actAdapter,
 		asynqClient: asynqClient,
 	}
+}
+
+func (w *DispatchWorker) scheduleDispatchRetry(ctx context.Context, payload queue.DispatchJobPayload) error {
+	if w.asynqClient == nil {
+		return nil
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal dispatch job payload: %w", err)
+	}
+	task := asynq.NewTask(queue.TypeDispatchJob, data)
+	_, err = w.asynqClient.EnqueueContext(ctx, task, asynq.ProcessIn(dispatchRetryDelay))
+	if err != nil {
+		return fmt.Errorf("enqueue dispatch retry: %w", err)
+	}
+	return nil
+}
+
+func (w *DispatchWorker) resolveRunsOnLabels(job *entity.WorkflowJob, payload queue.DispatchJobPayload) ([]string, error) {
+	labels := append([]string(nil), job.RunsOn...)
+	if len(labels) > 0 {
+		return labels, nil
+	}
+	if payload.RunsOn == "" {
+		return labels, nil
+	}
+	if len(payload.RunsOn) > maxRunsOnJSONLen {
+		return nil, fmt.Errorf("runs_on payload exceeds size limit")
+	}
+	if err := json.Unmarshal([]byte(payload.RunsOn), &labels); err != nil {
+		return nil, fmt.Errorf("parse runs_on: %w", err)
+	}
+	return labels, nil
 }
 
 func (w *DispatchWorker) HandleDispatchJob(ctx context.Context, task *asynq.Task) error {
@@ -62,15 +100,13 @@ func (w *DispatchWorker) HandleDispatchJob(ctx context.Context, task *asynq.Task
 		return fmt.Errorf("job organization mismatch")
 	}
 
-	labels := append([]string(nil), job.RunsOn...)
-	if len(labels) == 0 && payload.RunsOn != "" {
-		if err := json.Unmarshal([]byte(payload.RunsOn), &labels); err != nil {
-			return fmt.Errorf("parse runs_on: %w", err)
-		}
+	labels, err := w.resolveRunsOnLabels(job, payload)
+	if err != nil {
+		return err
 	}
 
 	if actions.UsesActAdapter(labels) {
-		actPayload := runner.ActJobPayload{
+		actPayload := runner.RunnerJobPayload{
 			JobID:          job.ID.String(),
 			WorkflowYAML:   runner.BuildActWorkflowYAML(job, nil),
 			TimeoutMinutes: job.TimeoutMinutes,
@@ -92,11 +128,17 @@ func (w *DispatchWorker) HandleDispatchJob(ctx context.Context, task *asynq.Task
 	runnerEntity, err := w.runnerRepo.FindAvailable(ctx, orgID, labels)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
+			if err := w.scheduleDispatchRetry(ctx, payload); err != nil {
+				return fmt.Errorf("schedule dispatch retry: %w", err)
+			}
 			return nil
 		}
 		return fmt.Errorf("find available runner: %w", err)
 	}
 	if runnerEntity == nil {
+		if err := w.scheduleDispatchRetry(ctx, payload); err != nil {
+			return fmt.Errorf("schedule dispatch retry: %w", err)
+		}
 		return nil
 	}
 
@@ -105,6 +147,9 @@ func (w *DispatchWorker) HandleDispatchJob(ctx context.Context, task *asynq.Task
 		return fmt.Errorf("acquire job for runner: %w", err)
 	}
 	if !acquired {
+		if err := w.scheduleDispatchRetry(ctx, payload); err != nil {
+			return fmt.Errorf("schedule dispatch retry: %w", err)
+		}
 		return nil
 	}
 	return nil
@@ -121,8 +166,19 @@ func (w *DispatchWorker) HandleCancelJob(ctx context.Context, task *asynq.Task) 
 		return fmt.Errorf("parse job_id: %w", err)
 	}
 
-	if err := w.actAdapter.Cancel(ctx, payload.JobID); err != nil {
-		return fmt.Errorf("cancel act adapter job: %w", err)
+	job, err := w.jobRepo.GetByID(ctx, jobID)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return fmt.Errorf("get job: %w", err)
+	}
+
+	useActAdapter := err != nil
+	if err == nil {
+		useActAdapter = actions.UsesActAdapter(job.RunsOn)
+	}
+	if useActAdapter {
+		if err := w.actAdapter.Cancel(ctx, payload.JobID); err != nil {
+			return fmt.Errorf("cancel act adapter job: %w", err)
+		}
 	}
 
 	if err := w.jobRepo.Cancel(ctx, jobID); err != nil {

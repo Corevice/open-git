@@ -30,14 +30,9 @@ func UsesActAdapter(labels []string) bool {
 	if len(labels) == 0 {
 		return true
 	}
-	if len(labels) == 1 {
-		switch labels[0] {
-		case "ubuntu-latest", "ubuntu-22.04", "ubuntu-20.04":
-			return true
-		}
-	}
 	for _, label := range labels {
-		if IsGitHubHosted(label) {
+		switch label {
+		case "ubuntu-latest", "ubuntu-22.04", "ubuntu-20.04":
 			return true
 		}
 	}

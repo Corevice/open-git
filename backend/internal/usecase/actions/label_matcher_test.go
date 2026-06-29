@@ -107,6 +107,8 @@ func TestUsesActAdapter(t *testing.T) {
 		{name: "ubuntu-latest", labels: []string{"ubuntu-latest"}, want: true},
 		{name: "ubuntu-22.04", labels: []string{"ubuntu-22.04"}, want: true},
 		{name: "ubuntu-20.04", labels: []string{"ubuntu-20.04"}, want: true},
+		{name: "windows-latest", labels: []string{"windows-latest"}, want: false},
+		{name: "macos-latest", labels: []string{"macos-latest"}, want: false},
 		{name: "self-hosted", labels: []string{"self-hosted", "linux"}, want: false},
 	}
 
