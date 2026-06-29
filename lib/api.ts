@@ -7,9 +7,23 @@ import type {
   OAuthAuthorizationInfo,
   OrgMember,
   OrgProfile,
+  Repository,
   SSHKey,
   User,
 } from "./api-types";
+
+export type CreateRepoData = {
+  name: string;
+  description?: string;
+  private?: boolean;
+  auto_init?: boolean;
+  gitignore_template?: string;
+  license_template?: string;
+};
+
+export type UpdateRepoData = Partial<
+  Pick<CreateRepoData, "name" | "description" | "private">
+>;
 
 export type AccessTokenListItem = AccessTokenMeta & {
   revoked_at: string | null;
@@ -171,6 +185,18 @@ export class ApiClient {
     create: (title: string, key: string) =>
       this.post<SSHKey>("/api/v3/user/keys", { title, key }),
     remove: (id: string) => this.del("/api/v3/user/keys/" + id),
+  };
+
+  repos = {
+    createForUser: (data: CreateRepoData) =>
+      this.post<Repository>("/api/v3/user/repos", data),
+    createForOrg: (org: string, data: CreateRepoData) =>
+      this.post<Repository>(`/api/v3/orgs/${org}/repos`, data),
+    listUser: () => this.get<Repository[]>("/api/v3/user/repos"),
+    updateRepo: (owner: string, name: string, data: UpdateRepoData) =>
+      this.patch<Repository>(`/api/v3/repos/${owner}/${name}`, data),
+    deleteRepo: (owner: string, name: string) =>
+      this.del(`/api/v3/repos/${owner}/${name}`),
   };
 
   tokens = {

@@ -331,6 +331,85 @@ describe("users", () => {
   });
 });
 
+describe("repos", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("createForUser({name:'hello', private:false}) calls POST /api/v3/user/repos", async () => {
+    const repo = {
+      id: 1,
+      name: "hello",
+      owner: "alice",
+      visibility: "public",
+      defaultBranch: "main",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => repo,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+
+    const result = await client.repos.createForUser({
+      name: "hello",
+      private: false,
+    });
+
+    expect(result).toEqual(repo);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/user/repos",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "hello", private: false }),
+      }),
+    );
+  });
+
+  it("createForOrg('acme', {name:'proj', private:true}) calls POST /api/v3/orgs/acme/repos", async () => {
+    const repo = {
+      id: 2,
+      name: "proj",
+      owner: "acme",
+      visibility: "private",
+      defaultBranch: "main",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => repo,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+
+    const result = await client.repos.createForOrg("acme", {
+      name: "proj",
+      private: true,
+    });
+
+    expect(result).toEqual(repo);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/orgs/acme/repos",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "proj", private: true }),
+      }),
+    );
+  });
+});
+
 describe("tokens", () => {
   beforeEach(() => {
     localStorage.clear();
