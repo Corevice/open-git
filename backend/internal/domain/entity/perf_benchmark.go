@@ -10,11 +10,11 @@ import (
 type BenchmarkStatus string
 
 const (
-	StatusCompleted BenchmarkStatus = "completed"
-	StatusPartial   BenchmarkStatus = "partial"
-	StatusFailed    BenchmarkStatus = "failed"
-	StatusTimeout   BenchmarkStatus = "timeout"
-	StatusInvalid   BenchmarkStatus = "invalid"
+	BenchmarkStatusCompleted BenchmarkStatus = "completed"
+	BenchmarkStatusPartial   BenchmarkStatus = "partial"
+	BenchmarkStatusFailed    BenchmarkStatus = "failed"
+	BenchmarkStatusTimeout   BenchmarkStatus = "timeout"
+	BenchmarkStatusInvalid   BenchmarkStatus = "invalid"
 )
 
 type SLOResult string
