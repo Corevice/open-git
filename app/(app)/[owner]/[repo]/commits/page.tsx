@@ -1,7 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Suspense } from "react";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   apiClient,
   isApiError,
@@ -53,103 +51,6 @@ function buildPageHref(
   return `/${owner}/${repo}/commits?${params.toString()}`;
 }
 
-async function CommitList({
-  owner,
-  repo,
-  branch,
-  page,
-  refParam,
-}: {
-  owner: string;
-  repo: string;
-  branch: string;
-  page: number;
-  refParam?: string;
-}) {
-  let commits: CommitListItem[];
-  let links: Record<string, string>;
-  try {
-    const result = await apiClient.getCommits<CommitListItem[]>(
-      owner,
-      repo,
-      branch,
-      page,
-    );
-    commits = result.commits;
-    links = result.links;
-  } catch (err) {
-    if (isApiError(err) && err.status === 404) {
-      commits = [];
-      links = {};
-    } else {
-      throw err;
-    }
-  }
-
-  const prevPage = links.prev ? pageFromLinkUrl(links.prev) : null;
-  const nextPage = links.next ? pageFromLinkUrl(links.next) : null;
-
-  return (
-    <>
-      {commits.length === 0 ? (
-        <p className="px-4 py-8 text-sm text-[#57606a]">No commits found.</p>
-      ) : (
-        <ul className="list-none p-0 m-0">
-          {commits.map((item) => {
-            const message = item.commit.message.split("\n")[0];
-            const authorName = item.author?.login ?? item.commit.author.name;
-            return (
-              <li key={item.sha} className="border-b border-[#d8dee4] last:border-b-0">
-                <Link
-                  href={`/${owner}/${repo}/commit/${item.sha}`}
-                  className="flex items-start gap-3 px-4 py-4 no-underline hover:bg-[#f6f8fa]"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-[#24292f] m-0 mb-1 truncate">
-                      {message}
-                    </p>
-                    <p className="text-xs text-[#57606a] m-0">
-                      {authorName} committed {formatDate(item.commit.author.date)}
-                    </p>
-                  </div>
-                  <code className="text-xs font-mono bg-[#f6f8fa] text-[#0969da] px-2 py-1 rounded shrink-0">
-                    {item.sha.slice(0, 7)}
-                  </code>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {(links.prev || links.next) && (
-        <div className="px-4 py-3 border-t border-[#d0d7de] flex justify-between">
-          {links.prev && prevPage ? (
-            <Link
-              href={buildPageHref(owner, repo, prevPage, refParam)}
-              className="text-sm text-[#0969da] no-underline hover:underline"
-            >
-              ← Previous
-            </Link>
-          ) : (
-            <span />
-          )}
-          {links.next && nextPage ? (
-            <Link
-              href={buildPageHref(owner, repo, nextPage, refParam)}
-              className="text-sm text-[#0969da] no-underline hover:underline"
-            >
-              Next →
-            </Link>
-          ) : (
-            <span />
-          )}
-        </div>
-      )}
-    </>
-  );
-}
-
 export default async function CommitsPage({
   params,
   searchParams,
@@ -181,6 +82,29 @@ export default async function CommitsPage({
     branches,
     repoData.default_branch ?? "main",
   );
+
+  let commits: CommitListItem[];
+  let links: Record<string, string>;
+  try {
+    const result = await apiClient.getCommits<CommitListItem[]>(
+      owner,
+      repo,
+      branch,
+      page,
+    );
+    commits = result.commits;
+    links = result.links;
+  } catch (err) {
+    if (isApiError(err) && err.status === 404) {
+      commits = [];
+      links = {};
+    } else {
+      throw err;
+    }
+  }
+
+  const prevPage = links.prev ? pageFromLinkUrl(links.prev) : null;
+  const nextPage = links.next ? pageFromLinkUrl(links.next) : null;
 
   return (
     <div className="min-h-screen bg-[#f6f8fa]">
@@ -236,23 +160,61 @@ export default async function CommitsPage({
             Commit history
           </div>
 
-          <Suspense
-            fallback={
-              <div className="space-y-3 p-4">
-                {[...Array(5)].map((_, i) => (
-                  <Skeleton key={i} className="h-12 w-full" />
-                ))}
-              </div>
-            }
-          >
-            <CommitList
-              owner={owner}
-              repo={repo}
-              branch={branch}
-              page={page}
-              refParam={refParam}
-            />
-          </Suspense>
+          {commits.length === 0 ? (
+            <p className="px-4 py-8 text-sm text-[#57606a]">No commits found.</p>
+          ) : (
+            <ul className="list-none p-0 m-0">
+              {commits.map((item) => {
+                const message = item.commit.message.split("\n")[0];
+                const authorName = item.author?.login ?? item.commit.author.name;
+                return (
+                  <li key={item.sha} className="border-b border-[#d8dee4] last:border-b-0">
+                    <Link
+                      href={`/${owner}/${repo}/commit/${item.sha}`}
+                      className="flex items-start gap-3 px-4 py-4 no-underline hover:bg-[#f6f8fa]"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-[#24292f] m-0 mb-1 truncate">
+                          {message}
+                        </p>
+                        <p className="text-xs text-[#57606a] m-0">
+                          {authorName} committed {formatDate(item.commit.author.date)}
+                        </p>
+                      </div>
+                      <code className="text-xs font-mono bg-[#f6f8fa] text-[#0969da] px-2 py-1 rounded shrink-0">
+                        {item.sha.slice(0, 7)}
+                      </code>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {(links.prev || links.next) && (
+            <div className="px-4 py-3 border-t border-[#d0d7de] flex justify-between">
+              {links.prev && prevPage ? (
+                <Link
+                  href={buildPageHref(owner, repo, prevPage, refParam)}
+                  className="text-sm text-[#0969da] no-underline hover:underline"
+                >
+                  ← Previous
+                </Link>
+              ) : (
+                <span />
+              )}
+              {links.next && nextPage ? (
+                <Link
+                  href={buildPageHref(owner, repo, nextPage, refParam)}
+                  className="text-sm text-[#0969da] no-underline hover:underline"
+                >
+                  Next →
+                </Link>
+              ) : (
+                <span />
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

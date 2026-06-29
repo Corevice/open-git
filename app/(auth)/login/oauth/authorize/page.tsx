@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ApiClient, ApiError } from "@/lib/api";
 import type { OAuthApp } from "@/lib/api-types";
@@ -32,7 +32,7 @@ function ErrorCard({ message }: { message: string }) {
   );
 }
 
-export default function OAuthAuthorizePage() {
+function OAuthAuthorizePageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { token } = useAuth();
@@ -220,5 +220,21 @@ export default function OAuthAuthorizePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function OAuthAuthorizePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#0d1117] text-[#c9d1d9] font-sans -m-6 w-[calc(100%+3rem)] max-w-none">
+          <div className="max-w-[480px] mx-auto px-5 py-10">
+            <p className="text-sm text-[#8b949e]">読み込み中...</p>
+          </div>
+        </div>
+      }
+    >
+      <OAuthAuthorizePageContent />
+    </Suspense>
   );
 }

@@ -1,11 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Suspense } from "react";
 import { RepoRefSelector } from "@/components/repo/BranchSelector";
 import CloneUrlCopy from "@/components/repo/CloneUrlCopy";
 import EmptyRepoState from "@/components/repo/EmptyRepoState";
 import FileTree, { type TreeEntry } from "@/components/repo/FileTree";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   apiClient,
   decodeBase64Content,
@@ -66,83 +64,6 @@ function mapContents(items: ContentItem[]): TreeEntry[] {
   }));
 }
 
-function RepoPageSkeleton() {
-  return (
-    <div className="space-y-2 p-3">
-      <Skeleton className="h-5 w-full" />
-      <Skeleton className="h-5 w-full" />
-      <Skeleton className="h-5 w-full" />
-    </div>
-  );
-}
-
-async function RepoFileTree({
-  owner,
-  repo,
-  branch,
-  cloneUrl,
-}: {
-  owner: string;
-  repo: string;
-  branch: string;
-  cloneUrl: string;
-}) {
-  let contentsRaw: ContentItem[] | ContentItem | null = null;
-  let contentsNotFound = false;
-  try {
-    contentsRaw = await apiClient.getContents<ContentItem[] | ContentItem>(
-      owner,
-      repo,
-      "",
-      branch,
-    );
-  } catch (err) {
-    if (isApiError(err) && err.status === 404) {
-      contentsNotFound = true;
-    } else {
-      throw err;
-    }
-  }
-
-  let commitsEmpty = false;
-  try {
-    const result = await apiClient.getCommits<{ sha: string }[]>(
-      owner,
-      repo,
-      branch,
-      1,
-    );
-    commitsEmpty = result.commits.length === 0;
-  } catch (err) {
-    if (isApiError(err) && err.status === 404) {
-      commitsEmpty = true;
-    } else {
-      throw err;
-    }
-  }
-
-  if (contentsNotFound || commitsEmpty) {
-    return <EmptyRepoState cloneUrl={cloneUrl} />;
-  }
-
-  const contents: ContentItem[] = Array.isArray(contentsRaw)
-    ? contentsRaw
-    : contentsRaw
-      ? [contentsRaw]
-      : [];
-  const entries = mapContents(contents);
-
-  return (
-    <FileTree
-      entries={entries}
-      owner={owner}
-      repo={repo}
-      branch={branch}
-      currentPath=""
-    />
-  );
-}
-
 async function fetchReadme(
   owner: string,
   repo: string,
@@ -195,8 +116,32 @@ export default async function RepoPage({
     metadata.clone_url ??
     `${process.env.NEXT_PUBLIC_API_URL ?? ""}/${owner}/${repo}.git`;
 
+  let contentsRaw: ContentItem[] | ContentItem | null = null;
+  let contentsNotFound = false;
+  try {
+    contentsRaw = await apiClient.getContents<ContentItem[] | ContentItem>(
+      owner,
+      repo,
+      "",
+      branch,
+    );
+  } catch (err) {
+    if (isApiError(err) && err.status === 404) {
+      contentsNotFound = true;
+    } else {
+      throw err;
+    }
+  }
+
   const [readmeRaw] = await Promise.all([fetchReadme(owner, repo, branch)]);
 
+  const contents: ContentItem[] = Array.isArray(contentsRaw)
+    ? contentsRaw
+    : contentsRaw
+      ? [contentsRaw]
+      : [];
+  const entries = mapContents(contents);
+  const isEmptyRepo = contentsNotFound || entries.length === 0;
   const readmeHtml = readmeRaw ? renderMarkdown(readmeRaw) : null;
 
   return (
@@ -267,6 +212,12 @@ export default async function RepoPage({
               📄 Code
             </Link>
             <Link
+              href={`/${owner}/${repo}/branches`}
+              className="px-4 py-2 text-sm text-[#24292f] rounded-t-md hover:bg-gray-100 inline-flex items-center gap-1.5"
+            >
+              Branches
+            </Link>
+            <Link
               href={`/${owner}/${repo}/issues`}
               className="px-4 py-2 text-sm text-[#24292f] rounded-t-md hover:bg-gray-100 inline-flex items-center gap-1.5"
             >
@@ -330,14 +281,16 @@ export default async function RepoPage({
                 </div>
               </div>
 
-              <Suspense fallback={<RepoPageSkeleton />}>
-                <RepoFileTree
+              {isEmptyRepo ? (
+                <EmptyRepoState cloneUrl={cloneUrl} />
+              ) : (
+                <FileTree
+                  entries={entries}
                   owner={owner}
                   repo={repo}
-                  branch={branch}
-                  cloneUrl={cloneUrl}
+                  treeRef={branch}
                 />
-              </Suspense>
+              )}
             </div>
 
             {readmeHtml && (
