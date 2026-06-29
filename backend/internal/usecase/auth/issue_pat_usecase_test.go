@@ -28,7 +28,12 @@ func (m *mockTokenRepo) Revoke(_ context.Context, _, _ int64) error {
 	return nil
 }
 
-func (m *mockTokenRepo) FindByTokenHash(_ context.Context, _ string) (*domain.AccessToken, error) {
+func (m *mockTokenRepo) FindByTokenHash(_ context.Context, hash string) (*domain.AccessToken, error) {
+	for _, token := range m.created {
+		if token.TokenHash == hash {
+			return token, nil
+		}
+	}
 	return nil, nil
 }
 

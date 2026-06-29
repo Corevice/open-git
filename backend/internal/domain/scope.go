@@ -1,6 +1,6 @@
 package domain
 
-var ValidScopes = map[string]bool{
+var validScopes = map[string]bool{
 	"repo":        true,
 	"read:org":    true,
 	"write:org":   true,
@@ -8,9 +8,9 @@ var ValidScopes = map[string]bool{
 	"user":        true,
 	"read:user":   true,
 	"repo:status": true,
-	"delete_repo": true,
+	"repo:delete": true,
 }
 
 func IsValidScope(s string) bool {
-	return ValidScopes[s]
+	return validScopes[s]
 }
