@@ -34,9 +34,14 @@ func (r *sqlAuditLogRepository) Record(
 		metaJSON = encoded
 	}
 
+	var actorLogin string
+	if err := r.db.QueryRowContext(ctx, `SELECT login FROM users WHERE id = $1`, actorID.String()).Scan(&actorLogin); err != nil {
+		actorLogin = ""
+	}
+
 	const query = `
-		INSERT INTO audit_logs (id, organization_id, actor_id, action, target_type, target_id, metadata, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO audit_logs (id, organization_id, actor_id, actor_login, action, target_type, target_id, metadata, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
 
 	_, err := r.db.ExecContext(
@@ -45,6 +50,7 @@ func (r *sqlAuditLogRepository) Record(
 		uuid.New().String(),
 		orgID.String(),
 		actorID.String(),
+		actorLogin,
 		action,
 		targetType,
 		targetID.String(),
