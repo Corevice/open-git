@@ -1,14 +1,11 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, it, expect } from "vitest";
 
-import { Skeleton } from "@/components/ui/skeleton";
+import { SkeletonBlock } from "@/components/ui/skeleton";
 
-describe("Skeleton", () => {
+describe("SkeletonBlock", () => {
   it("renders with animate-pulse class", () => {
-    const { container } = render(<Skeleton className="h-4 w-32" />);
-
-    const skeleton = container.firstElementChild;
-    expect(skeleton).toBeInTheDocument();
-    expect(skeleton).toHaveClass("animate-pulse");
+    const { container } = render(<SkeletonBlock />);
+    expect(container.firstChild).toHaveClass("animate-pulse");
   });
 });

@@ -84,6 +84,10 @@ func (m *mockRepositoryRepo) UpdateName(context.Context, uuid.UUID, string) erro
 	return nil
 }
 
+func (m *mockRepositoryRepo) UpdateDefaultBranch(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
 func (m *mockRepositoryRepo) Delete(_ context.Context, id uuid.UUID) error {
 	m.deletedIDs = append(m.deletedIDs, id)
 	if m.byOwnerAndName != nil {
