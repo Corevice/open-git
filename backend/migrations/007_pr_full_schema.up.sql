@@ -1,3 +1,5 @@
+-- Split into one ADD COLUMN per statement so the migration runs on both
+-- PostgreSQL and SQLite (SQLite only supports a single ADD COLUMN per ALTER).
 ALTER TABLE pull_requests ADD COLUMN title TEXT NOT NULL DEFAULT '';
 ALTER TABLE pull_requests ADD COLUMN body TEXT NOT NULL DEFAULT '';
 ALTER TABLE pull_requests ADD COLUMN draft INTEGER NOT NULL DEFAULT 0;

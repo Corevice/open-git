@@ -16,10 +16,10 @@ import (
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
+	"github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/transport"
-	fdiff "github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
 	domainservice "github.com/open-git/backend/internal/domain/service"
 )
@@ -448,15 +448,14 @@ func DeleteBranch(repoPath, name string) error {
 	}
 
 	refName := plumbing.NewBranchReferenceName(name)
-	if _, err := repo.Reference(refName, true); err != nil {
+	if _, err := repo.Reference(refName, false); err != nil {
 		if errors.Is(err, plumbing.ErrReferenceNotFound) {
 			return ErrPathNotFound
 		}
 		return err
 	}
 
-	err = repo.Storer.RemoveReference(refName)
-	if err != nil {
+	if err := repo.Storer.RemoveReference(refName); err != nil {
 		if errors.Is(err, plumbing.ErrReferenceNotFound) {
 			return ErrPathNotFound
 		}
@@ -501,7 +500,7 @@ func GetDiff(repoPath, baseRef, headRef string) ([]FileDiff, error) {
 		return nil, err
 	}
 
-	changes, err := object.DiffTreeContext(context.Background(), baseTree, headTree)
+	changes, err := object.DiffTree(baseTree, headTree)
 	if err != nil {
 		return nil, err
 	}
@@ -528,20 +527,18 @@ func GetDiff(repoPath, baseRef, headRef string) ([]FileDiff, error) {
 		var patchContent strings.Builder
 		for _, chunk := range fp.Chunks() {
 			switch chunk.Type() {
-			case fdiff.Add:
+			case diff.Add:
 				if status == "" {
 					status = "add"
 				}
-			case fdiff.Delete:
+			case diff.Delete:
 				status = "delete"
-			case fdiff.Equal:
-				continue
 			default:
-				if status != "delete" {
+				if status != "delete" && status != "add" {
 					status = "modify"
 				}
 			}
-			if chunk.Type() != fdiff.Equal {
+			if chunk.Type() != diff.Equal {
 				patchContent.WriteString(chunk.Content())
 			}
 		}

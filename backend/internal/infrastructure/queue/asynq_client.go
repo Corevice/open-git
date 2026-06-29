@@ -9,8 +9,10 @@ import (
 )
 
 const (
-	TypeWebhookDeliver    = "webhook:deliver"
-	TypeMCPVerification   = "mcp:verification"
+	TypeWebhookDeliver  = "webhook:deliver"
+	TypeMCPVerification = "mcp:verification"
+	TypeDispatchJob     = "actions:dispatch_job"
+	TypeCancelJob       = "actions:cancel_job"
 )
 
 type MCPVerificationPayload struct {
@@ -28,6 +30,16 @@ type WebhookDeliveryPayload struct {
 	Event          string `json:"event"`
 	Body           []byte `json:"body"`
 	Attempt        int    `json:"attempt"`
+}
+
+type DispatchJobPayload struct {
+	JobID          string `json:"job_id"`
+	OrganizationID string `json:"organization_id"`
+	RunsOn         string `json:"runs_on"`
+}
+
+type CancelJobPayload struct {
+	JobID string `json:"job_id"`
 }
 
 func NewAsynqClient(addr string) *asynq.Client {
@@ -57,4 +69,22 @@ func EnqueueWebhookDelivery(ctx context.Context, client *asynq.Client, payload W
 	}
 	task := asynq.NewTask(TypeWebhookDeliver, data)
 	return client.EnqueueContext(ctx, task, asynq.MaxRetry(5))
+}
+
+func EnqueueDispatchJob(ctx context.Context, client *asynq.Client, payload DispatchJobPayload) (*asynq.TaskInfo, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal dispatch job payload: %w", err)
+	}
+	task := asynq.NewTask(TypeDispatchJob, data)
+	return client.EnqueueContext(ctx, task)
+}
+
+func EnqueueCancelJob(ctx context.Context, client *asynq.Client, payload CancelJobPayload) (*asynq.TaskInfo, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal cancel job payload: %w", err)
+	}
+	task := asynq.NewTask(TypeCancelJob, data)
+	return client.EnqueueContext(ctx, task)
 }

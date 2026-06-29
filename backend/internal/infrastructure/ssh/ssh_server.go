@@ -17,7 +17,7 @@ import (
 	"github.com/open-git/backend/internal/repository"
 )
 
-var gitSSHCommandPattern = regexp.MustCompile(`^git-(upload-pack|receive-pack)\s+'?/?([^/]+)/([^'\s]+?)'?\.?$`)
+var gitSSHCommandPattern = regexp.MustCompile(`^git-(upload-pack|receive-pack)\s+'?/?([^/'\s]+)/([^'\s]+?)'?\.?$`)
 
 type GitSSHResolver interface {
 	Resolve(ctx context.Context, ownerLogin, repoName string) (diskPath string, ownerID uuid.UUID, err error)
@@ -109,9 +109,9 @@ func (h *SSHServer) Close() error {
 	return h.server.Close()
 }
 
-func (h *SSHServer) authenticateKey(_ gossh.Context, key gossh.PublicKey) bool {
+func (h *SSHServer) authenticateKey(ctx gossh.Context, key gossh.PublicKey) bool {
 	fingerprint := cryptossh.FingerprintSHA256(key)
-	stored, err := h.keyStore.FindByFingerprint(context.Background(), fingerprint)
+	stored, err := h.keyStore.FindByFingerprint(ctx, fingerprint)
 	if err != nil || stored == nil {
 		return false
 	}

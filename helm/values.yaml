@@ -2,6 +2,10 @@ global:
   databaseType: internal
   storageClass: ""
 
+config:
+  appEnv: production
+  logLevel: info
+
 replicaCount: 1
 
 image:
@@ -24,9 +28,15 @@ autoscaling:
 
 persistence:
   repositories:
+    enabled: true
+    mountPath: /data/repositories
     size: 50Gi
     accessMode: ReadWriteOnce
     retainOnDelete: true
+
+config:
+  appEnv: production
+  logLevel: info
 
 db:
   type: sqlite  # sqlite or postgres
@@ -87,6 +97,11 @@ ingress:
   tls: false
   className: ""
   annotations: {}
+  traefikCRD: false        # set true to use IngressRoute CRD instead of Ingress
+  certResolver: "le"       # Traefik cert resolver name
+  ssh:
+    enabled: false         # create IngressRouteTCP for SSH Git access
+    entrypoint: "ssh"      # Traefik entrypoint name for SSH
 
 worker:
   replicaCount: 1

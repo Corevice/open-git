@@ -17,7 +17,10 @@ import (
 	"github.com/open-git/backend/internal/infrastructure/runner"
 )
 
-const defaultJobTimeoutMinutes = 360
+const (
+	defaultJobTimeoutMinutes = 360
+	conclusionTimedOut       = "timed_out"
+)
 
 type workflowStepRepository interface {
 	ListByJobID(ctx context.Context, orgID, jobID string) ([]*runner.Step, error)
@@ -121,7 +124,7 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 		return fmt.Errorf("job run mismatch: %w", asynq.SkipRetry)
 	}
 
-	steps, err := h.stepRepo.ListByJobID(ctx, payload.OrgID, payload.JobID)
+	steps, err := h.stepRepo.ListByJobID(ctx, orgID.String(), jobID.String())
 	if err != nil {
 		return fmt.Errorf("load workflow steps: %w", err)
 	}
@@ -136,7 +139,7 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 
 	secretMap := map[string]string{}
 	if h.secrets != nil {
-		secretMap, err = h.secrets.GetSecrets(ctx, payload.OrgID, job.RepositoryID.String())
+		secretMap, err = h.secrets.GetSecrets(ctx, orgID.String(), job.RepositoryID.String())
 		if err != nil {
 			return fmt.Errorf("load secrets: %w", err)
 		}
@@ -160,12 +163,15 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 	}
 
 	completedAt := time.Now().UTC()
-	if status == entity.WorkflowJobStatusCompleted {
+	switch status {
+	case entity.WorkflowJobStatusCompleted:
 		if err := h.jobRepo.Complete(ctx, jobID, conclusion, completedAt); err != nil {
 			return fmt.Errorf("update job terminal status: %w", err)
 		}
-	} else if err := h.jobRepo.UpdateStatus(ctx, jobID, status, conclusion); err != nil {
-		return fmt.Errorf("update job terminal status: %w", err)
+	default:
+		if err := h.jobRepo.UpdateStatus(ctx, jobID, status, conclusion); err != nil {
+			return fmt.Errorf("update job terminal status: %w", err)
+		}
 	}
 
 	if err := h.enqueuer.EnqueueSchedule(ctx, WorkflowSchedulePayload{
@@ -216,9 +222,6 @@ func (h *WorkflowJobExecHandler) buildLogCallback(
 func jobTimeoutMinutes(job *entity.WorkflowJob) int {
 	if job == nil {
 		return defaultJobTimeoutMinutes
-	}
-	if job.TimeoutMinutes > 0 {
-		return job.TimeoutMinutes
 	}
 	field := reflect.ValueOf(job).Elem().FieldByName("TimeoutMinutes")
 	if field.IsValid() && field.Kind() == reflect.Int && field.Int() > 0 {

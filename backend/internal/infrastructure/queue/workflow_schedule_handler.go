@@ -20,7 +20,6 @@ const (
 	conclusionSuccess   = "success"
 	conclusionFailure   = "failure"
 	conclusionCancelled = "cancelled"
-	conclusionTimedOut  = "timed_out"
 )
 
 type schedulableJob struct {

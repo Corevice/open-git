@@ -131,6 +131,10 @@ func (m *wfStreamWorkflowJobRepo) Create(_ context.Context, _ *entity.WorkflowJo
 	return nil
 }
 
+func (m *wfStreamWorkflowJobRepo) CreateBatch(_ context.Context, _ []*entity.WorkflowJob) error {
+	return nil
+}
+
 func (m *wfStreamWorkflowJobRepo) GetByID(_ context.Context, _ uuid.UUID) (*entity.WorkflowJob, error) {
 	if m.job == nil {
 		return nil, domain.ErrNotFound
