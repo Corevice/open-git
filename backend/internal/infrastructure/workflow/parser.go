@@ -186,7 +186,7 @@ func validateWorkflowDocument(doc *yaml.Node) []Diagnostic {
 	if onNode == nil {
 		diags = append(diags, Diagnostic{
 			Line:     doc.Line,
-			Col:      doc.Col,
+			Col:      1,
 			Severity: "error",
 			Message:  "workflow must define trigger 'on'",
 		})
@@ -194,7 +194,7 @@ func validateWorkflowDocument(doc *yaml.Node) []Diagnostic {
 	if jobsNode == nil {
 		diags = append(diags, Diagnostic{
 			Line:     doc.Line,
-			Col:      doc.Col,
+			Col:      1,
 			Severity: "error",
 			Message:  "workflow must contain at least one job",
 		})
@@ -231,7 +231,7 @@ func ParseWorkflowFull(data []byte) (*WorkflowIR, []Diagnostic, error) {
 		return nil, diags, nil
 	}
 	if doc.Kind != yaml.MappingNode {
-		diags = append(diags, Diagnostic{Line: doc.Line, Col: doc.Col, Severity: "error", Message: "workflow root must be a mapping"})
+		diags = append(diags, Diagnostic{Line: doc.Line, Col: 1, Severity: "error", Message: "workflow root must be a mapping"})
 		return nil, diags, nil
 	}
 
@@ -252,10 +252,10 @@ func ParseWorkflowFull(data []byte) (*WorkflowIR, []Diagnostic, error) {
 	}
 
 	if onNode == nil {
-		diags = append(diags, Diagnostic{Line: doc.Line, Col: doc.Col, Severity: "error", Message: "workflow must define trigger 'on'"})
+		diags = append(diags, Diagnostic{Line: doc.Line, Col: 1, Severity: "error", Message: "workflow must define trigger 'on'"})
 	}
 	if jobsNode == nil {
-		diags = append(diags, Diagnostic{Line: doc.Line, Col: doc.Col, Severity: "error", Message: "workflow must contain at least one job"})
+		diags = append(diags, Diagnostic{Line: doc.Line, Col: 1, Severity: "error", Message: "workflow must contain at least one job"})
 		return nil, diags, nil
 	}
 
@@ -266,11 +266,11 @@ func ParseWorkflowFull(data []byte) (*WorkflowIR, []Diagnostic, error) {
 
 	var rawJobs map[string]Job
 	if err := jobsNode.Decode(&rawJobs); err != nil {
-		diags = append(diags, Diagnostic{Line: jobsNode.Line, Col: jobsNode.Col, Severity: "error", Message: err.Error()})
+		diags = append(diags, Diagnostic{Line: jobsNode.Line, Col: 1, Severity: "error", Message: err.Error()})
 		return nil, diags, nil
 	}
 	if len(rawJobs) == 0 {
-		diags = append(diags, Diagnostic{Line: jobsNode.Line, Col: jobsNode.Col, Severity: "error", Message: "workflow must contain at least one job"})
+		diags = append(diags, Diagnostic{Line: jobsNode.Line, Col: 1, Severity: "error", Message: "workflow must contain at least one job"})
 		return nil, diags, nil
 	}
 
@@ -422,7 +422,7 @@ func expandMatrix(node yaml.Node) ([]map[string]any, []Diagnostic) {
 	var diags []Diagnostic
 	var raw map[string]any
 	if err := node.Decode(&raw); err != nil {
-		diags = append(diags, Diagnostic{Line: node.Line, Col: node.Col, Severity: "error", Message: err.Error()})
+		diags = append(diags, Diagnostic{Line: node.Line, Col: 1, Severity: "error", Message: err.Error()})
 		return nil, diags
 	}
 
@@ -449,7 +449,7 @@ func expandMatrix(node yaml.Node) ([]map[string]any, []Diagnostic) {
 	if overflow {
 		diags = append(diags, Diagnostic{
 			Line:     node.Line,
-			Col:      node.Col,
+			Col:      1,
 			Severity: "error",
 			Message:  fmt.Sprintf("matrix expansion exceeds maximum of %d combinations", maxMatrixCombinations),
 		})
@@ -461,7 +461,7 @@ func expandMatrix(node yaml.Node) ([]map[string]any, []Diagnostic) {
 	if len(combos) > maxMatrixCombinations {
 		diags = append(diags, Diagnostic{
 			Line:     node.Line,
-			Col:      node.Col,
+			Col:      1,
 			Severity: "error",
 			Message:  fmt.Sprintf("matrix expansion exceeds maximum of %d combinations (got %d)", maxMatrixCombinations, len(combos)),
 		})

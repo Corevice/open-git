@@ -42,7 +42,27 @@ func (m *getMockRepositoryRepo) ListByOrg(context.Context, uuid.UUID, int, int) 
 	return nil, nil
 }
 
+func (m *getMockRepositoryRepo) CountByOrg(context.Context, uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *getMockRepositoryRepo) ListByOwner(context.Context, uuid.UUID, int, int) ([]*entity.Repository, error) {
+	return nil, nil
+}
+
+func (m *getMockRepositoryRepo) CountByOwner(context.Context, uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 func (m *getMockRepositoryRepo) UpdateVisibility(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
+func (m *getMockRepositoryRepo) UpdateName(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
+func (m *getMockRepositoryRepo) UpdateDefaultBranch(context.Context, uuid.UUID, string) error {
 	return nil
 }
 
