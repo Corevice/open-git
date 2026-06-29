@@ -47,10 +47,9 @@ func ResolveOwner(orgs OrgByLoginLookup, memberships OrgMembershipLookup) echo.M
 				}
 			}
 
-			SetActor(c, Actor{
-				UserID:         userID,
-				OrganizationID: Int64ToUUID(org.ID),
-			})
+			// Populate the organization scope on the request context so that
+			// GetActor (defined in auth_middleware.go) reports the resolved owner.
+			c.Set(organizationIDContextKey, Int64ToUUID(org.ID))
 			return next(c)
 		}
 	}

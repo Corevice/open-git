@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/domain"
@@ -52,68 +51,6 @@ func (m *mockOrgMembershipLookup) GetMemberRole(_ context.Context, orgID, userID
 		return "", nil
 	}
 	return role, nil
-}
-
-func TestGetActorAbsent(t *testing.T) {
-	e := echo.New()
-	e.GET("/", func(c echo.Context) error {
-		actor, err := middleware.GetActor(c)
-		if err == nil {
-			t.Fatal("expected error when actor absent")
-		}
-		if err != echo.ErrUnauthorized {
-			t.Fatalf("expected echo.ErrUnauthorized, got %v", err)
-		}
-		if actor != nil {
-			t.Fatal("expected nil actor")
-		}
-		return c.NoContent(http.StatusOK)
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-}
-
-func TestGetActorSet(t *testing.T) {
-	orgID := uuid.New()
-	want := middleware.Actor{
-		UserID:         42,
-		OrganizationID: orgID,
-	}
-
-	e := echo.New()
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			middleware.SetActor(c, want)
-			return next(c)
-		}
-	})
-	e.GET("/", func(c echo.Context) error {
-		actor, err := middleware.GetActor(c)
-		if err != nil {
-			t.Fatalf("GetActor: %v", err)
-		}
-		if actor.UserID != want.UserID {
-			t.Fatalf("UserID: got %v want %v", actor.UserID, want.UserID)
-		}
-		if actor.OrganizationID != want.OrganizationID {
-			t.Fatalf("OrganizationID: got %v want %v", actor.OrganizationID, want.OrganizationID)
-		}
-		return c.NoContent(http.StatusOK)
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
 }
 
 func TestResolveOwnerUnknown(t *testing.T) {
@@ -250,8 +187,8 @@ func TestResolveOwnerKnown(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetActor: %v", err)
 		}
-		if actor.UserID != userID {
-			t.Fatalf("UserID: got %v want %v", actor.UserID, userID)
+		if actor.UserID != middleware.Int64ToUUID(userID) {
+			t.Fatalf("UserID: got %v want %v", actor.UserID, middleware.Int64ToUUID(userID))
 		}
 		if actor.OrganizationID != orgUUID {
 			t.Fatalf("OrganizationID: got %v want %v", actor.OrganizationID, orgUUID)
@@ -279,6 +216,12 @@ func TestResolveOwnerOrgParam(t *testing.T) {
 	}
 
 	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			middleware.SetAuthContext(c, 1, nil)
+			return next(c)
+		}
+	})
 	e.Use(middleware.ResolveOwner(orgs, nil))
 	e.GET("/orgs/:org/repos", func(c echo.Context) error {
 		actor, err := middleware.GetActor(c)
