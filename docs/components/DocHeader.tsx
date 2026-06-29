@@ -15,7 +15,7 @@ export function DocHeader() {
       <span>open-git</span>
       <a
         href="https://github.com/Corevice/open-git"
-        aria-label="Source repository"
+        aria-label="GitHub"
         target="_blank"
         rel="noreferrer"
       >

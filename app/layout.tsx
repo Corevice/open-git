@@ -1,6 +1,7 @@
 import "@/lib/env";
 import type { Metadata } from "next";
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { AuthProvider as TokenAuthProvider } from "@/lib/auth";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { ToastProvider } from "@/components/ui/toast";
@@ -22,7 +23,9 @@ export default function RootLayout({
         <ThemeProvider>
           <QueryProvider>
             <ToastProvider>
-              <AuthProvider>{children}</AuthProvider>
+              <AuthProvider>
+                <TokenAuthProvider>{children}</TokenAuthProvider>
+              </AuthProvider>
             </ToastProvider>
           </QueryProvider>
         </ThemeProvider>
