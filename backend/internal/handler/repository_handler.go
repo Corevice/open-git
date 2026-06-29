@@ -284,12 +284,18 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 }
 
 func (h *RepositoryHandler) GetRepository(c echo.Context) error {
+	owner := c.Param("owner")
+	repoName := c.Param("repo")
+	if err := ValidateOwnerRepo(owner, repoName); err != nil {
+		return err
+	}
+
 	requestUserID := middleware.UserUUIDFromContext(c)
 
 	repository, err := h.get.Execute(c.Request().Context(), repoUC.GetRepositoryInput{
 		RequestUserID: requestUserID,
-		OwnerLogin:    c.Param("owner"),
-		Name:          c.Param("repo"),
+		OwnerLogin:    owner,
+		Name:          repoName,
 	})
 	if err != nil {
 		if errors.Is(err, repoUC.ErrNotFound) {

@@ -45,7 +45,7 @@ func (s stubRedisClient) Ping(ctx context.Context) *redis.StatusCmd {
 func newHealthTestDB(t *testing.T, pingErr error) *sqlx.DB {
 	t.Helper()
 
-	mockDB, mock, err := sqlmock.New()
+	mockDB, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
 	}

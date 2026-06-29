@@ -21,6 +21,7 @@ import (
 
 	gossh "github.com/gliderlabs/ssh"
 	"github.com/google/uuid"
+	cryptossh "golang.org/x/crypto/ssh"
 	"github.com/hibiken/asynq"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
@@ -44,6 +45,7 @@ import (
 	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
 	"github.com/open-git/backend/internal/middleware"
+	repo "github.com/open-git/backend/internal/repository"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
@@ -322,7 +324,7 @@ func domainUserToEntity(user *domain.User) *entity.User {
 
 func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
 	if data, err := os.ReadFile(path); err == nil {
-		signer, err := gossh.ParsePrivateKey(data)
+		signer, err := cryptossh.ParsePrivateKey(data)
 		if err != nil {
 			return nil, fmt.Errorf("parse host key: %w", err)
 		}
@@ -348,7 +350,7 @@ func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
 		return nil, fmt.Errorf("write host key: %w", err)
 	}
 
-	return gossh.NewSignerFromKey(privateKey)
+	return cryptossh.NewSignerFromKey(privateKey)
 }
 
 func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SSHServer, error) {
@@ -358,6 +360,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	entityUserRepo := infrarepo.NewUserRepository(sqlxDB)
 	userRepo := &legacyUserRepoAdapter{users: entityUserRepo}
 	repoRepo := infrarepo.NewRepositoryRepository(sqlxDB)
+	collaboratorRepo := infrarepo.NewRepositoryCollaboratorRepository(sqlxDB)
 	membershipRepo := infrarepo.NewMembershipRepository(sqlxDB)
 	legacyMembershipRepo := &legacyMembershipRepoAdapter{inner: membershipRepo}
 	orgRepo := infraDB.NewOrganizationRepository(db)
@@ -494,17 +497,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	wfRepo := infrarepo.NewWorkflowRunRepository(sqlxDB)
 	prAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
 	prTxManager := infrarepo.NewTransactionManager(sqlxDB)
-	createPRUC := prusecase.NewCreatePRUsecase(prRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo)
 	mergePRUC := prusecase.NewMergePRUsecase(prRepo, bpRepo, prReviewRepo, wfRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo)
-	pullRequestHandler := handler.NewPullRequestHandler(
-		createPRUC,
-		mergePRUC,
-		prRepo,
-		prReviewRepo,
-		prReviewCommentRepo,
-		gitSvc,
-		resolveRepo,
-	)
+	createReviewUC := prusecase.NewCreateReviewUsecase(prRepo, prReviewRepo, prAuditRepo, membershipRepo)
+	listReviewsUC := prusecase.NewListReviewsUsecase(prRepo, prReviewRepo)
 
 	bpReadRepo := &branchProtectionReadRepo{db: sqlxDB}
 	bpWriteRepo := &branchProtectionWriteRepo{db: sqlxDB}
@@ -603,6 +598,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		mux := asynq.NewServeMux()
 		mcpWorker := worker.NewMCPVerificationWorker(mcpVerificationRepo, cfg.WebBaseURL)
 		mux.HandleFunc(queue.TypeMCPVerification, mcpWorker.HandleMCPVerification)
+		prMergeableWorker := queue.NewPRMergeableWorker(prRepo, repoRepo, gitSvc)
+		mux.HandleFunc(queue.TypePRMergeableCheck, prMergeableWorker.HandlePRMergeableCheck)
 		go func() {
 			middleware.Log().Info("asynq server starting")
 			if err := asynqServer.Run(mux); err != nil {
@@ -616,6 +613,23 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 			noopMCPEnqueuer{},
 		)
 	}
+
+	var prMergeableEnqueuer prusecase.PRMergeableEnqueuer = prusecase.NoopPRMergeableEnqueuer{}
+	if asynqClient != nil {
+		prMergeableEnqueuer = asynqPRMergeableEnqueuer{client: asynqClient}
+	}
+	createPRUC := prusecase.NewCreatePRUsecase(prRepo, prAuditRepo, gitSvc, prTxManager, membershipRepo, prMergeableEnqueuer)
+	pullRequestHandler := handler.NewPullRequestHandler(
+		createPRUC,
+		mergePRUC,
+		createReviewUC,
+		listReviewsUC,
+		prRepo,
+		prReviewRepo,
+		prReviewCommentRepo,
+		gitSvc,
+		resolveRepo,
+	)
 
 	mcpVerificationHandler := handler.NewMCPVerificationHandler(
 		runVerificationUC,
@@ -633,6 +647,29 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		exportAuditLogsUC,
 	)
 
+	securityAdvisoryRepo := infrarepo.NewSecurityAdvisoryRepository(sqlxDB)
+	dependabotAlertRepo := infrarepo.NewDependabotAlertRepository(sqlxDB)
+	listAdvisoriesUC := securityUC.NewListAdvisoriesUsecase(securityAdvisoryRepo)
+	getAdvisoryUC := securityUC.NewGetAdvisoryUsecase(securityAdvisoryRepo)
+	updateAdvisoryStateUC := securityUC.NewUpdateAdvisoryStateUsecase(securityAdvisoryRepo)
+	listDependabotAlertsUC := securityUC.NewListDependabotAlertsUsecase(dependabotAlertRepo)
+	updateDependabotAlertUC := securityUC.NewUpdateDependabotAlertUsecase(dependabotAlertRepo)
+	securityAdvisoryHandler := handler.NewSecurityAdvisoryHandler(
+		getOrgUC,
+		membershipRepo,
+		listAdvisoriesUC,
+		getAdvisoryUC,
+		updateAdvisoryStateUC,
+		resolveRepo,
+	)
+	dependabotAlertHandler := handler.NewDependabotAlertHandler(
+		membershipRepo,
+		listDependabotAlertsUC,
+		updateDependabotAlertUC,
+		dependabotAlertRepo,
+		resolveRepo,
+	)
+
 	oauthHandler := handler.NewOAuthHandler(nil, nil)
 	rateLimitHandler := handler.NewRateLimitHandler()
 	rootHandler := handler.NewRootHandler()
@@ -642,9 +679,11 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		repoGitResolver,
 		membershipAdapter,
 		nil,
+		collaboratorRepo,
 		realGitBasicAuth,
 	)
 	sshKeyHandler := handler.NewSSHKeyHandler(sshKeyRepo)
+	collaboratorHandler := handler.NewCollaboratorHandler(repoGitResolver, repoRepo, collaboratorRepo, entityUserRepo)
 
 	api := e.Group("")
 	e.POST("/register", authHandler.Register, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
@@ -661,6 +700,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	repositoryHandler.RegisterRoutes(api, authMiddleware)
+	collaboratorHandler.RegisterRoutes(api, authMiddleware)
 	contentHandler.RegisterRoutes(api)
 	issueHandler.RegisterRoutes(api, authMiddleware)
 	labelHandler.RegisterRoutes(api, authMiddleware)
@@ -683,7 +723,10 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3.Group("", authMiddleware, middleware.RequireScope("admin:org")).PUT("/orgs/:org/memberships/:username", orgHandler.UpdateMembership)
 	orgHandler.RegisterRoutes(v3, authMiddleware)
 	orgAuditLogHandler.RegisterRoutes(v3, authMiddleware)
+	securityAdvisoryHandler.RegisterRoutes(v3, authMiddleware)
+	dependabotAlertHandler.RegisterRoutes(v3, authMiddleware)
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
+	collaboratorHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
 	issueHandler.RegisterRoutes(v3, authMiddleware)
 	labelHandler.RegisterRoutes(v3, authMiddleware)
@@ -777,6 +820,20 @@ type noopMCPEnqueuer struct{}
 
 func (noopMCPEnqueuer) EnqueueMCPVerification(context.Context, queue.MCPVerificationPayload) error {
 	return errors.New("redis not configured")
+}
+
+type asynqPRMergeableEnqueuer struct {
+	client *asynq.Client
+}
+
+func (e asynqPRMergeableEnqueuer) Enqueue(ctx context.Context, payload prusecase.PRMergeableEnqueuePayload) error {
+	_, err := queue.EnqueuePRMergeableCheck(ctx, e.client, queue.PRMergeableCheckPayload{
+		GitPath: payload.GitPath,
+		HeadRef: payload.HeadRef,
+		BaseRef: payload.BaseRef,
+		PRID:    payload.PRID,
+	})
+	return err
 }
 
 type artifactMinioStorage struct {

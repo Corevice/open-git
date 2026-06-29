@@ -249,7 +249,8 @@ func (r *sqlxWebhookDeliveryRepository) scanDelivery(row *sqlx.Row) (*entity.Web
 		responseBody      sql.NullString
 		durationMs        sql.NullInt64
 		parentDeliveryID  sql.NullString
-		deliveredAt       sql.NullTime
+		deliveredAt       nullTime
+		createdAt         nullTime
 	)
 
 	err := row.Scan(
@@ -268,11 +269,12 @@ func (r *sqlxWebhookDeliveryRepository) scanDelivery(row *sqlx.Row) (*entity.Web
 		&delivery.Redelivery,
 		&parentDeliveryID,
 		&deliveredAt,
-		&delivery.CreatedAt,
+		&createdAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+	delivery.CreatedAt = createdAt.Time
 
 	if statusCode.Valid {
 		code := int(statusCode.Int64)
@@ -324,7 +326,8 @@ func (r *sqlxWebhookDeliveryRepository) scanDeliveryRows(rows *sqlx.Rows) ([]*en
 			responseBody       sql.NullString
 			durationMs         sql.NullInt64
 			parentDeliveryID   sql.NullString
-			deliveredAt        sql.NullTime
+			deliveredAt        nullTime
+			createdAt          nullTime
 		)
 
 		if err := rows.Scan(
@@ -343,10 +346,11 @@ func (r *sqlxWebhookDeliveryRepository) scanDeliveryRows(rows *sqlx.Rows) ([]*en
 			&delivery.Redelivery,
 			&parentDeliveryID,
 			&deliveredAt,
-			&delivery.CreatedAt,
+			&createdAt,
 		); err != nil {
 			return nil, dbErrors.MapDBError(err)
 		}
+		delivery.CreatedAt = createdAt.Time
 
 		if statusCode.Valid {
 			code := int(statusCode.Int64)
