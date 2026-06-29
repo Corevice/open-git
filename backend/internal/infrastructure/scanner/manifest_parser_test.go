@@ -216,6 +216,8 @@ func TestParseRequirementsTxtCases(t *testing.T) {
 			content: "requests @ git+https://example.com/org/repo.git\n",
 			want:    nil,
 		},
+		{
+			name:    "requirement options and includes ignored",
 			content: "-r other.txt\n-c constraints.txt\n--index-url https://pypi.org/simple\nrequests==2.31.0\n",
 			want: []Dependency{
 				{Name: "requests", Version: "2.31.0", Ecosystem: "PyPI"},

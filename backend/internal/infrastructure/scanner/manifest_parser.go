@@ -304,7 +304,7 @@ func splitRequirementSpecifiers(line string) []string {
 			current = segment
 			continue
 		}
-		if looksLikeBareRequirementVersion(segment) && findRequirementOperator(current) < 0 {
+		if _, curOpIdx := findRequirementOperator(current); looksLikeBareRequirementVersion(segment) && curOpIdx < 0 {
 			if current != "" {
 				parts = append(parts, current)
 			}
