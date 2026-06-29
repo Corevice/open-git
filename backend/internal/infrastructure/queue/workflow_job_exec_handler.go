@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -123,7 +124,7 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 		return fmt.Errorf("job run mismatch: %w", asynq.SkipRetry)
 	}
 
-	steps, err := h.stepRepo.ListByJobID(ctx, payload.OrgID, payload.JobID)
+	steps, err := h.stepRepo.ListByJobID(ctx, orgID.String(), jobID.String())
 	if err != nil {
 		return fmt.Errorf("load workflow steps: %w", err)
 	}
@@ -138,13 +139,13 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 
 	secretMap := map[string]string{}
 	if h.secrets != nil {
-		secretMap, err = h.secrets.GetSecrets(ctx, payload.OrgID, job.RepositoryID.String())
+		secretMap, err = h.secrets.GetSecrets(ctx, orgID.String(), job.RepositoryID.String())
 		if err != nil {
 			return fmt.Errorf("load secrets: %w", err)
 		}
 	}
 
-	logFn, logErrFn := h.buildLogCallback(execCtx, payload, job)
+	logFn, logErrFn := h.buildLogCallback(execCtx, orgID, runID, jobID, job)
 	runErr := h.runner.ExecuteJob(execCtx, job, steps, secretMap, logFn)
 	if logErr := logErrFn(); logErr != nil {
 		return fmt.Errorf("append job log lines: %w", logErr)
@@ -171,8 +172,8 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 	}
 
 	if err := h.enqueuer.EnqueueSchedule(ctx, WorkflowSchedulePayload{
-		RunID: payload.RunID,
-		OrgID: payload.OrgID,
+		RunID: runID.String(),
+		OrgID: orgID.String(),
 	}); err != nil {
 		return fmt.Errorf("enqueue next workflow schedule: %w", err)
 	}
@@ -182,25 +183,30 @@ func (h *WorkflowJobExecHandler) HandleWorkflowJobExec(ctx context.Context, task
 
 func (h *WorkflowJobExecHandler) buildLogCallback(
 	ctx context.Context,
-	payload WorkflowJobExecPayload,
+	orgID uuid.UUID,
+	runID uuid.UUID,
+	jobID uuid.UUID,
 	job *entity.WorkflowJob,
 ) (func(offset int64, chunk string), func() error) {
 	var (
 		appendErr error
 		appendMu  sync.Mutex
 	)
+	orgIDStr := orgID.String()
+	runIDStr := runID.String()
+	jobIDStr := jobID.String()
 	return func(offset int64, chunk string) {
 		if h.logRepo == nil {
 			return
 		}
 		line := &entity.JobLogLine{
-			OrganizationID: payload.OrgID,
+			OrganizationID: orgIDStr,
 			RepositoryID:   job.RepositoryID.String(),
-			RunID:          payload.RunID,
-			JobID:          payload.JobID,
+			RunID:          runIDStr,
+			JobID:          jobIDStr,
 			LineNumber:     offset,
 			Stream:         entity.LogStreamStdout,
-			Text:           chunk,
+			Text:           sanitizeLogLine(chunk),
 			CreatedAt:      time.Now().UTC(),
 		}
 		appendMu.Lock()
@@ -213,6 +219,17 @@ func (h *WorkflowJobExecHandler) buildLogCallback(
 		defer appendMu.Unlock()
 		return appendErr
 	}
+}
+
+func sanitizeLogLine(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 func jobTimeoutMinutes(job *entity.WorkflowJob) int {

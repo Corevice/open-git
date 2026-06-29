@@ -26,6 +26,15 @@ func NewWorkflowJobRepository(db *sqlx.DB) domainrepo.IWorkflowJobRepository {
 }
 
 func (r *sqlxWorkflowJobRepository) Create(ctx context.Context, job *entity.WorkflowJob) error {
+	return r.insertJob(ctx, r.db, job)
+}
+
+type workflowJobExec interface {
+	NamedExecContext(context.Context, string, interface{}) (sql.Result, error)
+	Rebind(string) string
+}
+
+func (r *sqlxWorkflowJobRepository) insertJob(ctx context.Context, exec workflowJobExec, job *entity.WorkflowJob) error {
 	if job.ID == uuid.Nil {
 		job.ID = uuid.New()
 	}
@@ -54,7 +63,7 @@ func (r *sqlxWorkflowJobRepository) Create(ctx context.Context, job *entity.Work
 		)
 	`
 
-	_, err = r.db.NamedExecContext(ctx, query, map[string]any{
+	_, err = exec.NamedExecContext(ctx, query, map[string]any{
 		"id":                   job.ID,
 		"workflow_run_id":      runID,
 		"organization_id":      job.OrganizationID,
@@ -186,10 +195,24 @@ func (r *sqlxWorkflowJobRepository) Cancel(ctx context.Context, jobID uuid.UUID)
 }
 
 func (r *sqlxWorkflowJobRepository) CreateBatch(ctx context.Context, jobs []*entity.WorkflowJob) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	for _, job := range jobs {
-		if err := r.Create(ctx, job); err != nil {
+		if err := r.insertJob(ctx, tx, job); err != nil {
 			return err
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return dbErrors.MapDBError(err)
 	}
 	return nil
 }
@@ -208,11 +231,13 @@ func (r *sqlxWorkflowJobRepository) CancelInProgressByRunID(ctx context.Context,
 func (r *sqlxWorkflowJobRepository) ResetQueuedByRunID(ctx context.Context, runID uuid.UUID) error {
 	const query = `
 		UPDATE workflow_jobs
-		SET status = 'queued', conclusion = ''
-		WHERE workflow_run_id = ? AND status = 'queued'
+		SET status = 'queued', conclusion = '', assigned_runner_id = NULL, started_at = NULL, finished_at = NULL
+		WHERE workflow_run_id = ?
+			AND organization_id = (SELECT organization_id FROM workflow_runs WHERE id = ?)
+			AND status IN ('completed', 'failed', 'cancelled', 'in_progress')
 	`
 	q := r.db.Rebind(query)
-	_, err := r.db.ExecContext(ctx, q, runID)
+	_, err := r.db.ExecContext(ctx, q, runID, runID)
 	return dbErrors.MapDBError(err)
 }
 

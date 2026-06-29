@@ -30,6 +30,8 @@ type mockExecJobRepo struct {
 
 func (m *mockExecJobRepo) Create(context.Context, *entity.WorkflowJob) error { return nil }
 
+func (m *mockExecJobRepo) CreateBatch(context.Context, []*entity.WorkflowJob) error { return nil }
+
 func (m *mockExecJobRepo) GetByID(_ context.Context, jobID uuid.UUID) (*entity.WorkflowJob, error) {
 	if m.job == nil || m.job.ID != jobID {
 		return nil, errors.New("not found")
@@ -63,6 +65,12 @@ func (m *mockExecJobRepo) ListQueued(context.Context, uuid.UUID) ([]*entity.Work
 func (m *mockExecJobRepo) ListByRunID(context.Context, uuid.UUID, uuid.UUID) ([]*entity.WorkflowJob, error) {
 	return nil, nil
 }
+
+func (m *mockExecJobRepo) CancelInProgressByRunID(context.Context, uuid.UUID, uuid.UUID) error {
+	return nil
+}
+
+func (m *mockExecJobRepo) ResetQueuedByRunID(context.Context, uuid.UUID) error { return nil }
 
 var _ domainrepo.IWorkflowJobRepository = (*mockExecJobRepo)(nil)
 
@@ -149,14 +157,9 @@ func TestJobTimeoutMinutes_UsesReflectionField(t *testing.T) {
 func TestBuildLogCallback_ConcurrentAppendIsSafe(t *testing.T) {
 	logRepo := &mockExecLogRepo{}
 	handler := &WorkflowJobExecHandler{logRepo: logRepo}
-	payload := WorkflowJobExecPayload{
-		OrgID: testExecOrgID.String(),
-		RunID: testExecRunID.String(),
-		JobID: testExecJobID.String(),
-	}
 	job := &entity.WorkflowJob{RepositoryID: testExecRepoID}
 
-	logFn, logErrFn := handler.buildLogCallback(context.Background(), payload, job)
+	logFn, logErrFn := handler.buildLogCallback(context.Background(), testExecOrgID, testExecRunID, testExecJobID, job)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
