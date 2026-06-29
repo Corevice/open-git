@@ -29,6 +29,7 @@ describe("NewPullRequestPage", () => {
           ok: true,
           status: 201,
           json: async () => ({ number: 7 }),
+          text: async () => JSON.stringify({ number: 7 }),
         });
       }
 
