@@ -25,15 +25,10 @@ COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/licenses.json ./licenses.json
 COPY --from=builder /app/LICENSE ./LICENSE
 
-LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL org.opencontainers.image.title="OpenGit"
-LABEL org.opencontainers.image.source="https://github.com/open-git/open-git"
-
 USER opengit
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:8080/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 CMD wget -qO- http://localhost:8080/health || exit 1
 
 CMD ["./server"]
