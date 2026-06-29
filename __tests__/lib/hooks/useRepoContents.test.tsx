@@ -9,7 +9,9 @@ import {
   useRepoContents,
 } from "@/lib/hooks/useRepoContents";
 
-const mockGetContents = vi.fn();
+const { mockGetContents } = vi.hoisted(() => ({
+  mockGetContents: vi.fn(),
+}));
 
 vi.mock("@/lib/api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api-client")>();
