@@ -255,3 +255,152 @@ describe("orgs", () => {
     );
   });
 });
+
+describe("users", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("getCurrent calls GET /api/v3/user with auth header", async () => {
+    const user = { id: 1, login: "alice", email: "alice@example.com" };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => user,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+    client.setToken("test-bearer-token");
+
+    const result = await client.users.getCurrent();
+
+    expect(result).toEqual(user);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/user",
+      expect.objectContaining({
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer test-bearer-token",
+        },
+      }),
+    );
+  });
+
+  it("updateCurrent({name:'Bob'}) calls PATCH /api/v3/user", async () => {
+    const updatedUser = {
+      id: 1,
+      login: "alice",
+      email: "alice@example.com",
+      name: "Bob",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => updatedUser,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+    client.setToken("test-bearer-token");
+
+    const result = await client.users.updateCurrent({ name: "Bob" });
+
+    expect(result).toEqual(updatedUser);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/user",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer test-bearer-token",
+        },
+        body: JSON.stringify({ name: "Bob" }),
+      }),
+    );
+  });
+});
+
+describe("tokens", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("tokens.list() calls GET /api/v3/user/tokens", async () => {
+    const tokens = [
+      {
+        id: 1,
+        note: "ci-token",
+        scopes: ["repo"],
+        expires_at: "2026-12-31T00:00:00Z",
+        created_at: "2026-01-01T00:00:00Z",
+        last_used_at: null,
+        revoked_at: null,
+      },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name: string) =>
+          name === "content-type" ? "application/json" : null,
+      },
+      json: async () => tokens,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+    client.setToken("test-bearer-token");
+
+    const result = await client.tokens.list();
+
+    expect(result).toEqual(tokens);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/user/tokens",
+      expect.objectContaining({
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer test-bearer-token",
+        },
+      }),
+    );
+  });
+
+  it("tokens.revoke(5) calls DELETE /api/v3/user/tokens/5", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: {
+        get: () => null,
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("http://localhost:8080");
+    client.setToken("test-bearer-token");
+
+    await expect(client.tokens.revoke(5)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v3/user/tokens/5",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer test-bearer-token",
+        },
+      }),
+    );
+  });
+});

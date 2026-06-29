@@ -48,25 +48,27 @@ func (r *sqlxAccessTokenRepository) Create(ctx context.Context, token *domain.Ac
 	}
 
 	const query = `
-		INSERT INTO access_tokens (id, user_id, token_hash, scopes, expires_at, revoked_at, created_at)
-		VALUES (:id, :user_id, :token_hash, :scopes, :expires_at, :revoked_at, :created_at)
+		INSERT INTO access_tokens (id, user_id, note, token_hash, scopes, expires_at, last_used_at, revoked_at, created_at)
+		VALUES (:id, :user_id, :note, :token_hash, :scopes, :expires_at, :last_used_at, :revoked_at, :created_at)
 	`
 
 	_, err = r.DB.NamedExecContext(ctx, query, map[string]any{
-		"id":         formatTokenID(token.ID),
-		"user_id":    formatTokenID(token.UserID),
-		"token_hash": token.TokenHash,
-		"scopes":     scopes,
-		"expires_at": token.ExpiresAt,
-		"revoked_at": token.RevokedAt,
-		"created_at": token.CreatedAt,
+		"id":           formatTokenID(token.ID),
+		"user_id":      formatTokenID(token.UserID),
+		"note":         token.Note,
+		"token_hash":   token.TokenHash,
+		"scopes":       scopes,
+		"expires_at":   token.ExpiresAt,
+		"last_used_at": token.LastUsedAt,
+		"revoked_at":   token.RevokedAt,
+		"created_at":   token.CreatedAt,
 	})
 	return dbErrors.MapDBError(err)
 }
 
 func (r *sqlxAccessTokenRepository) ListByUserID(ctx context.Context, userID int64) ([]*domain.AccessToken, error) {
 	query := `
-		SELECT id, user_id, token_hash, scopes, expires_at, revoked_at, created_at
+		SELECT id, user_id, note, token_hash, scopes, expires_at, last_used_at, revoked_at, created_at
 		FROM access_tokens
 		WHERE user_id = ? AND revoked_at IS NULL
 		ORDER BY created_at DESC
@@ -119,7 +121,7 @@ func (r *sqlxAccessTokenRepository) Revoke(ctx context.Context, tokenID, userID 
 func (r *sqlxAccessTokenRepository) FindByTokenHash(ctx context.Context, tokenHash string) (*domain.AccessToken, error) {
 	now := time.Now().UTC()
 	query := `
-		SELECT id, user_id, token_hash, scopes, expires_at, revoked_at, created_at
+		SELECT id, user_id, note, token_hash, scopes, expires_at, last_used_at, revoked_at, created_at
 		FROM access_tokens
 		WHERE token_hash = ? AND revoked_at IS NULL
 			AND (expires_at IS NULL OR expires_at > ?)
@@ -143,16 +145,18 @@ type accessTokenRow interface {
 
 func scanAccessToken(row accessTokenRow, driver string) (*domain.AccessToken, error) {
 	var (
-		idRaw     string
-		userIDRaw string
-		tokenHash string
-		scopesRaw any
-		expiresAt sql.NullTime
-		revokedAt sql.NullTime
-		createdAt time.Time
+		idRaw       string
+		userIDRaw   string
+		note        sql.NullString
+		tokenHash   string
+		scopesRaw   any
+		expiresAt   sql.NullTime
+		lastUsedAt  sql.NullTime
+		revokedAt   sql.NullTime
+		createdAt   time.Time
 	)
 
-	if err := row.Scan(&idRaw, &userIDRaw, &tokenHash, &scopesRaw, &expiresAt, &revokedAt, &createdAt); err != nil {
+	if err := row.Scan(&idRaw, &userIDRaw, &note, &tokenHash, &scopesRaw, &expiresAt, &lastUsedAt, &revokedAt, &createdAt); err != nil {
 		return nil, err
 	}
 
@@ -177,9 +181,16 @@ func scanAccessToken(row accessTokenRow, driver string) (*domain.AccessToken, er
 		Scopes:    scopes,
 		CreatedAt: createdAt,
 	}
+	if note.Valid {
+		token.Note = note.String
+	}
 	if expiresAt.Valid {
 		t := expiresAt.Time
 		token.ExpiresAt = &t
+	}
+	if lastUsedAt.Valid {
+		t := lastUsedAt.Time
+		token.LastUsedAt = &t
 	}
 	if revokedAt.Valid {
 		t := revokedAt.Time
