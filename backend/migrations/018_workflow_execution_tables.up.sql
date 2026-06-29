@@ -5,24 +5,6 @@ ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS run_attempt INTEGER NOT NULL 
 ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS event TEXT NOT NULL DEFAULT 'push';
 ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS triggered_by_user_id TEXT REFERENCES users(id);
 
-CREATE TABLE workflow_jobs (
-    id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
-    organization_id TEXT NOT NULL REFERENCES organizations(id),
-    name TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'queued',
-    conclusion TEXT,
-    needs TEXT NOT NULL DEFAULT '[]',
-    matrix_context TEXT NOT NULL DEFAULT '{}',
-    runner_label TEXT NOT NULL DEFAULT '',
-    started_at TIMESTAMP,
-    completed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_workflow_jobs_run_id ON workflow_jobs(run_id);
-CREATE INDEX idx_workflow_jobs_organization_id ON workflow_jobs(organization_id);
-
 CREATE TABLE workflow_steps (
     id TEXT PRIMARY KEY,
     job_id TEXT NOT NULL REFERENCES workflow_jobs(id) ON DELETE CASCADE,
