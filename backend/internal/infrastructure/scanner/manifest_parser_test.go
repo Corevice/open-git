@@ -34,11 +34,6 @@ func resolveTestdataPath(name string) (string, error) {
 	return targetPath, nil
 }
 
-func validateTestdataName(name string) error {
-	_, err := resolveTestdataPath(name)
-	return err
-}
-
 func readTestdata(t *testing.T, name string) []byte {
 	t.Helper()
 
@@ -127,6 +122,21 @@ func TestParsePackageJSONDependenciesPrecedence(t *testing.T) {
 	})
 }
 
+func TestParsePackageJSONDevDependencyFallback(t *testing.T) {
+	content := []byte(`{
+		"dependencies": {"lodash": ">=1.0"},
+		"devDependencies": {"lodash": "4.17.21"}
+	}`)
+	deps, err := ParseManifest(ManifestPackageJSON, content)
+	if err != nil {
+		t.Fatalf("ParseManifest(package.json) returned error: %v", err)
+	}
+
+	assertDepsEqual(t, deps, []Dependency{
+		{Name: "lodash", Version: "4.17.21", Ecosystem: "npm"},
+	})
+}
+
 func TestParseRequirementsTxtCases(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -189,7 +199,23 @@ func TestParseRequirementsTxtCases(t *testing.T) {
 			},
 		},
 		{
-			name:    "pip option lines skipped",
+			name:    "exclusion constraint only",
+			content: "django!=4.2.6\n",
+			want:    nil,
+			absent:  []string{"django"},
+		},
+		{
+			name:    "bare version after comma",
+			content: "requests,2.31.0\n",
+			want: []Dependency{
+				{Name: "requests", Version: "2.31.0", Ecosystem: "PyPI"},
+			},
+		},
+		{
+			name:    "PEP508 direct reference skipped",
+			content: "requests @ git+https://example.com/org/repo.git\n",
+			want:    nil,
+		},
 			content: "-r other.txt\n-c constraints.txt\n--index-url https://pypi.org/simple\nrequests==2.31.0\n",
 			want: []Dependency{
 				{Name: "requests", Version: "2.31.0", Ecosystem: "PyPI"},
@@ -241,14 +267,14 @@ func TestValidateTestdataNameRejectsPathTraversal(t *testing.T) {
 	}
 	for _, name := range tests {
 		t.Run(name, func(t *testing.T) {
-			if err := validateTestdataName(name); err == nil {
-				t.Fatalf("validateTestdataName(%q) expected error, got nil", name)
+			if _, err := resolveTestdataPath(name); err == nil {
+				t.Fatalf("resolveTestdataPath(%q) expected error, got nil", name)
 			}
 		})
 	}
 
-	if err := validateTestdataName("sample.mod"); err != nil {
-		t.Fatalf("validateTestdataName(sample.mod) unexpected error: %v", err)
+	if _, err := resolveTestdataPath("sample.mod"); err != nil {
+		t.Fatalf("resolveTestdataPath(sample.mod) unexpected error: %v", err)
 	}
 }
 

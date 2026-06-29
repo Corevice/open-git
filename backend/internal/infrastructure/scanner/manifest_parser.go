@@ -66,7 +66,7 @@ type packageJSON struct {
 }
 
 func isValidPackageName(name string) bool {
-	if name == "" || strings.ContainsAny(name, " \t\n\r\f") {
+	if name == "" {
 		return false
 	}
 	if strings.HasPrefix(name, "@") {
@@ -114,10 +114,16 @@ func parsePackageJSON(content []byte) ([]Dependency, error) {
 		if !isValidPackageName(name) || !isValidVersionString(version) {
 			continue
 		}
+		if stripSemverPrefix(version) == "" {
+			continue
+		}
 		seen[name] = version
 	}
 	for name, version := range pkg.DevDependencies {
 		if !isValidPackageName(name) || !isValidVersionString(version) {
+			continue
+		}
+		if stripSemverPrefix(version) == "" {
 			continue
 		}
 		// Runtime dependencies take precedence: skip dev-only entries when the
@@ -160,11 +166,8 @@ func stripPEP508Extras(name string) string {
 func findRequirementOperator(spec string) (op string, idx int) {
 	bestIdx := -1
 	bestLen := 0
-	for i := 0; i < len(spec); i++ {
-		for _, candidate := range requirementOperators {
-			if !strings.HasPrefix(spec[i:], candidate) {
-				continue
-			}
+	for _, candidate := range requirementOperators {
+		if i := strings.Index(spec, candidate); i >= 0 {
 			if len(candidate) > bestLen || (len(candidate) == bestLen && (bestIdx < 0 || i < bestIdx)) {
 				op = candidate
 				bestIdx = i
@@ -260,10 +263,25 @@ func parseRequirementLine(line string) (name, version string, ok bool) {
 	return pkgName, version, true
 }
 
+func looksLikeBareRequirementVersion(segment string) bool {
+	segment = strings.TrimSpace(segment)
+	if segment == "" {
+		return false
+	}
+	for _, r := range segment {
+		switch {
+		case r >= '0' && r <= '9', r == '.', r == '*':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // splitRequirementSpecifiers splits PEP 440 compound specifiers on commas while
 // preserving commas inside URL-based dependency lines.
 func splitRequirementSpecifiers(line string) []string {
-	if strings.Contains(line, "://") {
+	if isExternalRequirementReference(line) {
 		return []string{line}
 	}
 
@@ -284,6 +302,13 @@ func splitRequirementSpecifiers(line string) []string {
 				parts = append(parts, current)
 			}
 			current = segment
+			continue
+		}
+		if looksLikeBareRequirementVersion(segment) && findRequirementOperator(current) < 0 {
+			if current != "" {
+				parts = append(parts, current)
+			}
+			current = "==" + segment
 			continue
 		}
 		if current == "" {
@@ -328,6 +353,23 @@ func stripSemverPrefix(version string) string {
 	return version
 }
 
+func isExternalRequirementReference(line string) bool {
+	line = strings.TrimSpace(line)
+	if strings.Contains(line, "://") {
+		return true
+	}
+	if strings.HasPrefix(line, "file:") {
+		return true
+	}
+	if atIdx := strings.Index(line, "@"); atIdx >= 0 {
+		ref := strings.TrimSpace(line[atIdx+1:])
+		if strings.Contains(ref, "://") || strings.HasPrefix(ref, "file:") {
+			return true
+		}
+	}
+	return false
+}
+
 func isRequirementsTxtOptionLine(line string) bool {
 	if !strings.HasPrefix(line, "-") {
 		return false
@@ -360,7 +402,7 @@ func parseRequirementsTxt(content []byte) ([]Dependency, error) {
 			continue
 		}
 
-		if strings.Contains(line, "://") {
+		if isExternalRequirementReference(line) {
 			continue
 		}
 
