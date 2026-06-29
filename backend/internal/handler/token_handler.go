@@ -2,7 +2,7 @@ package handler
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -113,9 +113,7 @@ func (h *TokenHandler) Create(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to create token"})
 	}
 
-	userUUID := middleware.Int64ToUUID(userID)
-	tokenUUID := middleware.Int64ToUUID(out.Record.ID)
-	h.recordAudit(c.Request().Context(), userUUID, tokenUUID, "token.create")
+	h.recordAudit(c.Request().Context(), middleware.Int64ToUUID(userID), out.Record.ID, "token.create")
 
 	return c.JSON(http.StatusCreated, createTokenResponse{
 		Token: out.Token,
@@ -138,14 +136,16 @@ func (h *TokenHandler) Revoke(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to revoke token"})
 	}
 
-	userUUID := middleware.Int64ToUUID(userID)
-	tokenUUID := middleware.Int64ToUUID(tokenID)
-	h.recordAudit(c.Request().Context(), userUUID, tokenUUID, "token.revoke")
+	h.recordAudit(c.Request().Context(), middleware.Int64ToUUID(userID), tokenID, "token.revoke")
 
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *TokenHandler) recordAudit(ctx context.Context, actorID, tokenID uuid.UUID, action string) {
+func (h *TokenHandler) recordAudit(ctx context.Context, actorID uuid.UUID, tokenID int64, action string) {
+	if h.auditLog == nil {
+		return
+	}
+
 	login := ""
 	if h.users != nil {
 		user, err := h.users.GetByID(ctx, actorID)
@@ -160,20 +160,17 @@ func (h *TokenHandler) recordAudit(ctx context.Context, actorID, tokenID uuid.UU
 	}
 
 	entry := entity.AuditLog{
-		OrganizationID: actorID,
+		OrganizationID: uuid.Nil,
 		ActorID:        actorID,
 		Action:         action,
 		TargetType:     "token",
-		TargetID:       tokenID.String(),
+		TargetID:       strconv.FormatInt(tokenID, 10),
 		Metadata:       metadata,
 		CreatedAt:      time.Now().UTC(),
 	}
 
-	if h.auditLog == nil {
-		return
-	}
 	if err := h.auditLog.Create(ctx, &entry); err != nil {
-		log.Printf("failed to record audit log: %v", err)
+		slog.Error("failed to record audit log", "error", err, "action", action)
 	}
 }
 

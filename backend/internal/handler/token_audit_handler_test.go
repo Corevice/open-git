@@ -70,23 +70,33 @@ var _ domainrepo.IAuditLogRepository = (*tokenAuditMockAuditRepo)(nil)
 
 type tokenAuditMockUserLookup struct {
 	user *entity.User
+	err  error
 }
 
 func (m *tokenAuditMockUserLookup) GetByID(_ context.Context, _ uuid.UUID) (*entity.User, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
 	return m.user, nil
 }
 
-func newTokenAuditEcho(t *testing.T, auditRepo *tokenAuditMockAuditRepo, userID int64) *echo.Echo {
+type tokenAuditUserLookup interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*entity.User, error)
+}
+
+func newTokenAuditEcho(t *testing.T, auditRepo *tokenAuditMockAuditRepo, userID int64, userLookup tokenAuditUserLookup) *echo.Echo {
 	t.Helper()
 
 	tokenRepo := &tokenAuditMockTokenRepo{}
 	issueUC := authUC.NewIssuePATUsecase(tokenRepo)
 	revokeUC := authUC.NewRevokePATUsecase(tokenRepo)
-	userLookup := &tokenAuditMockUserLookup{
-		user: &entity.User{
-			ID:    middleware.Int64ToUUID(userID),
-			Login: "octocat",
-		},
+	if userLookup == nil {
+		userLookup = &tokenAuditMockUserLookup{
+			user: &entity.User{
+				ID:    middleware.Int64ToUUID(userID),
+				Login: "octocat",
+			},
+		}
 	}
 	h := handler.NewTokenHandler(tokenRepo, issueUC, revokeUC, auditRepo, userLookup)
 
@@ -100,13 +110,14 @@ func newTokenAuditEcho(t *testing.T, auditRepo *tokenAuditMockAuditRepo, userID 
 
 	tokens := e.Group("/user/tokens", auth)
 	tokens.POST("", h.Create)
+	tokens.DELETE("/:id", h.Revoke)
 	return e
 }
 
 func TestTokenCreate_RecordsAudit(t *testing.T) {
 	const userID int64 = 42
 	auditRepo := &tokenAuditMockAuditRepo{}
-	e := newTokenAuditEcho(t, auditRepo, userID)
+	e := newTokenAuditEcho(t, auditRepo, userID, nil)
 
 	body := `{"note":"test","scopes":["read"]}`
 	req := httptest.NewRequest(http.MethodPost, "/user/tokens", bytes.NewReader([]byte(body)))
@@ -127,8 +138,14 @@ func TestTokenCreate_RecordsAudit(t *testing.T) {
 	if auditRepo.logs[0].Action != "token.create" {
 		t.Fatalf("action = %q, want token.create", auditRepo.logs[0].Action)
 	}
+	if auditRepo.logs[0].OrganizationID != uuid.Nil {
+		t.Fatalf("organizationID = %v, want uuid.Nil", auditRepo.logs[0].OrganizationID)
+	}
 	if auditRepo.logs[0].TargetType != "token" {
 		t.Fatalf("targetType = %q, want token", auditRepo.logs[0].TargetType)
+	}
+	if auditRepo.logs[0].TargetID != "1" {
+		t.Fatalf("targetID = %q, want 1", auditRepo.logs[0].TargetID)
 	}
 	if auditRepo.logs[0].Metadata["actor_login"] != "octocat" {
 		t.Fatalf("actor_login = %v, want octocat", auditRepo.logs[0].Metadata["actor_login"])
@@ -147,7 +164,7 @@ func TestTokenCreate_RecordsAudit(t *testing.T) {
 func TestTokenCreate_AuditFailureDoesNotReturn500(t *testing.T) {
 	const userID int64 = 42
 	auditRepo := &tokenAuditMockAuditRepo{err: errors.New("audit write failed")}
-	e := newTokenAuditEcho(t, auditRepo, userID)
+	e := newTokenAuditEcho(t, auditRepo, userID, nil)
 
 	body := `{"note":"test","scopes":["read"]}`
 	req := httptest.NewRequest(http.MethodPost, "/user/tokens", bytes.NewReader([]byte(body)))
@@ -160,5 +177,74 @@ func TestTokenCreate_AuditFailureDoesNotReturn500(t *testing.T) {
 	}
 	if auditRepo.calls != 1 {
 		t.Fatalf("audit Create calls = %d, want 1", auditRepo.calls)
+	}
+}
+
+func TestTokenRevoke_RecordsAudit(t *testing.T) {
+	const userID int64 = 42
+	auditRepo := &tokenAuditMockAuditRepo{}
+	e := newTokenAuditEcho(t, auditRepo, userID, nil)
+
+	body := `{"note":"test","scopes":["read"]}`
+	createReq := httptest.NewRequest(http.MethodPost, "/user/tokens", bytes.NewReader([]byte(body)))
+	createReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	createRec := httptest.NewRecorder()
+	e.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusCreated)
+	}
+	auditRepo.calls = 0
+	auditRepo.logs = nil
+
+	revokeReq := httptest.NewRequest(http.MethodDelete, "/user/tokens/1", nil)
+	revokeRec := httptest.NewRecorder()
+	e.ServeHTTP(revokeRec, revokeReq)
+
+	if revokeRec.Code != http.StatusNoContent {
+		t.Fatalf("revoke status = %d, want %d", revokeRec.Code, http.StatusNoContent)
+	}
+	if auditRepo.calls != 1 {
+		t.Fatalf("audit Create calls = %d, want 1", auditRepo.calls)
+	}
+	if len(auditRepo.logs) != 1 {
+		t.Fatalf("audit logs = %d, want 1", len(auditRepo.logs))
+	}
+	if auditRepo.logs[0].Action != "token.revoke" {
+		t.Fatalf("action = %q, want token.revoke", auditRepo.logs[0].Action)
+	}
+	if auditRepo.logs[0].OrganizationID != uuid.Nil {
+		t.Fatalf("organizationID = %v, want uuid.Nil", auditRepo.logs[0].OrganizationID)
+	}
+	if auditRepo.logs[0].TargetID != "1" {
+		t.Fatalf("targetID = %q, want 1", auditRepo.logs[0].TargetID)
+	}
+	if auditRepo.logs[0].Metadata["actor_login"] != "octocat" {
+		t.Fatalf("actor_login = %v, want octocat", auditRepo.logs[0].Metadata["actor_login"])
+	}
+}
+
+func TestTokenCreate_OmitsActorLoginWhenUserLookupFails(t *testing.T) {
+	const userID int64 = 42
+	auditRepo := &tokenAuditMockAuditRepo{}
+	userLookup := &tokenAuditMockUserLookup{err: errors.New("user not found")}
+	e := newTokenAuditEcho(t, auditRepo, userID, userLookup)
+
+	body := `{"note":"test","scopes":["read"]}`
+	req := httptest.NewRequest(http.MethodPost, "/user/tokens", bytes.NewReader([]byte(body)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+	if auditRepo.calls != 1 {
+		t.Fatalf("audit Create calls = %d, want 1", auditRepo.calls)
+	}
+	if len(auditRepo.logs) != 1 {
+		t.Fatalf("audit logs = %d, want 1", len(auditRepo.logs))
+	}
+	if _, ok := auditRepo.logs[0].Metadata["actor_login"]; ok {
+		t.Fatalf("actor_login should be omitted when user lookup fails, got %v", auditRepo.logs[0].Metadata["actor_login"])
 	}
 }
