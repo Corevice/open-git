@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain/entity"
 )
 
@@ -100,5 +101,21 @@ func TestSSHKeyValidate(t *testing.T) {
 				t.Fatalf("unexpected error for title=%q keyType=%q fingerprint=%q publicKey=%q: %v", tt.title, tt.keyType, tt.fingerprint, tt.publicKey, err)
 			}
 		})
+	}
+}
+
+func TestHostKeyZeroValue(t *testing.T) {
+	var key entity.HostKey
+	if key.ID != uuid.Nil {
+		t.Fatalf("expected zero ID, got %v", key.ID)
+	}
+	if key.Algorithm != "" {
+		t.Fatalf("expected empty algorithm, got %q", key.Algorithm)
+	}
+	if key.PrivateKey != "" {
+		t.Fatalf("expected empty private key")
+	}
+	if !key.CreatedAt.IsZero() {
+		t.Fatalf("expected zero created_at, got %v", key.CreatedAt)
 	}
 }
