@@ -40,7 +40,7 @@ func (uc *DeleteLabelUsecase) Execute(ctx context.Context, input DeleteLabelInpu
 		return apperror.ErrNotFound
 	}
 
-	if err := uc.labelRepo.Delete(ctx, input.RepositoryID, label.ID); err != nil {
+	if err := uc.labelRepo.Delete(ctx, label.ID); err != nil {
 		return err
 	}
 

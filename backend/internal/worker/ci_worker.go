@@ -1,17 +1,24 @@
 package worker
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
+	domainrepo "github.com/open-git/backend/internal/domain/repository"
+	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/open-git/backend/internal/infrastructure/queue"
 	"github.com/open-git/backend/internal/infrastructure/workflow"
 )
 
@@ -37,6 +44,9 @@ const (
 	ciConclusionInvalidPayload = "invalid_payload"
 
 	logMask = "***"
+
+	jobLogStatusSuccess = "success"
+	jobLogStatusFailure = "failure"
 )
 
 var (
@@ -59,19 +69,27 @@ type SecretDecrypter func(ctx context.Context, encrypted string) (string, error)
 // Exposed for testability.
 type CommandRunner func(ctx context.Context, env []string, script string) ([]byte, error)
 
+// StreamingCommandRunner executes a shell command and invokes sink for each output line.
+type StreamingCommandRunner func(ctx context.Context, env []string, script string, step int, sink func(stream, line string)) error
+
 type CIWorker struct {
-	db       *sql.DB
-	decrypt  SecretDecrypter
-	runStep  CommandRunner
-	stepWait time.Duration
+	db            *sql.DB
+	decrypt       SecretDecrypter
+	runStep       CommandRunner
+	runStepStream StreamingCommandRunner
+	stepWait      time.Duration
+	logRepo       domainrepo.IJobLogRepository
+	jobRepo       domainrepo.IWorkflowJobRepository
+	logPublisher  *queue.JobLogPublisher
 }
 
 func NewCIWorker(db *sql.DB) *CIWorker {
 	return &CIWorker{
-		db:       db,
-		decrypt:  identityDecrypter,
-		runStep:  defaultCommandRunner,
-		stepWait: ciStepTimeout,
+		db:            db,
+		decrypt:       identityDecrypter,
+		runStep:       defaultCommandRunner,
+		runStepStream: defaultStreamingCommandRunner,
+		stepWait:      ciStepTimeout,
 	}
 }
 
@@ -82,6 +100,26 @@ func (w *CIWorker) WithDecrypter(d SecretDecrypter) *CIWorker {
 
 func (w *CIWorker) WithCommandRunner(r CommandRunner) *CIWorker {
 	w.runStep = r
+	return w
+}
+
+func (w *CIWorker) WithLogRepository(r domainrepo.IJobLogRepository) *CIWorker {
+	w.logRepo = r
+	return w
+}
+
+func (w *CIWorker) WithJobRepository(r domainrepo.IWorkflowJobRepository) *CIWorker {
+	w.jobRepo = r
+	return w
+}
+
+func (w *CIWorker) WithLogPublisher(p *queue.JobLogPublisher) *CIWorker {
+	w.logPublisher = p
+	return w
+}
+
+func (w *CIWorker) WithStreamingCommandRunner(r StreamingCommandRunner) *CIWorker {
+	w.runStepStream = r
 	return w
 }
 
@@ -123,25 +161,112 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 		return fmt.Errorf("load secrets: %w", err)
 	}
 
+	useStreaming := w.logRepo != nil
+	streamRunner := w.runStepStream
+	if useStreaming && streamRunner == nil {
+		streamRunner = defaultStreamingCommandRunner
+	}
+
 	logBuf := &strings.Builder{}
 	conclusion := ciConclusionSuccess
+	jobLogStatus := make(map[string]string)
+	jobLineCounts := make(map[string]int64)
+	jobIDs := make(map[string]string)
+
 runLoop:
-	for jobID, job := range wf.Jobs {
+	for jobName, job := range wf.Jobs {
+		var jobUUID uuid.UUID
+		if w.jobRepo != nil {
+			jobUUID = uuid.New()
+			jobIDs[jobName] = jobUUID.String()
+			now := time.Now().UTC()
+			runID, parseErr := uuid.Parse(payload.WorkflowRunID)
+			if parseErr != nil {
+				w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, parseErr.Error())
+				return fmt.Errorf("parse workflow run id: %w: %w", parseErr, asynq.SkipRetry)
+			}
+			repoID, parseErr := uuid.Parse(payload.RepositoryID)
+			if parseErr != nil {
+				w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, parseErr.Error())
+				return fmt.Errorf("parse repository id: %w: %w", parseErr, asynq.SkipRetry)
+			}
+			orgID, parseErr := uuid.Parse(payload.OrganizationID)
+			if parseErr != nil {
+				w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, parseErr.Error())
+				return fmt.Errorf("parse organization id: %w: %w", parseErr, asynq.SkipRetry)
+			}
+			wfJob := &entity.WorkflowJob{
+				ID:             jobUUID,
+				WorkflowRunID:  &runID,
+				OrganizationID: orgID,
+				RepositoryID:   repoID,
+				Name:           jobName,
+				Status:         entity.WorkflowJobStatusInProgress,
+				StartedAt:      &now,
+				CreatedAt:      now,
+			}
+			if createErr := w.jobRepo.Create(ctx, wfJob); createErr != nil {
+				return fmt.Errorf("create workflow job: %w", createErr)
+			}
+		}
+		jobLogStatus[jobName] = jobLogStatusSuccess
+
 		for i, step := range job.Steps {
 			if step.Run == "" {
 				continue
 			}
 			stepCtx, cancel := context.WithTimeout(ctx, w.stepWait)
-			out, runErr := w.runStep(stepCtx, secretEnv, step.Run)
-			cancel()
 
-			masked := maskSecrets(string(out), secretValues)
-			fmt.Fprintf(logBuf, "[job=%s step=%d name=%s]\n%s\n", jobID, i, step.Name, masked)
+			if useStreaming {
+				jobIDStr := jobIDs[jobName]
+				if jobIDStr == "" {
+					jobIDStr = jobName
+				}
+				runErr := streamRunner(stepCtx, secretEnv, step.Run, i, func(stream, line string) {
+					jobLineCounts[jobName]++
+					lineNum := jobLineCounts[jobName]
+					masked := maskSecrets(line, secretValues)
+					fmt.Fprintf(logBuf, "[job=%s step=%d name=%s]\n%s\n", jobName, i, step.Name, masked)
 
-			if runErr != nil {
-				conclusion = ciConclusionFailure
-				fmt.Fprintf(logBuf, "[job=%s step=%d] error: %s\n", jobID, i, maskSecrets(runErr.Error(), secretValues))
-				break runLoop
+					logLine := &entity.JobLogLine{
+						OrganizationID: payload.OrganizationID,
+						RepositoryID:   payload.RepositoryID,
+						RunID:          payload.WorkflowRunID,
+						JobID:          jobIDStr,
+						StepIndex:      i,
+						LineNumber:     lineNum,
+						Stream:         stream,
+						Text:           masked,
+						CreatedAt:      time.Now().UTC(),
+					}
+					if appendErr := w.logRepo.AppendLines(ctx, []*entity.JobLogLine{logLine}); appendErr != nil {
+						return
+					}
+					if w.logPublisher != nil {
+						_ = w.logPublisher.Publish(ctx, logLine)
+					}
+				})
+				cancel()
+
+				if runErr != nil {
+					conclusion = ciConclusionFailure
+					jobLogStatus[jobName] = jobLogStatusFailure
+					fmt.Fprintf(logBuf, "[job=%s step=%d] error: %s\n", jobName, i, maskSecrets(runErr.Error(), secretValues))
+					break runLoop
+				}
+			} else {
+				out, runErr := w.runStep(stepCtx, secretEnv, step.Run)
+				cancel()
+
+				masked := maskSecrets(string(out), secretValues)
+				fmt.Fprintf(logBuf, "[job=%s step=%d name=%s]\n%s\n", jobName, i, step.Name, masked)
+
+				if runErr != nil {
+					conclusion = ciConclusionFailure
+					jobLogStatus[jobName] = jobLogStatusFailure
+					fmt.Fprintf(logBuf, "[job=%s step=%d] error: %s\n", jobName, i, maskSecrets(runErr.Error(), secretValues))
+					break runLoop
+				}
 			}
 		}
 	}
@@ -150,6 +275,23 @@ runLoop:
 	if conclusion != ciConclusionSuccess {
 		finalStatus = ciStatusFailed
 	}
+
+	if w.logRepo != nil {
+		for jobName, status := range jobLogStatus {
+			jobIDStr := jobIDs[jobName]
+			if jobIDStr == "" {
+				jobIDStr = jobName
+			}
+			meta := &domainrepo.JobLogMeta{
+				JobID:          jobIDStr,
+				OrganizationID: payload.OrganizationID,
+				Status:         status,
+				TotalLines:     jobLineCounts[jobName],
+			}
+			_ = w.logRepo.SetMeta(ctx, meta)
+		}
+	}
+
 	w.markRun(ctx, payload.WorkflowRunID, finalStatus, conclusion, logBuf.String())
 	return nil
 }
@@ -280,4 +422,38 @@ func defaultCommandRunner(ctx context.Context, env []string, script string) ([]b
 	cmd := exec.CommandContext(ctx, "sh", "-c", script)
 	cmd.Env = append(cmd.Env, env...)
 	return cmd.CombinedOutput()
+}
+
+func defaultStreamingCommandRunner(ctx context.Context, env []string, script string, _ int, sink func(stream, line string)) error {
+	cmd := exec.CommandContext(ctx, "sh", "-c", script)
+	cmd.Env = append(cmd.Env, env...)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	var wg sync.WaitGroup
+	scanLines := func(r io.Reader, stream string) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			sink(stream, scanner.Text())
+		}
+	}
+
+	wg.Add(2)
+	go scanLines(stdout, entity.LogStreamStdout)
+	go scanLines(stderr, entity.LogStreamStderr)
+	wg.Wait()
+
+	return cmd.Wait()
 }

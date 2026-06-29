@@ -40,7 +40,7 @@ func (uc *DeleteMilestoneUsecase) Execute(ctx context.Context, input DeleteMiles
 		return apperror.ErrNotFound
 	}
 
-	if err := uc.milestoneRepo.Delete(ctx, input.RepositoryID, milestone.ID); err != nil {
+	if err := uc.milestoneRepo.Delete(ctx, milestone.ID); err != nil {
 		return err
 	}
 

@@ -44,7 +44,15 @@ func (m *mockMilestoneRepo) Update(_ context.Context, milestone *entity.Mileston
 	return nil
 }
 
-func (m *mockMilestoneRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+func (m *mockMilestoneRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *mockMilestoneRepo) IncrOpenCount(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *mockMilestoneRepo) DecrOpenCount(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
 
@@ -80,6 +88,14 @@ func (m *mockAuditLogRepo) InsertAuditLog(
 		targetID:   targetID,
 	})
 	return nil
+}
+
+func (m *mockAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (m *mockAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
 }
 
 func TestCreateMilestoneNumberAllocation(t *testing.T) {

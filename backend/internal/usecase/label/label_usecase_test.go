@@ -44,7 +44,7 @@ func (m *mockLabelRepo) Update(_ context.Context, _ *entity.Label) error {
 	return nil
 }
 
-func (m *mockLabelRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+func (m *mockLabelRepo) Delete(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
 
@@ -83,6 +83,14 @@ func (m *mockAuditLogRepo) InsertAuditLog(
 		targetID:   targetID,
 	})
 	return nil
+}
+
+func (m *mockAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (m *mockAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
 }
 
 func TestCreateLabelInvalidColor(t *testing.T) {

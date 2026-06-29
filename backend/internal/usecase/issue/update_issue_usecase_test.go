@@ -54,11 +54,39 @@ type updateMilestoneRepo struct {
 	milestones map[int]*entity.Milestone
 }
 
+func (m *updateMilestoneRepo) Create(_ context.Context, _ *entity.Milestone) error {
+	return nil
+}
+
 func (m *updateMilestoneRepo) GetByNumber(_ context.Context, _ uuid.UUID, number int) (*entity.Milestone, error) {
 	if m.milestones == nil {
 		return nil, nil
 	}
 	return m.milestones[number], nil
+}
+
+func (m *updateMilestoneRepo) ListByRepo(_ context.Context, _ uuid.UUID, _ string, _, _ int) ([]*entity.Milestone, int, error) {
+	return nil, 0, nil
+}
+
+func (m *updateMilestoneRepo) Update(_ context.Context, _ *entity.Milestone) error {
+	return nil
+}
+
+func (m *updateMilestoneRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *updateMilestoneRepo) NextNumber(_ context.Context, _ uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *updateMilestoneRepo) IncrOpenCount(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *updateMilestoneRepo) DecrOpenCount(_ context.Context, _ uuid.UUID) error {
+	return nil
 }
 
 type updateAuditLogRepo struct {
@@ -80,6 +108,14 @@ func (m *updateAuditLogRepo) InsertAuditLog(
 		targetID:   targetID,
 	})
 	return nil
+}
+
+func (m *updateAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (m *updateAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
 }
 
 func TestUpdateIssueTitleTooLong(t *testing.T) {

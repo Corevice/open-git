@@ -16,6 +16,20 @@ type mockUserRepo struct {
 	created []*domain.User
 }
 
+func (m *mockUserRepo) GetByID(_ context.Context, id int64) (*domain.User, error) {
+	for _, u := range m.byLogin {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	for _, u := range m.created {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return nil, errors.New("not found")
+}
+
 func (m *mockUserRepo) Create(_ context.Context, user *domain.User) error {
 	m.created = append(m.created, user)
 	user.ID = int64(len(m.created))
