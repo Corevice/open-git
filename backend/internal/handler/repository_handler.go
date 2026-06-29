@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/binary"
 	"errors"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
@@ -56,9 +58,10 @@ func (h *RepositoryHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.Mi
 }
 
 type createRepositoryRequest struct {
-	Name        string `json:"name"`
-	Private     bool   `json:"private"`
-	Description string `json:"description"`
+	Name           string `json:"name"`
+	Private        bool   `json:"private"`
+	Description    string `json:"description"`
+	OrganizationID string `json:"organization_id"`
 }
 
 type updateVisibilityRequest struct {
@@ -91,12 +94,21 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid request"})
 	}
 
-	result, err := h.create.Execute(c.Request().Context(), repoUC.CreateRepositoryInput{
+	input := repoUC.CreateRepositoryInput{
 		OwnerID:     userID,
 		Name:        req.Name,
 		Private:     req.Private,
 		Description: req.Description,
-	})
+	}
+	if req.OrganizationID != "" {
+		orgID, err := uuid.Parse(req.OrganizationID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid organization_id"})
+		}
+		input.OrganizationID = orgID
+	}
+
+	result, err := h.create.Execute(c.Request().Context(), input)
 	if err != nil {
 		if errors.Is(err, repoUC.ErrDuplicateName) {
 			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "Repository name already exists"})
@@ -116,10 +128,16 @@ func (h *RepositoryHandler) ListRepositories(c echo.Context) error {
 		return err
 	}
 
+	ownerLogin, err := h.resolveAuthenticatedUserLogin(c, userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to list repositories"})
+	}
+
 	page, perPage := parseRepositoryPagination(c)
 
 	result, err := h.list.Execute(c.Request().Context(), repoUC.ListRepositoriesInput{
 		RequestUserID: userID,
+		OwnerLogin:    ownerLogin,
 		Page:          page,
 		PerPage:       perPage,
 	})
@@ -220,15 +238,30 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 		return err
 	}
 
-	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
-	}
-
 	if err := removeRepositoryDiskFiles(h.gitRoot, repository.DiskPath, repository.Name); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository files"})
 	}
 
+	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
+	}
+
 	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *RepositoryHandler) resolveAuthenticatedUserLogin(c echo.Context, userID uuid.UUID) (string, error) {
+	userInt64 := int64(binary.BigEndian.Uint64(userID[8:]))
+	owner, err := h.users.GetByID(c.Request().Context(), userInt64)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", repoUC.ErrOwnerNotFound
+		}
+		return "", err
+	}
+	if owner == nil || owner.Login == "" {
+		return "", repoUC.ErrOwnerNotFound
+	}
+	return owner.Login, nil
 }
 
 func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID uuid.UUID) (*entity.Repository, error) {
@@ -255,7 +288,7 @@ func parseRepositoryPagination(c echo.Context) (int, int) {
 	return repoUC.NormalizeRepositoryPagination(page, perPage)
 }
 
-func validatedRepositoryDiskPath(gitRoot, diskPath, repoName string) (string, bool) {
+func validateRepositoryDiskPath(gitRoot, diskPath, repoName string) (string, bool) {
 	if diskPath == "" || repoName == "" {
 		return "", false
 	}
@@ -273,7 +306,7 @@ func validatedRepositoryDiskPath(gitRoot, diskPath, repoName string) (string, bo
 }
 
 func removeRepositoryDiskFiles(gitRoot, diskPath, repoName string) error {
-	safePath, ok := validatedRepositoryDiskPath(gitRoot, diskPath, repoName)
+	safePath, ok := validateRepositoryDiskPath(gitRoot, diskPath, repoName)
 	if !ok {
 		return nil
 	}

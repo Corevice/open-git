@@ -3,6 +3,7 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -283,7 +284,20 @@ func TestListRepositoriesUsecase_PaginationBoundaries(t *testing.T) {
 	})
 
 	t.Run("caps per page at max", func(t *testing.T) {
-		result, err := uc.Execute(context.Background(), repository.ListRepositoriesInput{
+		largeList := make([]*entity.Repository, 0, 150)
+		for i := 1; i <= 150; i++ {
+			largeList = append(largeList, &entity.Repository{
+				ID:             uuid.MustParse(fmt.Sprintf("00000000-0000-4000-8000-%012x", i)),
+				OrganizationID: testOrgID,
+				OwnerID:        ownerID,
+				Name:           "large-repo-" + strconv.Itoa(i),
+				Visibility:     entity.VisibilityPublic,
+			})
+		}
+		largeRepos := &listMockRepositoryRepo{repos: largeList}
+		largeUC := repository.NewListRepositoriesUsecase(largeRepos, users, &listMockMembershipRepo{})
+
+		result, err := largeUC.Execute(context.Background(), repository.ListRepositoriesInput{
 			RequestUserID: uuid.Nil,
 			OwnerLogin:    "alice",
 			Page:          1,
@@ -292,8 +306,11 @@ func TestListRepositoriesUsecase_PaginationBoundaries(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(result.Repositories) != 5 {
-			t.Fatalf("expected all 5 repositories, got %d", len(result.Repositories))
+		if len(result.Repositories) != repository.MaxRepositoriesPerPage {
+			t.Fatalf("expected %d repositories, got %d", repository.MaxRepositoriesPerPage, len(result.Repositories))
+		}
+		if result.Total != 150 {
+			t.Fatalf("expected total 150, got %d", result.Total)
 		}
 	})
 }

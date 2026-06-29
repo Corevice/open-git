@@ -11,27 +11,28 @@ import (
 	"strings"
 	"time"
 
+	gogit "github.com/go-git/go-git/v5"
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
-	infragit "github.com/open-git/backend/internal/infrastructure/git"
-	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 	"github.com/open-git/backend/internal/validator"
 )
 
 var (
-	ErrDuplicateName = errors.New("repository name already exists")
-	ErrInvalidName   = errors.New("invalid repository name")
+	ErrDuplicateName     = errors.New("repository name already exists")
+	ErrInvalidName       = errors.New("invalid repository name")
+	ErrInvalidUserUUID   = errors.New("invalid user uuid")
 )
 
 var repoNameRegex = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
 
 type CreateRepositoryInput struct {
-	OwnerID     uuid.UUID
-	Name        string
-	Private     bool
-	Description string
+	OwnerID        uuid.UUID
+	OrganizationID uuid.UUID
+	Name           string
+	Private        bool
+	Description    string
 }
 
 type CreateRepositoryResult struct {
@@ -62,7 +63,11 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 		return nil, ErrDuplicateName
 	}
 
-	owner, err := u.users.GetByID(ctx, uuidToInt64(input.OwnerID))
+	ownerID, err := userUUIDToInt64(input.OwnerID)
+	if err != nil {
+		return nil, errors.New("resolve owner: user not found")
+	}
+	owner, err := u.users.GetByID(ctx, ownerID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, errors.New("resolve owner: user not found")
@@ -77,7 +82,10 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 	}
 
 	ownerLogin := owner.Login
-	orgID := middleware.Int64ToUUID(owner.ID)
+	orgID := input.OrganizationID
+	if orgID == uuid.Nil {
+		orgID = int64ToUserUUID(owner.ID)
+	}
 
 	visibility := entity.VisibilityPublic
 	if input.Private {
@@ -99,15 +107,15 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 
 	diskPath, err := buildRepositoryDiskPath(u.gitRoot, ownerLogin, repository.Name)
 	if err != nil {
-		return nil, u.joinWithRollback(err, "build disk path", u.rollbackCreate(ctx, repository.ID, "", repository.Name))
+		return nil, u.joinWithRollback(err, "build disk path", u.rollbackCreate(repository.ID, u.gitRoot, "", repository.Name))
 	}
 
-	if err := infragit.InitBare(diskPath); err != nil {
-		return nil, u.joinWithRollback(err, "init bare repository", u.rollbackCreate(ctx, repository.ID, diskPath, repository.Name))
+	if err := initBareRepository(diskPath); err != nil {
+		return nil, u.joinWithRollback(err, "init bare repository", u.rollbackCreate(repository.ID, u.gitRoot, diskPath, repository.Name))
 	}
 
 	if err := u.repos.UpdateDiskPath(ctx, repository.ID, diskPath); err != nil {
-		return nil, u.joinWithRollback(err, "update disk path", u.rollbackCreate(ctx, repository.ID, diskPath, repository.Name))
+		return nil, u.joinWithRollback(err, "update disk path", u.rollbackCreate(repository.ID, u.gitRoot, diskPath, repository.Name))
 	}
 
 	repository.DiskPath = diskPath
@@ -115,6 +123,42 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 		Repository: repository,
 		OwnerLogin: ownerLogin,
 	}, nil
+}
+
+func initBareRepository(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	_, err := gogit.PlainInit(path, true)
+	return err
+}
+
+func isUserUUID(id uuid.UUID) bool {
+	for i := 0; i < 8; i++ {
+		if id[i] != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func userUUIDToInt64(id uuid.UUID) (int64, error) {
+	if id == uuid.Nil {
+		return 0, ErrInvalidUserUUID
+	}
+	if !isUserUUID(id) {
+		return 0, ErrInvalidUserUUID
+	}
+	return int64(binary.BigEndian.Uint64(id[8:])), nil
+}
+
+func int64ToUserUUID(id int64) uuid.UUID {
+	if id == 0 {
+		return uuid.Nil
+	}
+	var u uuid.UUID
+	binary.BigEndian.PutUint64(u[8:], uint64(id))
+	return u
 }
 
 func buildRepositoryDiskPath(gitRoot, ownerLogin, repoName string) (string, error) {
@@ -138,12 +182,12 @@ func buildRepositoryDiskPath(gitRoot, ownerLogin, repoName string) (string, erro
 	return cleanPath, nil
 }
 
-func (u *CreateRepositoryUsecase) rollbackCreate(ctx context.Context, repositoryID uuid.UUID, diskPath, repoName string) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+func (u *CreateRepositoryUsecase) rollbackCreate(repositoryID uuid.UUID, gitRoot, diskPath, repoName string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	var rollbackErr error
-	if err := removeRepositoryDiskDir(diskPath, repoName); err != nil {
+	if err := removeRepositoryDiskDir(gitRoot, diskPath, repoName); err != nil {
 		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove bare repository: %w", err))
 	}
 	if err := u.repos.Delete(ctx, repositoryID); err != nil {
@@ -152,17 +196,13 @@ func (u *CreateRepositoryUsecase) rollbackCreate(ctx context.Context, repository
 	return rollbackErr
 }
 
-func removeRepositoryDiskDir(diskPath, repoName string) error {
-	if diskPath == "" || repoName == "" {
+func removeRepositoryDiskDir(gitRoot, diskPath, repoName string) error {
+	safePath, ok := validateRepositoryDiskPath(gitRoot, diskPath, repoName)
+	if !ok {
 		return nil
 	}
 
-	cleanPath := filepath.Clean(diskPath)
-	if filepath.Base(cleanPath) != repoName+".git" {
-		return nil
-	}
-
-	fi, err := os.Lstat(cleanPath)
+	fi, err := os.Lstat(safePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -173,12 +213,49 @@ func removeRepositoryDiskDir(diskPath, repoName string) error {
 		return errors.New("unsafe repository disk path")
 	}
 
-	return os.RemoveAll(cleanPath)
+	resolvedRoot, err := filepath.EvalSymlinks(filepath.Clean(gitRoot))
+	if err != nil {
+		return err
+	}
+	resolvedPath, err := filepath.EvalSymlinks(safePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return errors.New("unsafe repository disk path")
+	}
+	if filepath.Base(resolvedPath) != repoName+".git" {
+		return errors.New("unsafe repository disk path")
+	}
+
+	return os.RemoveAll(resolvedPath)
+}
+
+func validateRepositoryDiskPath(gitRoot, diskPath, repoName string) (string, bool) {
+	if diskPath == "" || repoName == "" || gitRoot == "" {
+		return "", false
+	}
+
+	cleanRoot := filepath.Clean(gitRoot)
+	cleanPath := filepath.Clean(diskPath)
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	if filepath.Base(cleanPath) != repoName+".git" {
+		return "", false
+	}
+	return cleanPath, true
 }
 
 func (u *CreateRepositoryUsecase) joinWithRollback(err error, step string, rollbackErr error) error {
 	if rollbackErr != nil {
-		return fmt.Errorf("%s: %w; rollback failed", step, err)
+		return fmt.Errorf("%s: %w; rollback failed: %v", step, err, rollbackErr)
 	}
 	return fmt.Errorf("%s: %w", step, err)
 }

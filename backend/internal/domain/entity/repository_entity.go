@@ -23,7 +23,7 @@ type Repository struct {
 	Name           string
 	Visibility     string
 	DefaultBranch  string
-	DiskPath       string
+	DiskPath       string `json:"-"`
 	CreatedAt      time.Time
 }
 

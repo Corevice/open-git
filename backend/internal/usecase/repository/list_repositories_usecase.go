@@ -2,13 +2,11 @@ package repository
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
-	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 	"github.com/open-git/backend/internal/validator"
 )
@@ -18,6 +16,7 @@ const MaxRepositoriesPerPage = 100
 var ErrOwnerNotFound = errors.New("owner not found")
 
 type repositoryListQuerier interface {
+	repo.IRepositoryRepository
 	CountByOrg(ctx context.Context, organizationID uuid.UUID) (int, error)
 	CountVisibleByOrg(ctx context.Context, organizationID, viewerID uuid.UUID) (int, error)
 	ListVisibleByOrg(ctx context.Context, organizationID, viewerID uuid.UUID, page, perPage int) ([]*entity.Repository, error)
@@ -50,13 +49,13 @@ type ListRepositoriesResult struct {
 }
 
 type ListRepositoriesUsecase struct {
-	repos       repo.IRepositoryRepository
+	repos       repositoryListQuerier
 	users       repo.IUserRepository
 	memberships repo.IMembershipRepository
 }
 
 func NewListRepositoriesUsecase(
-	repos repo.IRepositoryRepository,
+	repos repositoryListQuerier,
 	users repo.IUserRepository,
 	memberships repo.IMembershipRepository,
 ) *ListRepositoriesUsecase {
@@ -69,13 +68,8 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 		return nil, err
 	}
 
-	querier, ok := u.repos.(repositoryListQuerier)
-	if !ok {
-		return nil, errors.New("repository list querier not configured")
-	}
-
 	page, perPage := NormalizeRepositoryPagination(input.Page, input.PerPage)
-	ownerUUID := middleware.Int64ToUUID(owner.ID)
+	ownerUUID := int64ToUserUUID(owner.ID)
 
 	var (
 		total     int
@@ -83,17 +77,21 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 	)
 
 	if input.RequestUserID == ownerUUID {
-		total, err = querier.CountByOrg(ctx, orgID)
+		total, err = u.repos.CountByOrg(ctx, orgID)
 		if err != nil {
 			return nil, err
 		}
 		pageRepos, err = u.repos.ListByOrg(ctx, orgID, page, perPage)
 	} else {
-		total, err = querier.CountVisibleByOrg(ctx, orgID, input.RequestUserID)
+		total, err = u.repos.CountVisibleByOrg(ctx, orgID, input.RequestUserID)
 		if err != nil {
 			return nil, err
 		}
-		pageRepos, err = querier.ListVisibleByOrg(ctx, orgID, input.RequestUserID, page, perPage)
+		pageRepos, err = u.repos.ListVisibleByOrg(ctx, orgID, input.RequestUserID, page, perPage)
+		if err != nil {
+			return nil, err
+		}
+		pageRepos, err = u.filterPrivateRepositories(ctx, input.RequestUserID, pageRepos)
 	}
 	if err != nil {
 		return nil, err
@@ -104,6 +102,32 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 		Total:        total,
 		OwnerLogin:   ownerLogin,
 	}, nil
+}
+
+func (u *ListRepositoriesUsecase) filterPrivateRepositories(ctx context.Context, viewerID uuid.UUID, repositories []*entity.Repository) ([]*entity.Repository, error) {
+	if viewerID == uuid.Nil {
+		return repositories, nil
+	}
+
+	filtered := make([]*entity.Repository, 0, len(repositories))
+	for _, repository := range repositories {
+		if repository.Visibility != entity.VisibilityPrivate {
+			filtered = append(filtered, repository)
+			continue
+		}
+		if repository.OwnerID == viewerID {
+			filtered = append(filtered, repository)
+			continue
+		}
+		hasAccess, err := u.memberships.HasReadAccess(ctx, viewerID, repository.OrganizationID)
+		if err != nil {
+			return nil, err
+		}
+		if hasAccess {
+			filtered = append(filtered, repository)
+		}
+	}
+	return filtered, nil
 }
 
 func (u *ListRepositoriesUsecase) resolveOwnerAndOrg(ctx context.Context, input ListRepositoriesInput) (*domain.User, string, uuid.UUID, error) {
@@ -119,7 +143,11 @@ func (u *ListRepositoriesUsecase) resolveOwnerAndOrg(ctx context.Context, input 
 		}
 		owner, err = u.users.GetByLogin(ctx, input.OwnerLogin)
 	case input.RequestUserID != uuid.Nil:
-		owner, err = u.users.GetByID(ctx, uuidToInt64(input.RequestUserID))
+		ownerID, convErr := userUUIDToInt64(input.RequestUserID)
+		if convErr != nil {
+			return nil, "", uuid.Nil, ErrOwnerNotFound
+		}
+		owner, err = u.users.GetByID(ctx, ownerID)
 	default:
 		return nil, "", uuid.Nil, ErrOwnerNotFound
 	}
@@ -134,10 +162,6 @@ func (u *ListRepositoriesUsecase) resolveOwnerAndOrg(ctx context.Context, input 
 		return nil, "", uuid.Nil, ErrOwnerNotFound
 	}
 
-	orgID := middleware.Int64ToUUID(owner.ID)
+	orgID := int64ToUserUUID(owner.ID)
 	return owner, owner.Login, orgID, nil
-}
-
-func uuidToInt64(id uuid.UUID) int64 {
-	return int64(binary.BigEndian.Uint64(id[8:]))
 }
