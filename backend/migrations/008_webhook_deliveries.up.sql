@@ -3,7 +3,7 @@ ALTER TABLE webhooks ADD COLUMN updated_at TIMESTAMPTZ;
 
 CREATE TABLE webhook_deliveries (
     id UUID PRIMARY KEY,
-    webhook_id BIGINT NOT NULL REFERENCES webhooks(id),
+    webhook_id TEXT NOT NULL REFERENCES webhooks(id),
     organization_id TEXT NOT NULL,
     event TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',

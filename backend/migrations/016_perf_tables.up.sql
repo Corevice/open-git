@@ -32,7 +32,7 @@ CREATE TABLE perf_baselines (
 CREATE TABLE perf_jobs (
     id UUID PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'queued',
-    triggered_by UUID REFERENCES users(id),
+    triggered_by TEXT REFERENCES users(id),
     benchmark_id UUID REFERENCES perf_benchmarks(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP

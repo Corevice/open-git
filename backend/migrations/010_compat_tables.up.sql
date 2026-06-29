@@ -2,7 +2,7 @@ CREATE TABLE compat_test_run (
     id uuid PRIMARY KEY,
     suite varchar NOT NULL,
     status varchar NOT NULL DEFAULT 'queued',
-    triggered_by uuid REFERENCES users(id),
+    triggered_by TEXT REFERENCES users(id),
     organization_id uuid NOT NULL,
     total_endpoints int NOT NULL DEFAULT 0,
     passing int NOT NULL DEFAULT 0,
