@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { JobLogsPageContent } from "@/app/12-actions-job/page";
+import { JobLogsPageContent } from "@/app/12-actions-job/JobLogsPageContent";
 
 type MockEventSourceInstance = {
   url: string;
@@ -87,7 +87,7 @@ describe("workflow job logs page", () => {
           return {
             ok: true,
             status: 200,
-            text: async () => "existing line\n",
+            text: async (): Promise<string> => "existing line\n",
           };
         }
 
@@ -95,7 +95,7 @@ describe("workflow job logs page", () => {
           ok: false,
           status: 404,
           json: async () => ({ message: "Not Found" }),
-          text: async () => "Not Found",
+          text: async (): Promise<string> => "Not Found",
         };
       }),
     );
