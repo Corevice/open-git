@@ -247,6 +247,7 @@ func scanSecurityAdvisory(row securityAdvisoryScanner) (*entity.SecurityAdvisory
 	var (
 		advisory        entity.SecurityAdvisory
 		repositoryID    sql.NullString
+		cveID           sql.NullString
 		dismissedReason sql.NullString
 	)
 
@@ -255,7 +256,7 @@ func scanSecurityAdvisory(row securityAdvisoryScanner) (*entity.SecurityAdvisory
 		&advisory.OrganizationID,
 		&repositoryID,
 		&advisory.GHSAPID,
-		&advisory.CVEID,
+		&cveID,
 		&advisory.Severity,
 		&advisory.Summary,
 		&advisory.Description,
@@ -277,6 +278,9 @@ func scanSecurityAdvisory(row securityAdvisoryScanner) (*entity.SecurityAdvisory
 			return nil, err
 		}
 		advisory.RepositoryID = &parsed
+	}
+	if cveID.Valid {
+		advisory.CVEID = cveID.String
 	}
 	if dismissedReason.Valid {
 		reason := entity.DismissedReason(dismissedReason.String)
