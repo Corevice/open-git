@@ -1,0 +1,14 @@
+name: Brand Check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  brand-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check forbidden brand terms
+        run: ./tools/check-brand.sh

@@ -11,7 +11,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const sqliteMigrationsPath = "../../migrations"
+const sqliteMigrationsPath = "../../../migrations"
 
 func TestRunMigrations_SQLiteIdempotency(t *testing.T) {
 	// Shared in-memory DSN so a second connection sees the same database.
