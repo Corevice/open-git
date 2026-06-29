@@ -1,13 +1,9 @@
 package handler
 
 import (
-	"encoding/binary"
 	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -238,20 +234,23 @@ func (h *RepositoryHandler) DeleteRepository(c echo.Context) error {
 		return err
 	}
 
-	if err := removeRepositoryDiskFiles(h.gitRoot, repository.DiskPath, repository.Name); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository files"})
-	}
-
 	if err := h.repos.Delete(c.Request().Context(), repository.ID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository"})
+	}
+
+	if err := repoUC.RemoveRepositoryDiskDir(h.gitRoot, repository.DiskPath, repository.Name); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to delete repository files"})
 	}
 
 	return c.NoContent(http.StatusNoContent)
 }
 
 func (h *RepositoryHandler) resolveAuthenticatedUserLogin(c echo.Context, userID uuid.UUID) (string, error) {
-	userInt64 := int64(binary.BigEndian.Uint64(userID[8:]))
-	owner, err := h.users.GetByID(c.Request().Context(), userInt64)
+	ownerID, err := repoUC.UserUUIDToInt64(userID)
+	if err != nil {
+		return "", repoUC.ErrOwnerNotFound
+	}
+	owner, err := h.users.GetByID(c.Request().Context(), ownerID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return "", repoUC.ErrOwnerNotFound
@@ -286,63 +285,6 @@ func parseRepositoryPagination(c echo.Context) (int, int) {
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
 	return repoUC.NormalizeRepositoryPagination(page, perPage)
-}
-
-func validateRepositoryDiskPath(gitRoot, diskPath, repoName string) (string, bool) {
-	if diskPath == "" || repoName == "" {
-		return "", false
-	}
-
-	cleanRoot := filepath.Clean(gitRoot)
-	cleanPath := filepath.Clean(diskPath)
-	rel, err := filepath.Rel(cleanRoot, cleanPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", false
-	}
-	if filepath.Base(cleanPath) != repoName+".git" {
-		return "", false
-	}
-	return cleanPath, true
-}
-
-func removeRepositoryDiskFiles(gitRoot, diskPath, repoName string) error {
-	safePath, ok := validateRepositoryDiskPath(gitRoot, diskPath, repoName)
-	if !ok {
-		return nil
-	}
-
-	fi, err := os.Lstat(safePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return errors.New("unsafe repository disk path")
-	}
-
-	resolvedRoot, err := filepath.EvalSymlinks(filepath.Clean(gitRoot))
-	if err != nil {
-		return err
-	}
-	resolvedPath, err := filepath.EvalSymlinks(safePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return errors.New("unsafe repository disk path")
-	}
-	if filepath.Base(resolvedPath) != repoName+".git" {
-		return errors.New("unsafe repository disk path")
-	}
-
-	return os.RemoveAll(resolvedPath)
 }
 
 func toRepositoryResponses(repositories []*entity.Repository, ownerLogin string) []repositoryResponse {

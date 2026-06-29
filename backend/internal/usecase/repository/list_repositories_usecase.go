@@ -88,10 +88,6 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 			return nil, err
 		}
 		pageRepos, err = u.repos.ListVisibleByOrg(ctx, orgID, input.RequestUserID, page, perPage)
-		if err != nil {
-			return nil, err
-		}
-		pageRepos, err = u.filterPrivateRepositories(ctx, input.RequestUserID, pageRepos)
 	}
 	if err != nil {
 		return nil, err
@@ -102,32 +98,6 @@ func (u *ListRepositoriesUsecase) Execute(ctx context.Context, input ListReposit
 		Total:        total,
 		OwnerLogin:   ownerLogin,
 	}, nil
-}
-
-func (u *ListRepositoriesUsecase) filterPrivateRepositories(ctx context.Context, viewerID uuid.UUID, repositories []*entity.Repository) ([]*entity.Repository, error) {
-	if viewerID == uuid.Nil {
-		return repositories, nil
-	}
-
-	filtered := make([]*entity.Repository, 0, len(repositories))
-	for _, repository := range repositories {
-		if repository.Visibility != entity.VisibilityPrivate {
-			filtered = append(filtered, repository)
-			continue
-		}
-		if repository.OwnerID == viewerID {
-			filtered = append(filtered, repository)
-			continue
-		}
-		hasAccess, err := u.memberships.HasReadAccess(ctx, viewerID, repository.OrganizationID)
-		if err != nil {
-			return nil, err
-		}
-		if hasAccess {
-			filtered = append(filtered, repository)
-		}
-	}
-	return filtered, nil
 }
 
 func (u *ListRepositoriesUsecase) resolveOwnerAndOrg(ctx context.Context, input ListRepositoriesInput) (*domain.User, string, uuid.UUID, error) {
@@ -143,7 +113,7 @@ func (u *ListRepositoriesUsecase) resolveOwnerAndOrg(ctx context.Context, input 
 		}
 		owner, err = u.users.GetByLogin(ctx, input.OwnerLogin)
 	case input.RequestUserID != uuid.Nil:
-		ownerID, convErr := userUUIDToInt64(input.RequestUserID)
+		ownerID, convErr := UserUUIDToInt64(input.RequestUserID)
 		if convErr != nil {
 			return nil, "", uuid.Nil, ErrOwnerNotFound
 		}

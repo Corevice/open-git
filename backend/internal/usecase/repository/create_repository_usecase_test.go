@@ -206,8 +206,8 @@ func TestOwnerNotFound(t *testing.T) {
 		OwnerID: unknownOwnerID,
 		Name:    "my-repo",
 	})
-	if err == nil {
-		t.Fatal("expected error for unknown owner")
+	if !errors.Is(err, repository.ErrOwnerNotFound) {
+		t.Fatalf("expected ErrOwnerNotFound, got %v", err)
 	}
 }
 

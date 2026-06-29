@@ -63,19 +63,19 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 		return nil, ErrDuplicateName
 	}
 
-	ownerID, err := userUUIDToInt64(input.OwnerID)
+	ownerID, err := UserUUIDToInt64(input.OwnerID)
 	if err != nil {
-		return nil, errors.New("resolve owner: user not found")
+		return nil, ErrOwnerNotFound
 	}
 	owner, err := u.users.GetByID(ctx, ownerID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return nil, errors.New("resolve owner: user not found")
+			return nil, ErrOwnerNotFound
 		}
 		return nil, fmt.Errorf("resolve owner: %w", err)
 	}
 	if owner == nil || owner.Login == "" {
-		return nil, errors.New("resolve owner: user not found")
+		return nil, ErrOwnerNotFound
 	}
 	if err := validator.ValidateLogin(owner.Login); err != nil {
 		return nil, fmt.Errorf("resolve owner login: %w", err)
@@ -107,15 +107,15 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 
 	diskPath, err := buildRepositoryDiskPath(u.gitRoot, ownerLogin, repository.Name)
 	if err != nil {
-		return nil, u.joinWithRollback(err, "build disk path", u.rollbackCreate(repository.ID, u.gitRoot, "", repository.Name))
+		return nil, u.joinWithRollback(err, "build disk path", u.rollbackCreate(ctx, repository.ID, u.gitRoot, "", repository.Name))
 	}
 
 	if err := initBareRepository(diskPath); err != nil {
-		return nil, u.joinWithRollback(err, "init bare repository", u.rollbackCreate(repository.ID, u.gitRoot, diskPath, repository.Name))
+		return nil, u.joinWithRollback(err, "init bare repository", u.rollbackCreate(ctx, repository.ID, u.gitRoot, diskPath, repository.Name))
 	}
 
 	if err := u.repos.UpdateDiskPath(ctx, repository.ID, diskPath); err != nil {
-		return nil, u.joinWithRollback(err, "update disk path", u.rollbackCreate(repository.ID, u.gitRoot, diskPath, repository.Name))
+		return nil, u.joinWithRollback(err, "update disk path", u.rollbackCreate(ctx, repository.ID, u.gitRoot, diskPath, repository.Name))
 	}
 
 	repository.DiskPath = diskPath
@@ -142,7 +142,7 @@ func isUserUUID(id uuid.UUID) bool {
 	return true
 }
 
-func userUUIDToInt64(id uuid.UUID) (int64, error) {
+func UserUUIDToInt64(id uuid.UUID) (int64, error) {
 	if id == uuid.Nil {
 		return 0, ErrInvalidUserUUID
 	}
@@ -182,22 +182,22 @@ func buildRepositoryDiskPath(gitRoot, ownerLogin, repoName string) (string, erro
 	return cleanPath, nil
 }
 
-func (u *CreateRepositoryUsecase) rollbackCreate(repositoryID uuid.UUID, gitRoot, diskPath, repoName string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (u *CreateRepositoryUsecase) rollbackCreate(ctx context.Context, repositoryID uuid.UUID, gitRoot, diskPath, repoName string) error {
+	rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 
 	var rollbackErr error
-	if err := removeRepositoryDiskDir(gitRoot, diskPath, repoName); err != nil {
+	if err := RemoveRepositoryDiskDir(gitRoot, diskPath, repoName); err != nil {
 		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove bare repository: %w", err))
 	}
-	if err := u.repos.Delete(ctx, repositoryID); err != nil {
+	if err := u.repos.Delete(rollbackCtx, repositoryID); err != nil {
 		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("delete repository record: %w", err))
 	}
 	return rollbackErr
 }
 
-func removeRepositoryDiskDir(gitRoot, diskPath, repoName string) error {
-	safePath, ok := validateRepositoryDiskPath(gitRoot, diskPath, repoName)
+func RemoveRepositoryDiskDir(gitRoot, diskPath, repoName string) error {
+	safePath, ok := ValidateRepositoryDiskPath(gitRoot, diskPath, repoName)
 	if !ok {
 		return nil
 	}
@@ -233,10 +233,21 @@ func removeRepositoryDiskDir(gitRoot, diskPath, repoName string) error {
 		return errors.New("unsafe repository disk path")
 	}
 
+	fi, err = os.Lstat(resolvedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return errors.New("unsafe repository disk path")
+	}
+
 	return os.RemoveAll(resolvedPath)
 }
 
-func validateRepositoryDiskPath(gitRoot, diskPath, repoName string) (string, bool) {
+func ValidateRepositoryDiskPath(gitRoot, diskPath, repoName string) (string, bool) {
 	if diskPath == "" || repoName == "" || gitRoot == "" {
 		return "", false
 	}
