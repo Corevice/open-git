@@ -56,14 +56,14 @@ func (m *mockBranchRepoRepo) GetByOwnerLoginAndName(_ context.Context, _, _ stri
 	return &entity.Repository{DefaultBranch: m.defaultBranch}, nil
 }
 
-func (m *mockBranchRepoRepo) ListByOrg(context.Context, uuid.UUID, int, int) ([]*entity.Repository, int, error) {
-	return nil, 0, nil
+func (m *mockBranchRepoRepo) ListByOrg(context.Context, uuid.UUID, int, int) ([]*entity.Repository, error) {
+	return nil, nil
 }
 
 func (m *mockBranchRepoRepo) CountByOrg(context.Context, uuid.UUID) (int, error) { return 0, nil }
 
-func (m *mockBranchRepoRepo) ListByOwner(context.Context, uuid.UUID, int, int) ([]*entity.Repository, int, error) {
-	return nil, 0, nil
+func (m *mockBranchRepoRepo) ListByOwner(context.Context, uuid.UUID, int, int) ([]*entity.Repository, error) {
+	return nil, nil
 }
 
 func (m *mockBranchRepoRepo) CountByOwner(context.Context, uuid.UUID) (int, error) { return 0, nil }
@@ -97,7 +97,7 @@ func branchTestSeedMainBranch(t *testing.T, repoPath string) error {
 	if err := repo.Storer.SetReference(ref); err != nil {
 		return err
 	}
-	head := plumbing.NewSymbolicReference(plumbing.Head, plumbing.ReferenceName("refs/heads/main"))
+	head := plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.ReferenceName("refs/heads/main"))
 	return repo.Storer.SetReference(head)
 }
 
@@ -229,7 +229,7 @@ func TestBranchHandler_CreateRef_success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open repo: %v", err)
 	}
-	mainRef, err := gitRepo.Reference(plumbing.Head, true)
+	mainRef, err := gitRepo.Reference(plumbing.HEAD, true)
 	if err != nil {
 		t.Fatalf("head ref: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestBranchHandler_DeleteRef_success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open repo: %v", err)
 	}
-	mainRef, err := gitRepo.Reference(plumbing.Head, true)
+	mainRef, err := gitRepo.Reference(plumbing.HEAD, true)
 	if err != nil {
 		t.Fatalf("head ref: %v", err)
 	}

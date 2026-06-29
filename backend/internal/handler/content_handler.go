@@ -70,7 +70,18 @@ type commitDetailResponse struct {
 }
 
 func (h *ContentHandler) GetContents(c echo.Context) error {
-	resolved, err := h.resolver.Resolve(c.Request().Context(), c.Param("owner"), c.Param("repo"))
+	owner := c.Param("owner")
+	repo := c.Param("repo")
+	if err := ValidateOwnerRepo(owner, repo); err != nil {
+		return err
+	}
+
+	path := c.QueryParam("path")
+	if strings.Contains(path, "../") {
+		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "Invalid path"})
+	}
+
+	resolved, err := h.resolver.Resolve(c.Request().Context(), owner, repo)
 	if err != nil {
 		return err
 	}
@@ -79,7 +90,6 @@ func (h *ContentHandler) GetContents(c echo.Context) error {
 	if ref == "" {
 		ref = "HEAD"
 	}
-	path := c.QueryParam("path")
 
 	entries, err := infragit.GetTree(resolved.DiskPath, ref, path)
 	if err != nil {
@@ -170,7 +180,13 @@ func (h *ContentHandler) GetGitBlob(c echo.Context) error {
 }
 
 func (h *ContentHandler) GetCommits(c echo.Context) error {
-	resolved, err := h.resolver.Resolve(c.Request().Context(), c.Param("owner"), c.Param("repo"))
+	owner := c.Param("owner")
+	repo := c.Param("repo")
+	if err := ValidateOwnerRepo(owner, repo); err != nil {
+		return err
+	}
+
+	resolved, err := h.resolver.Resolve(c.Request().Context(), owner, repo)
 	if err != nil {
 		return err
 	}

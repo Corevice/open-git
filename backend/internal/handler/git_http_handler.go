@@ -14,6 +14,7 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
@@ -23,6 +24,7 @@ import (
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
+	repo "github.com/open-git/backend/internal/repository"
 )
 
 // ResolvedGitRepository is metadata required to serve Git Smart HTTP for a repo.
@@ -53,11 +55,12 @@ type GitBranchProtectionStore interface {
 
 // GitHTTPHandler serves Git Smart HTTP protocol endpoints.
 type GitHTTPHandler struct {
-	gitRoot      string
-	resolver     GitRepositoryResolver
-	memberships  GitMembershipAccess
-	protections  GitBranchProtectionStore
-	authRequired echo.MiddlewareFunc
+	gitRoot       string
+	resolver      GitRepositoryResolver
+	memberships   GitMembershipAccess
+	protections   GitBranchProtectionStore
+	collaborators repo.IRepositoryCollaboratorRepository
+	authRequired  echo.MiddlewareFunc
 }
 
 func NewGitHTTPHandler(
@@ -65,14 +68,16 @@ func NewGitHTTPHandler(
 	resolver GitRepositoryResolver,
 	memberships GitMembershipAccess,
 	protections GitBranchProtectionStore,
+	collaborators repo.IRepositoryCollaboratorRepository,
 	authRequired echo.MiddlewareFunc,
 ) *GitHTTPHandler {
 	return &GitHTTPHandler{
-		gitRoot:      gitRoot,
-		resolver:     resolver,
-		memberships:  memberships,
-		protections:  protections,
-		authRequired: authRequired,
+		gitRoot:       gitRoot,
+		resolver:      resolver,
+		memberships:   memberships,
+		protections:   protections,
+		collaborators: collaborators,
+		authRequired:  authRequired,
 	}
 }
 
@@ -112,7 +117,7 @@ func (h *GitHTTPHandler) resolveRepo(c echo.Context) (*ResolvedGitRepository, er
 // InfoRefs handles GET /:owner/:repo.git/info/refs?service=
 func (h *GitHTTPHandler) InfoRefs(c echo.Context) error {
 	service := c.QueryParam("service")
-	if service != transport.UploadPackService.String() && service != transport.ReceivePackService.String() {
+	if service != transport.UploadPackServiceName && service != transport.ReceivePackServiceName {
 		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid service"})
 	}
 
@@ -120,7 +125,7 @@ func (h *GitHTTPHandler) InfoRefs(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if service == transport.ReceivePackService.String() {
+	if service == transport.ReceivePackServiceName {
 		userID, err := middleware.GetUserID(c)
 		if err != nil {
 			return err
@@ -133,7 +138,7 @@ func (h *GitHTTPHandler) InfoRefs(c echo.Context) error {
 	}
 
 	contentType := "application/x-git-upload-pack-advertisement"
-	if service == transport.ReceivePackService.String() {
+	if service == transport.ReceivePackServiceName {
 		contentType = "application/x-git-receive-pack-advertisement"
 	}
 	c.Response().Header().Set("Content-Type", contentType)
@@ -146,21 +151,20 @@ func advertiseRefs(w http.ResponseWriter, ctx context.Context, repoPath, service
 	if err != nil {
 		return err
 	}
-	root := filepath.Dir(abs)
-	name := filepath.Base(abs)
-
-	loader := server.NewFilesystemLoader(osfs.New(root))
+	// Use the repository's absolute path against a root filesystem so the
+	// loader resolves it regardless of the process working directory.
+	loader := server.NewFilesystemLoader(osfs.New("/"))
 	svr := server.NewServer(loader)
-	ep, err := transport.NewEndpoint(name)
+	ep, err := transport.NewEndpoint(abs)
 	if err != nil {
 		return fmt.Errorf("transport endpoint: %w", err)
 	}
 
 	var sess transport.Session
 	switch service {
-	case transport.UploadPackService.String():
+	case transport.UploadPackServiceName:
 		sess, err = svr.NewUploadPackSession(ep, nil)
-	case transport.ReceivePackService.String():
+	case transport.ReceivePackServiceName:
 		sess, err = svr.NewReceivePackSession(ep, nil)
 	default:
 		return fmt.Errorf("unsupported service: %s", service)
@@ -174,8 +178,16 @@ func advertiseRefs(w http.ResponseWriter, ctx context.Context, repoPath, service
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(w, refs)
-	return err
+
+	// Smart HTTP requires a service announcement header preceding the refs.
+	enc := pktline.NewEncoder(w)
+	if err := enc.EncodeString("# service=" + service + "\n"); err != nil {
+		return err
+	}
+	if err := enc.Flush(); err != nil {
+		return err
+	}
+	return refs.Encode(w)
 }
 
 // UploadPack handles POST /:owner/:repo.git/git-upload-pack
@@ -255,6 +267,12 @@ func (h *GitHTTPHandler) ensureReadAccessForUser(ctx context.Context, userID int
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to check permissions"})
 	}
 	if !ok {
+		if h.collaborators != nil {
+			perm, err := h.collaborators.GetPermission(ctx, repo.ID, middleware.Int64ToUUID(userID))
+			if err == nil && perm != "" {
+				return nil
+			}
+		}
 		return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "read access required"})
 	}
 	return nil
@@ -272,6 +290,12 @@ func (h *GitHTTPHandler) ensureWriteAccess(ctx context.Context, userID int64, re
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to check permissions"})
 	}
 	if !ok {
+		if h.collaborators != nil {
+			perm, err := h.collaborators.GetPermission(ctx, repo.ID, middleware.Int64ToUUID(userID))
+			if err == nil && (perm == entity.CollaboratorPermWrite || perm == entity.CollaboratorPermAdmin) {
+				return nil
+			}
+		}
 		return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "write access required"})
 	}
 	return nil
@@ -325,9 +349,24 @@ func isForcePush(repo *gogit.Repository, oldHash, newHash plumbing.Hash) bool {
 	if oldHash == plumbing.ZeroHash || newHash == plumbing.ZeroHash {
 		return false
 	}
-	merged, err := repo.MergeBase(oldHash, newHash)
+	oldCommit, err := repo.CommitObject(oldHash)
 	if err != nil {
 		return true
 	}
-	return merged != oldHash
+	newCommit, err := repo.CommitObject(newHash)
+	if err != nil {
+		return true
+	}
+	// A non-force (fast-forward) update requires the old commit to be an
+	// ancestor of the new one, i.e. the merge base equals the old commit.
+	bases, err := oldCommit.MergeBase(newCommit)
+	if err != nil {
+		return true
+	}
+	for _, base := range bases {
+		if base.Hash == oldHash {
+			return false
+		}
+	}
+	return true
 }
