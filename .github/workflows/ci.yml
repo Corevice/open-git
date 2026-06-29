@@ -70,6 +70,26 @@ jobs:
           name: coverage
           path: backend/coverage.out
 
+  frontend:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npx tsc --noEmit
+
+      - run: npx vitest run
+
   compat-tests:
     runs-on: ubuntu-latest
     steps:
