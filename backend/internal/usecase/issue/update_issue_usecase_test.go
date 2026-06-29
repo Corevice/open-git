@@ -39,6 +39,18 @@ func (m *updateIssueRepo) Update(_ context.Context, issue *entity.Issue) error {
 	return nil
 }
 
+func (m *updateIssueRepo) GetByID(_ context.Context, _ uuid.UUID) (*entity.Issue, error) {
+	return m.issue, nil
+}
+
+func (m *updateIssueRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *updateIssueRepo) Count(_ context.Context, _ repository.ListIssuesFilter) (int, error) {
+	return 0, nil
+}
+
 type updateLabelRepo struct {
 	labels map[string]*entity.Label
 }
@@ -48,6 +60,30 @@ func (m *updateLabelRepo) GetByName(_ context.Context, _ uuid.UUID, name string)
 		return nil, nil
 	}
 	return m.labels[name], nil
+}
+
+func (m *updateLabelRepo) Create(_ context.Context, _ *entity.Label) error {
+	return nil
+}
+
+func (m *updateLabelRepo) ListByRepo(_ context.Context, _ uuid.UUID, _, _ int) ([]*entity.Label, int, error) {
+	return nil, 0, nil
+}
+
+func (m *updateLabelRepo) Update(_ context.Context, _ *entity.Label) error {
+	return nil
+}
+
+func (m *updateLabelRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *updateLabelRepo) AddToIssue(_ context.Context, _ uuid.UUID, _ int, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *updateLabelRepo) RemoveFromIssue(_ context.Context, _ uuid.UUID, _ int, _ uuid.UUID) error {
+	return nil
 }
 
 type updateMilestoneRepo struct {
@@ -108,6 +144,14 @@ func (m *updateAuditLogRepo) InsertAuditLog(
 		targetID:   targetID,
 	})
 	return nil
+}
+
+func (m *updateAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (m *updateAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
 }
 
 func TestUpdateIssueTitleTooLong(t *testing.T) {

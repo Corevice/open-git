@@ -67,6 +67,14 @@ func (m *mockCommentAuditLogRepo) InsertAuditLog(
 	return nil
 }
 
+func (m *mockCommentAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (m *mockCommentAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 func TestUpdateCommentNotFoundWhenNil(t *testing.T) {
 	uc := issueusecase.NewUpdateCommentUsecase(
 		&mockCommentRepo{comment: nil},

@@ -1,54 +1,73 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import type { MouseEvent } from "react";
 
-type PaginationProps = {
+import { cn } from "@/lib/utils";
+
+export interface PaginationProps {
   page: number;
   hasNext: boolean;
   hasPrev: boolean;
   basePath: string;
-};
+}
 
-export function Pagination({ page, hasNext, hasPrev, basePath }: PaginationProps) {
-  const searchParams = useSearchParams();
+function sanitizeBasePath(path: string): string {
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("://")) {
+    return "/";
+  }
+  return path;
+}
 
-  const buildPageUrl = (targetPage: number) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (targetPage <= 1) {
-      params.delete("page");
-    } else {
-      params.set("page", String(targetPage));
-    }
-    const qs = params.toString();
-    return qs ? `${basePath}?${qs}` : basePath;
-  };
+function preventDisabledNavigation(
+  event: MouseEvent<HTMLAnchorElement>,
+  enabled: boolean,
+): void {
+  if (!enabled) {
+    event.preventDefault();
+  }
+}
+
+export function Pagination({
+  page,
+  hasNext,
+  hasPrev,
+  basePath,
+}: PaginationProps) {
+  const safeBasePath = sanitizeBasePath(basePath);
 
   return (
-    <nav className="flex justify-center gap-2 py-5" aria-label="Pagination">
-      {hasPrev ? (
-        <Link
-          href={buildPageUrl(page - 1)}
-          className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#0969da] hover:bg-[#f6f8fa]"
-        >
-          Previous
-        </Link>
-      ) : (
-        <span
-          className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#656d76] opacity-50 cursor-not-allowed"
-          aria-disabled="true"
-        >
-          Previous
-        </span>
-      )}
-      {hasNext ? (
-        <Link
-          href={buildPageUrl(page + 1)}
-          className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#0969da] hover:bg-[#f6f8fa]"
-        >
-          Next
-        </Link>
-      ) : null}
+    <nav className="flex items-center gap-2" aria-label="Pagination">
+      <Link
+        href={`${safeBasePath}?page=${page - 1}`}
+        aria-disabled={hasPrev ? undefined : "true"}
+        tabIndex={hasPrev ? undefined : -1}
+        onClick={(event) => preventDisabledNavigation(event, hasPrev)}
+        className={cn(
+          "inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-medium hover:bg-slate-100",
+          !hasPrev && "pointer-events-none opacity-50",
+        )}
+      >
+        Previous
+      </Link>
+      <span
+        className="inline-flex h-9 items-center justify-center px-2 text-sm text-slate-600"
+        aria-current="page"
+      >
+        Page {page}
+      </span>
+      <Link
+        href={`${safeBasePath}?page=${page + 1}`}
+        aria-disabled={hasNext ? undefined : "true"}
+        tabIndex={hasNext ? undefined : -1}
+        onClick={(event) => preventDisabledNavigation(event, hasNext)}
+        className={cn(
+          "inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-medium hover:bg-slate-100",
+          !hasNext && "pointer-events-none opacity-50",
+        )}
+      >
+        Next
+      </Link>
     </nav>
   );
 }

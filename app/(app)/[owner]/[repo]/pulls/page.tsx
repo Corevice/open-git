@@ -1,44 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 
-import IssueFilters from "@/components/issue/IssueFilters";
-import { EmptyState } from "@/components/ui/empty-state";
-import { Pagination } from "@/components/ui/pagination";
+import { ApiError, listPullRequests, listPullRequestsWithPagination } from "@/lib/api";
+import type { PullRequest } from "@/types/pull-request";
 
-type PullRequestItem = {
-  number: number;
-  title: string;
-  state: "open" | "closed";
-  draft?: boolean;
-  merged_at?: string | null;
-  mergeable_state?: string;
-  user: { login: string };
-  created_at: string;
-  comments?: number;
-};
+type Tab = "open" | "closed" | "merged";
 
 type Props = {
   params: Promise<{ owner: string; repo: string }>;
-  searchParams: Promise<{
-    state?: string;
-    labels?: string;
-    milestone?: string;
-    assignee?: string;
-    page?: string;
-  }>;
+  searchParams: Promise<{ state?: string; page?: string }>;
 };
-
-function parseLinkHeader(header: string | null): Record<string, string> {
-  if (!header) return {};
-  const links: Record<string, string> = {};
-  for (const part of header.split(",")) {
-    const match = part.match(/<([^>]+)>;\s*rel="([^"]+)"/);
-    if (match) links[match[2]] = match[1];
-  }
-  return links;
-}
 
 function formatAge(dateStr: string): string {
   const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -55,11 +29,45 @@ function formatAge(dateStr: string): string {
   return `${years} year${years === 1 ? "" : "s"} ago`;
 }
 
-function hasConflicts(pr: PullRequestItem): boolean {
-  return pr.mergeable_state === "dirty" || pr.mergeable_state === "conflicting";
+function labelStyle(color: string): React.CSSProperties {
+  const hex = color.startsWith("#") ? color : `#${color}`;
+  return { backgroundColor: hex, color: "#fff" };
 }
 
-function prStatusBadge(pr: PullRequestItem): { label: string; className: string; iconClass: string } {
+function tabFromState(state: string | undefined): Tab {
+  if (state === "closed") return "closed";
+  if (state === "merged") return "merged";
+  return "open";
+}
+
+function stateFromTab(tab: Tab): string {
+  if (tab === "merged") return "closed";
+  return tab;
+}
+
+function filterByTab(items: PullRequest[], tab: Tab): PullRequest[] {
+  if (tab === "open") {
+    return items.filter((pr) => pr.state === "open" && !pr.merged_at);
+  }
+  if (tab === "merged") {
+    return items.filter((pr) => pr.merged_at != null);
+  }
+  return items.filter((pr) => pr.state === "closed" && !pr.merged_at);
+}
+
+function hasConflicts(pr: PullRequest): boolean {
+  return (
+    pr.mergeable === false ||
+    pr.mergeable_state === "dirty" ||
+    pr.mergeable_state === "conflicting"
+  );
+}
+
+function prStatusBadge(pr: PullRequest): {
+  label: string;
+  className: string;
+  iconClass: string;
+} {
   if (pr.merged_at) {
     return {
       label: "Merged",
@@ -95,17 +103,54 @@ function prStatusBadge(pr: PullRequestItem): { label: string; className: string;
   };
 }
 
+function paginationHref(linkUrl: string, basePath: string): string {
+  try {
+    const url = new URL(linkUrl, "http://localhost");
+    const params = new URLSearchParams();
+    const state = url.searchParams.get("state");
+    const pageParam = url.searchParams.get("page");
+    if (state && state !== "open") params.set("state", state);
+    if (pageParam && pageParam !== "1") params.set("page", pageParam);
+    const query = params.toString();
+    return query ? `${basePath}?${query}` : basePath;
+  } catch {
+    return basePath;
+  }
+}
+
+function authorLogin(pr: PullRequest): string {
+  return pr.user?.login ?? pr.author_id ?? "unknown";
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="bg-white border border-[#d0d7de] border-t-0 rounded-b-md">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-start gap-3 px-4 py-3 border-t border-[#d0d7de] animate-pulse"
+        >
+          <div className="w-4 h-4 bg-[#eaeef2] rounded mt-1" />
+          <div className="flex-1 space-y-2">
+            <div className="h-4 bg-[#eaeef2] rounded w-2/3" />
+            <div className="h-3 bg-[#eaeef2] rounded w-1/3" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function PullsPage({ params, searchParams }: Props) {
+  const router = useRouter();
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
-  const [state, setState] = useState("open");
-  const [labelsParam, setLabelsParam] = useState("");
-  const [milestone, setMilestone] = useState("");
-  const [assignee, setAssignee] = useState("");
+  const [activeTab, setActiveTab] = useState<Tab>("open");
   const [page, setPage] = useState("1");
 
-  const [pulls, setPulls] = useState<PullRequestItem[]>([]);
-  const [hasNext, setHasNext] = useState(false);
+  const [pulls, setPulls] = useState<PullRequest[]>([]);
+  const [pagination, setPagination] = useState<Record<string, string>>({});
+  const [tabCounts, setTabCounts] = useState({ open: 0, closed: 0, merged: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,16 +158,60 @@ export default function PullsPage({ params, searchParams }: Props) {
     Promise.all([params, searchParams]).then(([p, sp]) => {
       setOwner(p.owner);
       setRepo(p.repo);
-      setState(sp.state ?? "open");
-      setLabelsParam(sp.labels ?? "");
-      setMilestone(sp.milestone ?? "");
-      setAssignee(sp.assignee ?? "");
+      setActiveTab(tabFromState(sp.state));
       setPage(sp.page ?? "1");
     });
   }, [params, searchParams]);
 
   const basePath = owner && repo ? `/${owner}/${repo}/pulls` : "";
-  const currentPage = Math.max(1, parseInt(page, 10) || 1);
+
+  const buildQuery = useCallback(
+    (overrides: { state?: Tab; page?: string } = {}) => {
+      const qs = new URLSearchParams();
+      const nextTab = overrides.state ?? activeTab;
+      const nextPage = overrides.page ?? page;
+
+      if (nextTab !== "open") qs.set("state", nextTab);
+      if (nextPage && nextPage !== "1") qs.set("page", nextPage);
+
+      const query = qs.toString();
+      return query ? `?${query}` : "";
+    },
+    [activeTab, page],
+  );
+
+  const navigate = (overrides: { state?: Tab; page?: string }) => {
+    if (!basePath) return;
+    router.push(`${basePath}${buildQuery(overrides)}`);
+  };
+
+  useEffect(() => {
+    if (!owner || !repo) return;
+
+    let cancelled = false;
+
+    async function loadCounts() {
+      try {
+        const [openData, closedData] = await Promise.all([
+          listPullRequests(owner, repo, "open", 1, 100),
+          listPullRequests(owner, repo, "closed", 1, 100),
+        ]);
+        if (cancelled) return;
+        setTabCounts({
+          open: filterByTab(openData, "open").length,
+          closed: filterByTab(closedData, "closed").length,
+          merged: filterByTab(closedData, "merged").length,
+        });
+      } catch {
+        // tab counts are best-effort
+      }
+    }
+
+    loadCounts();
+    return () => {
+      cancelled = true;
+    };
+  }, [owner, repo]);
 
   useEffect(() => {
     if (!owner || !repo) return;
@@ -133,26 +222,24 @@ export default function PullsPage({ params, searchParams }: Props) {
       setLoading(true);
       setError(null);
       try {
-        const query = new URLSearchParams();
-        if (state && state !== "all") query.set("state", state);
-        if (labelsParam) query.set("labels", labelsParam);
-        if (milestone) query.set("milestone", milestone);
-        if (assignee) query.set("assignee", assignee);
-        if (page) query.set("page", page);
-        query.set("per_page", "30");
-
-        const pullsRes = await fetch(`/repos/${owner}/${repo}/pulls?${query.toString()}`);
-
-        if (!pullsRes.ok) throw new Error("Failed to load pull requests");
-
-        const pullsData = (await pullsRes.json()) as PullRequestItem[];
+        const pageNum = parseInt(page, 10) || 1;
+        const { items, links } = await listPullRequestsWithPagination(
+          owner,
+          repo,
+          stateFromTab(activeTab),
+          pageNum,
+          30,
+        );
         if (cancelled) return;
-
-        setPulls(pullsData);
-        const pagination = parseLinkHeader(pullsRes.headers.get("Link"));
-        setHasNext(!!pagination.next);
+        setPulls(filterByTab(items, activeTab));
+        setPagination(links);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load pull requests");
+        if (cancelled) return;
+        if (e instanceof ApiError && e.status === 404) {
+          router.push("/404");
+          return;
+        }
+        setError(e instanceof Error ? e.message : "Failed to load pull requests");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -162,10 +249,11 @@ export default function PullsPage({ params, searchParams }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [owner, repo, state, labelsParam, milestone, assignee, page]);
+  }, [owner, repo, activeTab, page, router]);
 
-  const openCount = pulls.filter((p) => p.state === "open" && !p.merged_at).length;
-  const closedCount = pulls.filter((p) => p.state === "closed" || p.merged_at).length;
+  const openCount = tabCounts.open;
+  const closedCount = tabCounts.closed;
+  const mergedCount = tabCounts.merged;
 
   if (!owner || !repo) {
     return (
@@ -192,26 +280,38 @@ export default function PullsPage({ params, searchParams }: Props) {
           </Link>
         </div>
 
-        <IssueFilters
-          owner={owner}
-          repo={repo}
-          state={state}
-          labels={labelsParam}
-          milestone={milestone}
-          assignee={assignee}
-          basePath={basePath}
-        />
+        <div className="flex flex-wrap gap-3 items-center mb-4 p-3 bg-[#f6f8fa] border border-[#d0d7de] rounded-md">
+          <div className="flex gap-1">
+            {(
+              [
+                { id: "open" as const, label: "Open" },
+                { id: "closed" as const, label: "Closed" },
+                { id: "merged" as const, label: "Merged" },
+              ] as const
+            ).map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => navigate({ state: id, page: "1" })}
+                className={`px-3 py-1.5 text-sm rounded-md border ${
+                  activeTab === id
+                    ? "bg-white border-[#0969da] text-[#0969da] font-semibold"
+                    : "bg-white border-[#d0d7de] hover:bg-[#f6f8fa]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="flex gap-4 items-center bg-[#f6f8fa] border border-[#d0d7de] border-b-0 rounded-t-md px-4 py-3 text-sm">
           <span className="font-semibold text-[#1a7f37]">⇆ {openCount} Open</span>
           <span className="text-[#656d76]">✓ {closedCount} Closed</span>
+          <span className="text-[#656d76]">⊕ {mergedCount} Merged</span>
         </div>
 
-        {loading && (
-          <div className="bg-white border border-[#d0d7de] px-4 py-8 text-center text-[#656d76]">
-            Loading pull requests…
-          </div>
-        )}
+        {loading && <LoadingSkeleton />}
 
         {error && (
           <div className="bg-white border border-[#d0d7de] px-4 py-8 text-center text-[#d1242f]">
@@ -222,10 +322,7 @@ export default function PullsPage({ params, searchParams }: Props) {
         {!loading && !error && (
           <div className="bg-white border border-[#d0d7de] border-t-0 rounded-b-md">
             {pulls.length === 0 ? (
-              <EmptyState
-                title="No pull requests"
-                description="There are no pull requests matching your filters."
-              />
+              <div className="px-4 py-8 text-center text-[#656d76]">No pull requests found.</div>
             ) : (
               pulls.map((pr) => {
                 const badge = prStatusBadge(pr);
@@ -247,13 +344,19 @@ export default function PullsPage({ params, searchParams }: Props) {
                       >
                         {badge.label}
                       </span>
+                      {pr.labels?.map((label) => (
+                        <span
+                          key={label.name}
+                          className="inline-block ml-1 px-2 py-0.5 rounded-full text-[11px] font-semibold"
+                          style={labelStyle(label.color)}
+                        >
+                          {label.name}
+                        </span>
+                      ))}
                       <div className="text-xs text-[#656d76] mt-1">
-                        #{pr.number} opened {formatAge(pr.created_at)} by {pr.user.login}
+                        #{pr.number} opened {formatAge(pr.created_at)} by {authorLogin(pr)}
                       </div>
                     </div>
-                    {pr.comments != null && (
-                      <div className="text-xs text-[#656d76] whitespace-nowrap">💬 {pr.comments}</div>
-                    )}
                   </div>
                 );
               })
@@ -261,13 +364,25 @@ export default function PullsPage({ params, searchParams }: Props) {
           </div>
         )}
 
-        {!loading && !error && (
-          <Pagination
-            page={currentPage}
-            hasNext={hasNext}
-            hasPrev={currentPage > 1}
-            basePath={basePath}
-          />
+        {(pagination.prev || pagination.next) && (
+          <div className="flex justify-center gap-2 py-5">
+            {pagination.prev && (
+              <Link
+                href={paginationHref(pagination.prev, basePath)}
+                className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#0969da]"
+              >
+                ← Prev
+              </Link>
+            )}
+            {pagination.next && (
+              <Link
+                href={paginationHref(pagination.next, basePath)}
+                className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#0969da]"
+              >
+                Next →
+              </Link>
+            )}
+          </div>
         )}
       </div>
     </div>
