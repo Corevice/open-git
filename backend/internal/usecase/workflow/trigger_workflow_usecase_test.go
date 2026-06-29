@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -62,37 +63,49 @@ func (m *mockWorkflowRunRepo) IncrementRunAttempt(context.Context, uuid.UUID, uu
 var _ domainrepo.IWorkflowRunRepository = (*mockWorkflowRunRepo)(nil)
 
 type mockWorkflowJobRepo struct {
-	batches [][]*entity.WorkflowJob
+	created []*entity.WorkflowJob
 }
 
-func (m *mockWorkflowJobRepo) Create(context.Context, *entity.WorkflowJob) error {
+func (m *mockWorkflowJobRepo) Create(_ context.Context, job *entity.WorkflowJob) error {
+	copyJob := *job
+	m.created = append(m.created, &copyJob)
 	return nil
 }
 
 func (m *mockWorkflowJobRepo) CreateBatch(_ context.Context, jobs []*entity.WorkflowJob) error {
-	copied := make([]*entity.WorkflowJob, len(jobs))
-	for i, job := range jobs {
+	for _, job := range jobs {
 		copyJob := *job
-		copied[i] = &copyJob
+		m.created = append(m.created, &copyJob)
 	}
-	m.batches = append(m.batches, copied)
 	return nil
+}
+
+func (m *mockWorkflowJobRepo) GetByID(context.Context, uuid.UUID) (*entity.WorkflowJob, error) {
+	return nil, domain.ErrNotFound
+}
+
+func (m *mockWorkflowJobRepo) AcquireForRunner(context.Context, uuid.UUID, uuid.UUID, int) (bool, error) {
+	return false, nil
+}
+
+func (m *mockWorkflowJobRepo) UpdateStatus(context.Context, uuid.UUID, string, string) error {
+	return nil
+}
+
+func (m *mockWorkflowJobRepo) Complete(context.Context, uuid.UUID, string, time.Time) error {
+	return nil
+}
+
+func (m *mockWorkflowJobRepo) Cancel(context.Context, uuid.UUID) error {
+	return nil
+}
+
+func (m *mockWorkflowJobRepo) ListQueued(context.Context, uuid.UUID) ([]*entity.WorkflowJob, error) {
+	return nil, nil
 }
 
 func (m *mockWorkflowJobRepo) ListByRunID(context.Context, uuid.UUID, uuid.UUID) ([]*entity.WorkflowJob, error) {
 	return nil, nil
-}
-
-func (m *mockWorkflowJobRepo) Update(context.Context, *entity.WorkflowJob) error {
-	return nil
-}
-
-func (m *mockWorkflowJobRepo) CancelInProgressByRunID(context.Context, uuid.UUID, uuid.UUID) error {
-	return nil
-}
-
-func (m *mockWorkflowJobRepo) ResetQueuedByRunID(context.Context, uuid.UUID) error {
-	return nil
 }
 
 var _ domainrepo.IWorkflowJobRepository = (*mockWorkflowJobRepo)(nil)
@@ -236,7 +249,7 @@ func TestTrigger_PushMatchesBranchFilter_CreatesRun(t *testing.T) {
 	if enqueuer.payloads[0].RunID != out.RunID.String() {
 		t.Fatalf("expected enqueued run ID %s, got %s", out.RunID, enqueuer.payloads[0].RunID)
 	}
-	if len(jobRepo.batches) != 1 || len(jobRepo.batches[0]) != 1 {
+	if len(jobRepo.created) != 1 {
 		t.Fatalf("expected 1 workflow job to be created")
 	}
 }
