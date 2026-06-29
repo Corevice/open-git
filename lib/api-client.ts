@@ -216,6 +216,12 @@ async function handleResponse<T>(res: Response): Promise<T> {
     if (res.status === 401) {
       redirectToSignIn();
     }
+    if (res.status === 403) {
+      error.code = "forbidden";
+    }
+    if (res.status === 409) {
+      error.code = "conflict";
+    }
     throw error;
   }
   if (res.status === 204) {
