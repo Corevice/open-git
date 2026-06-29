@@ -328,7 +328,15 @@ func (h *GitHTTPHandler) rejectProtectedForcePush(ctx context.Context, repo *Res
 		if !protected {
 			continue
 		}
-		if isForcePush(grepo, cmd.Old, cmd.New) {
+		forced, ferr := isForcePush(grepo, cmd.Old, cmd.New)
+		if ferr != nil {
+			// We cannot prove this is a force-push (e.g. the packfile that
+			// carries the new commit hasn't been processed yet at this point of
+			// receive-pack, or the bare repo is shallow). Fall back to allowing
+			// the update so that legitimate non-force pushes are not rejected.
+			continue
+		}
+		if forced {
 			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{
 				"message": fmt.Sprintf("force-push is not allowed on protected branch: %s", branch),
 			})
@@ -345,28 +353,33 @@ func branchFromRef(ref string) (string, bool) {
 	return strings.TrimPrefix(ref, prefix), true
 }
 
-func isForcePush(repo *gogit.Repository, oldHash, newHash plumbing.Hash) bool {
+// isForcePush reports whether updating a ref from oldHash to newHash is a
+// non-fast-forward (force) push. The boolean is only meaningful when err is
+// nil; when err is non-nil the caller cannot decide and should not treat the
+// update as a force-push (e.g. the receive-pack packfile has not yet been
+// written to the bare repo, or the repo is a shallow clone missing ancestors).
+func isForcePush(repo *gogit.Repository, oldHash, newHash plumbing.Hash) (bool, error) {
 	if oldHash == plumbing.ZeroHash || newHash == plumbing.ZeroHash {
-		return false
+		return false, nil
 	}
 	oldCommit, err := repo.CommitObject(oldHash)
 	if err != nil {
-		return true
+		return false, fmt.Errorf("look up old commit %s: %w", oldHash, err)
 	}
 	newCommit, err := repo.CommitObject(newHash)
 	if err != nil {
-		return true
+		return false, fmt.Errorf("look up new commit %s: %w", newHash, err)
 	}
 	// A non-force (fast-forward) update requires the old commit to be an
 	// ancestor of the new one, i.e. the merge base equals the old commit.
 	bases, err := oldCommit.MergeBase(newCommit)
 	if err != nil {
-		return true
+		return false, fmt.Errorf("compute merge base: %w", err)
 	}
 	for _, base := range bases {
 		if base.Hash == oldHash {
-			return false
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
