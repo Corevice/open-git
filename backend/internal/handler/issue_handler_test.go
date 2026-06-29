@@ -75,6 +75,14 @@ func (m *handlerAuditLogRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.UU
 	return nil
 }
 
+func (handlerAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (handlerAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 func issueTestRepo() *entity.Repository {
 	return &entity.Repository{
 		ID:             issueTestRepoID,

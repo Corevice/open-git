@@ -25,6 +25,24 @@ var (
 	bpTestUserID  = int64(12)
 )
 
+type bpHandlerMockAuditLogRepo struct {
+	created []*entity.AuditLog
+}
+
+func (m *bpHandlerMockAuditLogRepo) Create(_ context.Context, log *entity.AuditLog) error {
+	copied := *log
+	m.created = append(m.created, &copied)
+	return nil
+}
+
+func (m *bpHandlerMockAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
+func (m *bpHandlerMockAuditLogRepo) InsertAuditLog(context.Context, uuid.UUID, uuid.UUID, string, string, uuid.UUID, json.RawMessage) error {
+	return nil
+}
+
 type branchProtectionStore struct {
 	byPattern map[string]*handler.BranchProtectionDetail
 	list      []*handler.BranchProtectionDetail
@@ -122,15 +140,16 @@ func newBranchProtectionEcho(
 	t *testing.T,
 	store *branchProtectionStore,
 	isAdmin bool,
-) (*echo.Echo, *handler.BranchProtectionHandler) {
+) (*echo.Echo, *handler.BranchProtectionHandler, *bpHandlerMockAuditLogRepo) {
 	t.Helper()
 
 	readRepo := &stubBranchProtectionReadRepo{store: store}
 	writeRepo := &stubBranchProtectionWriteRepo{store: store}
 
-	auditLog := &listMockAuditLogRepo{}
-	upsertUC := repoUC.NewUpsertBranchProtectionUsecase(writeRepo, auditLog)
-	deleteUC := repoUC.NewDeleteBranchProtectionUsecase(writeRepo, auditLog)
+	ucAuditLog := &listMockAuditLogRepo{}
+	handlerAuditLog := &bpHandlerMockAuditLogRepo{}
+	upsertUC := repoUC.NewUpsertBranchProtectionUsecase(writeRepo, ucAuditLog)
+	deleteUC := repoUC.NewDeleteBranchProtectionUsecase(writeRepo, ucAuditLog)
 
 	testRepo := testRepository()
 	resolveRepo := func(_ echo.Context, _, _ string) (*entity.Repository, error) {
@@ -143,7 +162,7 @@ func newBranchProtectionEcho(
 		return nil
 	}
 
-	h := handler.NewBranchProtectionHandler(readRepo, upsertUC, deleteUC, resolveRepo, checkRepoAdmin)
+	h := handler.NewBranchProtectionHandler(readRepo, upsertUC, deleteUC, resolveRepo, checkRepoAdmin, handlerAuditLog)
 
 	e := echo.New()
 	v3 := e.Group("/api/v3")
@@ -152,7 +171,7 @@ func newBranchProtectionEcho(
 	internal := e.Group("/api/internal")
 	h.RegisterInternalRoutes(internal, authMiddleware(bpTestUserID))
 
-	return e, h
+	return e, h, handlerAuditLog
 }
 
 func TestGetBranchProtection_Found(t *testing.T) {
@@ -173,7 +192,7 @@ func TestGetBranchProtection_Found(t *testing.T) {
 			},
 		},
 	}
-	e, _ := newBranchProtectionEcho(t, store, true)
+	e, _, _ := newBranchProtectionEcho(t, store, true)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v3/repos/alice/demo/branches/main/protection", nil)
 	rec := httptest.NewRecorder()
@@ -214,7 +233,7 @@ func TestGetBranchProtection_Found(t *testing.T) {
 
 func TestGetBranchProtection_NotFound(t *testing.T) {
 	store := &branchProtectionStore{byPattern: map[string]*handler.BranchProtectionDetail{}}
-	e, _ := newBranchProtectionEcho(t, store, true)
+	e, _, _ := newBranchProtectionEcho(t, store, true)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v3/repos/alice/demo/branches/main/protection", nil)
 	rec := httptest.NewRecorder()
@@ -227,7 +246,7 @@ func TestGetBranchProtection_NotFound(t *testing.T) {
 
 func TestPutBranchProtection_AdminSuccess(t *testing.T) {
 	store := &branchProtectionStore{byPattern: map[string]*handler.BranchProtectionDetail{}}
-	e, _ := newBranchProtectionEcho(t, store, true)
+	e, _, _ := newBranchProtectionEcho(t, store, true)
 
 	body := `{
 		"required_status_checks": {"strict": true, "contexts": ["ci/build"]},
@@ -267,7 +286,7 @@ func TestPutBranchProtection_AdminSuccess(t *testing.T) {
 
 func TestPutBranchProtection_NonAdminForbidden(t *testing.T) {
 	store := &branchProtectionStore{byPattern: map[string]*handler.BranchProtectionDetail{}}
-	e, _ := newBranchProtectionEcho(t, store, false)
+	e, _, _ := newBranchProtectionEcho(t, store, false)
 
 	body := `{
 		"required_pull_request_reviews": {"required_approving_review_count": 1}
@@ -284,7 +303,7 @@ func TestPutBranchProtection_NonAdminForbidden(t *testing.T) {
 
 func TestPutBranchProtection_InvalidReviewCount422(t *testing.T) {
 	store := &branchProtectionStore{byPattern: map[string]*handler.BranchProtectionDetail{}}
-	e, _ := newBranchProtectionEcho(t, store, true)
+	e, _, _ := newBranchProtectionEcho(t, store, true)
 
 	body := `{
 		"required_pull_request_reviews": {"required_approving_review_count": 99}
@@ -308,7 +327,7 @@ func TestDeleteBranchProtection_Success204(t *testing.T) {
 			},
 		},
 	}
-	e, _ := newBranchProtectionEcho(t, store, true)
+	e, _, _ := newBranchProtectionEcho(t, store, true)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v3/repos/alice/demo/branches/main/protection", nil)
 	rec := httptest.NewRecorder()
@@ -321,7 +340,7 @@ func TestDeleteBranchProtection_Success204(t *testing.T) {
 
 func TestDeleteBranchProtection_NotFound404(t *testing.T) {
 	store := &branchProtectionStore{byPattern: map[string]*handler.BranchProtectionDetail{}}
-	e, _ := newBranchProtectionEcho(t, store, true)
+	e, _, _ := newBranchProtectionEcho(t, store, true)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v3/repos/alice/demo/branches/main/protection", nil)
 	rec := httptest.NewRecorder()
@@ -347,7 +366,7 @@ func TestListBranchProtections_ReturnsArray(t *testing.T) {
 			},
 		},
 	}
-	e, _ := newBranchProtectionEcho(t, store, true)
+	e, _, _ := newBranchProtectionEcho(t, store, true)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/internal/repos/alice/demo/branch-protections", nil)
 	rec := httptest.NewRecorder()
@@ -368,5 +387,66 @@ func TestListBranchProtections_ReturnsArray(t *testing.T) {
 		if item["restrictions"] != nil {
 			t.Fatalf("expected restrictions null, got %v", item["restrictions"])
 		}
+	}
+}
+
+func TestBranchProtectionCreate_RecordsAudit(t *testing.T) {
+	store := &branchProtectionStore{byPattern: map[string]*handler.BranchProtectionDetail{}}
+	e, _, handlerAudit := newBranchProtectionEcho(t, store, true)
+
+	body := `{
+		"required_pull_request_reviews": {"required_approving_review_count": 1}
+	}`
+	req := httptest.NewRequest(http.MethodPut, "/api/v3/repos/alice/demo/branches/main/protection", bytes.NewBufferString(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(handlerAudit.created) != 1 {
+		t.Fatalf("expected 1 handler audit log, got %d", len(handlerAudit.created))
+	}
+	if handlerAudit.created[0].Action != "branch_protection.create" {
+		t.Fatalf("action = %q, want %q", handlerAudit.created[0].Action, "branch_protection.create")
+	}
+	if handlerAudit.created[0].TargetType != "branch_protection" {
+		t.Fatalf("target_type = %q, want %q", handlerAudit.created[0].TargetType, "branch_protection")
+	}
+	if handlerAudit.created[0].TargetID != "main" {
+		t.Fatalf("target_id = %q, want %q", handlerAudit.created[0].TargetID, "main")
+	}
+}
+
+func TestBranchProtectionDelete_RecordsAudit(t *testing.T) {
+	store := &branchProtectionStore{
+		byPattern: map[string]*handler.BranchProtectionDetail{
+			bpKey(bpTestOrgID, bpTestRepoID, "main"): {
+				Pattern:                      "main",
+				RequiredApprovingReviewCount: 1,
+			},
+		},
+	}
+	e, _, handlerAudit := newBranchProtectionEcho(t, store, true)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v3/repos/alice/demo/branches/main/protection", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+	if len(handlerAudit.created) != 1 {
+		t.Fatalf("expected 1 handler audit log, got %d", len(handlerAudit.created))
+	}
+	if handlerAudit.created[0].Action != "branch_protection.delete" {
+		t.Fatalf("action = %q, want %q", handlerAudit.created[0].Action, "branch_protection.delete")
+	}
+	if handlerAudit.created[0].TargetType != "branch_protection" {
+		t.Fatalf("target_type = %q, want %q", handlerAudit.created[0].TargetType, "branch_protection")
+	}
+	if handlerAudit.created[0].TargetID != "main" {
+		t.Fatalf("target_id = %q, want %q", handlerAudit.created[0].TargetID, "main")
 	}
 }
