@@ -165,7 +165,7 @@ func TestWorkflowUpsert_Idempotent(t *testing.T) {
 	}
 
 	var count int
-	if err := db.Get(&count, `SELECT COUNT(*) FROM workflows WHERE repository_id = ? AND path = ?`, seed.RepoID.String(), wf.Path); err != nil {
+	if err := db.Get(&count, `SELECT COUNT(*) FROM workflows WHERE repository_id = ? AND path = ?`, seed.RepoID, wf.Path); err != nil {
 		t.Fatalf("count workflows: %v", err)
 	}
 	if count != 1 {
@@ -329,7 +329,7 @@ func TestWorkflowSaveRevision_Idempotent(t *testing.T) {
 	}
 
 	var count int
-	if err := db.Get(&count, `SELECT COUNT(*) FROM workflow_revisions WHERE workflow_id = ? AND commit_sha = ?`, wf.ID.String(), rev.CommitSHA); err != nil {
+	if err := db.Get(&count, `SELECT COUNT(*) FROM workflow_revisions WHERE workflow_id = ? AND commit_sha = ?`, wf.ID, rev.CommitSHA); err != nil {
 		t.Fatalf("count revisions: %v", err)
 	}
 	if count != 1 {
