@@ -53,12 +53,13 @@ export function Header() {
     }
 
     let cancelled = false;
+    const authToken = token;
 
     async function loadAuthData() {
       try {
         const [currentUser, orgList] = await Promise.all([
-          getCurrentUser(token),
-          getOrgs(token),
+          getCurrentUser(authToken),
+          getOrgs(authToken),
         ]);
         if (!cancelled) {
           setUser(currentUser);
@@ -136,6 +137,7 @@ export function Header() {
           <span>{BRANDING.appName}</span>
         ) : (
           <>
+            {/* eslint-disable-next-line @next/next/no-img-element -- branded logo is a static asset, not optimized via next/image */}
             <img
               src={BRANDING.logoSrc}
               alt={BRANDING.appName}

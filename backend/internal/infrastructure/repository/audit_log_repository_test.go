@@ -2,13 +2,18 @@ package repository_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	domainrepo "github.com/open-git/backend/internal/domain/repository"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/open-git/backend/internal/domain/entity"
+	domainrepo "github.com/open-git/backend/internal/domain/repository"
+	"github.com/open-git/backend/internal/infrastructure/database"
 	"github.com/open-git/backend/internal/infrastructure/repository"
 )
 
@@ -109,6 +114,124 @@ func TestMockAuditLogRepository_ListContract(t *testing.T) {
 	}
 }
 
+func newAuditLogTestDB(t *testing.T) *sqlx.DB {
+	t.Helper()
+
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := database.RunMigrations(db, "sqlite", "../../../migrations"); err != nil {
+		_ = db.Close()
+		t.Fatalf("run migrations: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return sqlx.NewDb(db, "sqlite3")
+}
+
+func TestListByOrg_FiltersAndPaginates(t *testing.T) {
+	db := newAuditLogTestDB(t)
+	var repo domainrepo.AuditLogRepository = repository.NewAuditLogRepository(db)
+
+	orgA := createTestOrganization(t, db, "audit-org-a")
+	orgB := createTestOrganization(t, db, "audit-org-b")
+	actorA := createTestUser(t, db, "audit-actor-a")
+	actorB := createTestUser(t, db, "audit-actor-b")
+
+	orgAActions := []string{
+		"settings.update",
+		"settings.update",
+		"settings.update",
+		"member.invite",
+		"member.invite",
+	}
+	for i, action := range orgAActions {
+		log := &entity.AuditLog{
+			OrganizationID: orgA,
+			ActorID:        actorA,
+			ActorLogin:     "audit-actor-a",
+			Action:         action,
+			TargetType:     "organization",
+			TargetID:       uuid.New().String(),
+			CreatedAt:      time.Date(2025, 6, 1, 10, i, 0, 0, time.UTC),
+		}
+		if err := repo.Create(context.Background(), log); err != nil {
+			t.Fatalf("Create orgA log %d: %v", i, err)
+		}
+	}
+
+	for i := 0; i < 3; i++ {
+		log := &entity.AuditLog{
+			OrganizationID: orgB,
+			ActorID:        actorB,
+			ActorLogin:     "audit-actor-b",
+			Action:         "repo.delete",
+			TargetType:     "repository",
+			TargetID:       uuid.New().String(),
+			CreatedAt:      time.Date(2025, 6, 2, 10, i, 0, 0, time.UTC),
+		}
+		if err := repo.Create(context.Background(), log); err != nil {
+			t.Fatalf("Create orgB log %d: %v", i, err)
+		}
+	}
+
+	ctx := context.Background()
+
+	logs, total, err := repo.ListByOrg(ctx, domainrepo.AuditLogListOpts{
+		OrgID:   orgA,
+		Page:    1,
+		PerPage: 100,
+	})
+	if err != nil {
+		t.Fatalf("ListByOrg orgA: %v", err)
+	}
+	if total != 5 {
+		t.Fatalf("expected total 5 for orgA, got %d", total)
+	}
+	if len(logs) != 5 {
+		t.Fatalf("expected 5 logs for orgA, got %d", len(logs))
+	}
+	for _, log := range logs {
+		if log.OrganizationID != orgA {
+			t.Fatalf("expected orgA log, got org %s", log.OrganizationID)
+		}
+	}
+
+	logs, total, err = repo.ListByOrg(ctx, domainrepo.AuditLogListOpts{
+		OrgID:   orgA,
+		Page:    1,
+		PerPage: 2,
+	})
+	if err != nil {
+		t.Fatalf("ListByOrg paginated: %v", err)
+	}
+	if total != 5 {
+		t.Fatalf("expected total 5 with pagination, got %d", total)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 logs per page, got %d", len(logs))
+	}
+
+	logs, total, err = repo.ListByOrg(ctx, domainrepo.AuditLogListOpts{
+		OrgID:  orgA,
+		Action: "settings.update",
+	})
+	if err != nil {
+		t.Fatalf("ListByOrg action filter: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("expected total 3 for settings.update, got %d", total)
+	}
+	if len(logs) != 3 {
+		t.Fatalf("expected 3 logs for settings.update, got %d", len(logs))
+	}
+	for _, log := range logs {
+		if log.Action != "settings.update" {
+			t.Fatalf("expected action settings.update, got %q", log.Action)
+		}
+	}
+}
+
 func TestAuditLogRowToEntity(t *testing.T) {
 	id := uuid.New()
 	orgID := uuid.New()
@@ -132,6 +255,7 @@ func TestAuditLogRowToEntity(t *testing.T) {
 				TargetType:     "repository",
 				TargetID:       "repo-123",
 				Metadata:       `{"visibility":"private"}`,
+				IPAddress:      "192.168.1.10",
 				CreatedAt:      createdAt,
 			},
 			want: &entity.AuditLog{
@@ -142,6 +266,7 @@ func TestAuditLogRowToEntity(t *testing.T) {
 				Action:         "repo.destroy",
 				TargetType:     "repository",
 				TargetID:       "repo-123",
+				IPAddress:      "192.168.1.10",
 				Metadata:       map[string]any{"visibility": "private"},
 				CreatedAt:      createdAt,
 			},
@@ -224,6 +349,9 @@ func TestAuditLogRowToEntity(t *testing.T) {
 			if got.TargetType != tt.want.TargetType || got.TargetID != tt.want.TargetID {
 				t.Fatalf("unexpected target: %+v", got)
 			}
+			if got.IPAddress != tt.want.IPAddress {
+				t.Fatalf("ipAddress: got %q, want %q", got.IPAddress, tt.want.IPAddress)
+			}
 			if !got.CreatedAt.Equal(tt.want.CreatedAt) {
 				t.Fatalf("createdAt: got %v, want %v", got.CreatedAt, tt.want.CreatedAt)
 			}
@@ -235,6 +363,98 @@ func TestAuditLogRowToEntity(t *testing.T) {
 			}
 			if got.Metadata["visibility"] != tt.want.Metadata["visibility"] {
 				t.Fatalf("metadata: got %v, want %v", got.Metadata, tt.want.Metadata)
+			}
+		})
+	}
+}
+
+func TestAuditLogRepository_IPAddressRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	setupAuditLogSearchColumns(t, db)
+	orgID, actorID := seedAuditLogSearchFixtures(t, db)
+	repo := repository.NewAuditLogRepository(db)
+	ctx := context.Background()
+
+	logID := uuid.New()
+	log := &entity.AuditLog{
+		ID:             logID,
+		OrganizationID: orgID,
+		ActorID:        actorID,
+		ActorLogin:     "alice",
+		Action:         "settings.update",
+		TargetType:     "system_setting",
+		TargetID:       "site.name",
+		IPAddress:      "203.0.113.42",
+		Metadata:       map[string]any{"key": "site.name"},
+		CreatedAt:      time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC),
+	}
+
+	if err := repo.Create(ctx, log); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	logs, _, err := repo.List(ctx, orgID, "settings.update", 1, 100)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	var found *entity.AuditLog
+	for _, entry := range logs {
+		if entry.ID == logID {
+			found = entry
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected log %v in list (len=%d)", logID, len(logs))
+	}
+	if found.IPAddress != "203.0.113.42" {
+		t.Fatalf("IPAddress: got %q, want %q", found.IPAddress, "203.0.113.42")
+	}
+}
+
+func TestAuditLogRepository_CreateIPAddressValidation(t *testing.T) {
+	db := openTestDB(t)
+	setupAuditLogSearchColumns(t, db)
+	orgID, actorID := seedAuditLogSearchFixtures(t, db)
+	repo := repository.NewAuditLogRepository(db)
+	ctx := context.Background()
+
+	base := &entity.AuditLog{
+		OrganizationID: orgID,
+		ActorID:        actorID,
+		ActorLogin:     "alice",
+		Action:         "settings.update",
+		TargetType:     "system_setting",
+		TargetID:       "site.name",
+		CreatedAt:      time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC),
+	}
+
+	tests := []struct {
+		name      string
+		ipAddress string
+		wantErr   bool
+	}{
+		{name: "empty ip address allowed", ipAddress: "", wantErr: false},
+		{name: "valid ipv4", ipAddress: "203.0.113.42", wantErr: false},
+		{name: "invalid ip format rejected", ipAddress: "not-an-ip", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := *base
+			entry.ID = uuid.New()
+			entry.IPAddress = tt.ipAddress
+
+			err := repo.Create(ctx, &entry)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Create: %v", err)
 			}
 		})
 	}
