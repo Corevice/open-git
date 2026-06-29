@@ -4,6 +4,10 @@ import EditOnRepoLink from '@/components/docs/EditOnRepoLink';
 import MarkdownRenderer from '@/components/docs/MarkdownRenderer';
 import TableOfContents from '@/components/docs/TableOfContents';
 
+// Rendered on demand: the section content is served by the backend API, which
+// is not available during the static build.
+export const dynamic = 'force-dynamic';
+
 type Props = { params: Promise<{ slug: string }> };
 
 export default async function DocSectionPage({ params }: Props) {
@@ -31,12 +35,8 @@ export default async function DocSectionPage({ params }: Props) {
   );
 }
 
-export async function generateStaticParams() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? '';
-  const res = await fetch(`${apiUrl}/api/v1/docs/contributing`).catch(
-    () => null,
-  );
-  if (!res?.ok) return [];
-  const { sections } = await res.json();
-  return sections.map((s: { slug: string }) => ({ slug: s.slug }));
+// Slugs are resolved at request time (see `dynamic = 'force-dynamic'`); avoid
+// contacting the backend API during the build.
+export function generateStaticParams(): { slug: string }[] {
+  return [];
 }
