@@ -1,0 +1,22 @@
+{{- if (.Values.persistence.repositories.enabled | default true) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "open-git.fullname" . }}-repositories
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "open-git.labels" . | nindent 4 }}
+  {{- if (.Values.persistence.repositories.retainOnDelete | default true) }}
+  annotations:
+    "helm.sh/resource-policy": keep
+  {{- end }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.repositories.accessMode | default "ReadWriteOnce" | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.repositories.size | default "50Gi" | quote }}
+  {{- with .Values.global.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}
