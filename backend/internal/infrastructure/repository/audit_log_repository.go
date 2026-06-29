@@ -17,10 +17,13 @@ type sqlxAuditLogRepository struct {
 	db *sqlx.DB
 }
 
-var _ domainrepo.IAuditLogRepository = (*sqlxAuditLogRepository)(nil)
-var _ domainrepo.IAuditLogSearchRepository = (*sqlxAuditLogRepository)(nil)
+var (
+	_ domainrepo.IAuditLogRepository       = (*sqlxAuditLogRepository)(nil)
+	_ domainrepo.IAuditLogSearchRepository = (*sqlxAuditLogRepository)(nil)
+	_ domainrepo.AuditLogRepository        = (*sqlxAuditLogRepository)(nil)
+)
 
-func NewAuditLogRepository(db *sqlx.DB) domainrepo.IAuditLogFullRepository {
+func NewAuditLogRepository(db *sqlx.DB) domainrepo.AuditLogRepository {
 	return &sqlxAuditLogRepository{db: db}
 }
 
@@ -316,6 +319,75 @@ func (r *sqlxAuditLogRepository) Search(ctx context.Context, input domainrepo.Au
 	}
 
 	rows, err := r.db.NamedQueryContext(ctx, listQuery, args)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var logs []*entity.AuditLog
+	for rows.Next() {
+		var row AuditLogRow
+		if err := rows.StructScan(&row); err != nil {
+			return nil, 0, err
+		}
+		log, err := AuditLogRowToEntity(row)
+		if err != nil {
+			return nil, 0, err
+		}
+		logs = append(logs, log)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	return logs, total, nil
+}
+
+func (r *sqlxAuditLogRepository) ListByOrg(ctx context.Context, opts domainrepo.AuditLogListOpts) ([]*entity.AuditLog, int64, error) {
+	page := opts.Page
+	if page < 1 {
+		page = 1
+	}
+	perPage := opts.PerPage
+	if perPage < 1 {
+		perPage = 30
+	}
+	offset := (page - 1) * perPage
+
+	where := "WHERE organization_id = ?"
+	args := []any{opts.OrgID}
+
+	if opts.Action != "" {
+		where += " AND action = ?"
+		args = append(args, opts.Action)
+	}
+	if opts.ActorID != nil {
+		where += " AND actor_id = ?"
+		args = append(args, *opts.ActorID)
+	}
+	if opts.Since != nil {
+		where += " AND created_at >= ?"
+		args = append(args, *opts.Since)
+	}
+	if opts.Until != nil {
+		where += " AND created_at <= ?"
+		args = append(args, *opts.Until)
+	}
+
+	countQuery := "SELECT COUNT(*) FROM audit_logs " + where
+	countQuery = r.db.Rebind(countQuery)
+
+	var total int64
+	if err := r.db.QueryRowxContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	selectColumns := "id, organization_id, actor_id, actor_login, action, target_type, target_id, metadata, ip_address, created_at"
+	listQuery := "SELECT " + selectColumns + " FROM audit_logs " + where + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+	listQuery = r.db.Rebind(listQuery)
+	listArgs := append(append([]any{}, args...), perPage, offset)
+
+	rows, err := r.db.QueryxContext(ctx, listQuery, listArgs...)
 	if err != nil {
 		return nil, 0, err
 	}

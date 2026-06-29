@@ -2,13 +2,18 @@ package repository_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	domainrepo "github.com/open-git/backend/internal/domain/repository"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/open-git/backend/internal/domain/entity"
+	domainrepo "github.com/open-git/backend/internal/domain/repository"
+	"github.com/open-git/backend/internal/infrastructure/database"
 	"github.com/open-git/backend/internal/infrastructure/repository"
 )
 
@@ -106,6 +111,124 @@ func TestMockAuditLogRepository_ListContract(t *testing.T) {
 				t.Fatalf("offset: got %d, want %d", mock.offset, tt.wantOffset)
 			}
 		})
+	}
+}
+
+func newAuditLogTestDB(t *testing.T) *sqlx.DB {
+	t.Helper()
+
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := database.RunMigrations(db, "sqlite", "../../../migrations"); err != nil {
+		_ = db.Close()
+		t.Fatalf("run migrations: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return sqlx.NewDb(db, "sqlite3")
+}
+
+func TestListByOrg_FiltersAndPaginates(t *testing.T) {
+	db := newAuditLogTestDB(t)
+	var repo domainrepo.AuditLogRepository = repository.NewAuditLogRepository(db)
+
+	orgA := createTestOrganization(t, db, "audit-org-a")
+	orgB := createTestOrganization(t, db, "audit-org-b")
+	actorA := createTestUser(t, db, "audit-actor-a")
+	actorB := createTestUser(t, db, "audit-actor-b")
+
+	orgAActions := []string{
+		"settings.update",
+		"settings.update",
+		"settings.update",
+		"member.invite",
+		"member.invite",
+	}
+	for i, action := range orgAActions {
+		log := &entity.AuditLog{
+			OrganizationID: orgA,
+			ActorID:        actorA,
+			ActorLogin:     "audit-actor-a",
+			Action:         action,
+			TargetType:     "organization",
+			TargetID:       uuid.New().String(),
+			CreatedAt:      time.Date(2025, 6, 1, 10, i, 0, 0, time.UTC),
+		}
+		if err := repo.Create(context.Background(), log); err != nil {
+			t.Fatalf("Create orgA log %d: %v", i, err)
+		}
+	}
+
+	for i := 0; i < 3; i++ {
+		log := &entity.AuditLog{
+			OrganizationID: orgB,
+			ActorID:        actorB,
+			ActorLogin:     "audit-actor-b",
+			Action:         "repo.delete",
+			TargetType:     "repository",
+			TargetID:       uuid.New().String(),
+			CreatedAt:      time.Date(2025, 6, 2, 10, i, 0, 0, time.UTC),
+		}
+		if err := repo.Create(context.Background(), log); err != nil {
+			t.Fatalf("Create orgB log %d: %v", i, err)
+		}
+	}
+
+	ctx := context.Background()
+
+	logs, total, err := repo.ListByOrg(ctx, domainrepo.AuditLogListOpts{
+		OrgID:   orgA,
+		Page:    1,
+		PerPage: 100,
+	})
+	if err != nil {
+		t.Fatalf("ListByOrg orgA: %v", err)
+	}
+	if total != 5 {
+		t.Fatalf("expected total 5 for orgA, got %d", total)
+	}
+	if len(logs) != 5 {
+		t.Fatalf("expected 5 logs for orgA, got %d", len(logs))
+	}
+	for _, log := range logs {
+		if log.OrganizationID != orgA {
+			t.Fatalf("expected orgA log, got org %s", log.OrganizationID)
+		}
+	}
+
+	logs, total, err = repo.ListByOrg(ctx, domainrepo.AuditLogListOpts{
+		OrgID:   orgA,
+		Page:    1,
+		PerPage: 2,
+	})
+	if err != nil {
+		t.Fatalf("ListByOrg paginated: %v", err)
+	}
+	if total != 5 {
+		t.Fatalf("expected total 5 with pagination, got %d", total)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 logs per page, got %d", len(logs))
+	}
+
+	logs, total, err = repo.ListByOrg(ctx, domainrepo.AuditLogListOpts{
+		OrgID:  orgA,
+		Action: "settings.update",
+	})
+	if err != nil {
+		t.Fatalf("ListByOrg action filter: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("expected total 3 for settings.update, got %d", total)
+	}
+	if len(logs) != 3 {
+		t.Fatalf("expected 3 logs for settings.update, got %d", len(logs))
+	}
+	for _, log := range logs {
+		if log.Action != "settings.update" {
+			t.Fatalf("expected action settings.update, got %q", log.Action)
+		}
 	}
 }
 
