@@ -50,7 +50,9 @@ import (
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
+	labelusecase "github.com/open-git/backend/internal/usecase/label"
 	mcpusecase "github.com/open-git/backend/internal/usecase/mcp"
+	milestoneusecase "github.com/open-git/backend/internal/usecase/milestone"
 	orgUC "github.com/open-git/backend/internal/usecase/org"
 	prusecase "github.com/open-git/backend/internal/usecase/pr"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
@@ -440,6 +442,30 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		})
 	}
 
+	listLabelsUC := labelusecase.NewListLabelsUsecase(labelRepo)
+	createLabelUC := labelusecase.NewCreateLabelUsecase(labelRepo)
+	updateLabelUC := labelusecase.NewUpdateLabelUsecase(labelRepo)
+	deleteLabelUC := labelusecase.NewDeleteLabelUsecase(labelRepo, issueAuditRepo)
+	labelHandler := handler.NewLabelHandler(
+		listLabelsUC,
+		createLabelUC,
+		updateLabelUC,
+		deleteLabelUC,
+		resolveRepo,
+	)
+
+	listMilestonesUC := milestoneusecase.NewListMilestonesUsecase(milestoneRepo)
+	createMilestoneUC := milestoneusecase.NewCreateMilestoneUsecase(milestoneRepo, issueAuditRepo)
+	updateMilestoneUC := milestoneusecase.NewUpdateMilestoneUsecase(milestoneRepo)
+	deleteMilestoneUC := milestoneusecase.NewDeleteMilestoneUsecase(milestoneRepo, issueAuditRepo)
+	milestoneHandler := handler.NewMilestoneHandler(
+		listMilestonesUC,
+		createMilestoneUC,
+		updateMilestoneUC,
+		deleteMilestoneUC,
+		resolveRepo,
+	)
+
 	createIssueUC := issueusecase.NewCreateIssueUsecase(issueRepo, issueAuditRepo, txManager)
 	updateIssueUC := issueusecase.NewUpdateIssueUsecase(issueRepo, labelRepo, milestoneRepo, issueAuditRepo)
 	createCommentUC := issueusecase.NewCreateCommentUsecase(issueRepo, commentRepo, issueAuditRepo)
@@ -661,6 +687,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	collaboratorHandler.RegisterRoutes(api, authMiddleware)
 	contentHandler.RegisterRoutes(api)
 	issueHandler.RegisterRoutes(api, authMiddleware)
+	labelHandler.RegisterRoutes(api, authMiddleware)
+	milestoneHandler.RegisterRoutes(api, authMiddleware)
 	pullRequestHandler.RegisterRoutes(api, authMiddleware)
 	oauthHandler.RegisterRoutes(api, authMiddleware)
 	api.GET("/rate_limit", rateLimitHandler.Get)
@@ -685,6 +713,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	collaboratorHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
 	issueHandler.RegisterRoutes(v3, authMiddleware)
+	labelHandler.RegisterRoutes(v3, authMiddleware)
+	milestoneHandler.RegisterRoutes(v3, authMiddleware)
 	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
 	branchProtectionHandler.RegisterRoutes(v3, authMiddleware)
 	webhookHandler.RegisterRoutes(v3, authMiddleware)
