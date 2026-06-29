@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/open-git/backend/internal/logger"
 )
 
 var appLogger = slog.New(newJSONHandler(os.Stdout, slog.LevelInfo))
@@ -68,6 +70,9 @@ func RequestLogger() echo.MiddlewareFunc {
 				"path", c.Request().URL.Path,
 				"status", status,
 				"latency_ms", time.Since(start).Milliseconds(),
+			}
+			if Log().Enabled(c.Request().Context(), slog.LevelDebug) {
+				attrs = append(attrs, "request_headers", logger.MaskHeaders(c.Request().Header))
 			}
 
 			switch {

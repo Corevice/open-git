@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -10,46 +9,68 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain/entity"
-	"github.com/open-git/backend/internal/infrastructure/storage"
 	"github.com/open-git/backend/internal/middleware"
+	artifactusecase "github.com/open-git/backend/internal/usecase/artifact"
 )
 
-const artifactDownloadExpiry = 5 * time.Minute
-
-type IArtifactRepository interface {
-	ListByRunID(ctx context.Context, orgID, repoID, runID uuid.UUID) ([]*entity.Artifact, error)
-	GetByID(ctx context.Context, orgID, artifactID uuid.UUID) (*entity.Artifact, error)
-}
-
 type ArtifactHandler struct {
-	artifactRepo IArtifactRepository
-	storage      *storage.MinIOStorage
-	resolveRepo  func(c echo.Context, owner, repo string) (*entity.Repository, error)
+	createArtifactUC   *artifactusecase.CreateArtifactUsecase
+	completeArtifactUC *artifactusecase.CompleteArtifactUsecase
+	listArtifactsUC    *artifactusecase.ListArtifactsUsecase
+	getDownloadURLUC   *artifactusecase.GetArtifactDownloadURLUsecase
+	deleteArtifactUC   *artifactusecase.DeleteArtifactUsecase
+	resolveRepo        func(c echo.Context, owner, repo string) (*entity.Repository, error)
 }
 
 func NewArtifactHandler(
-	artifactRepo IArtifactRepository,
-	storage *storage.MinIOStorage,
+	createArtifactUC *artifactusecase.CreateArtifactUsecase,
+	completeArtifactUC *artifactusecase.CompleteArtifactUsecase,
+	listArtifactsUC *artifactusecase.ListArtifactsUsecase,
+	getDownloadURLUC *artifactusecase.GetArtifactDownloadURLUsecase,
+	deleteArtifactUC *artifactusecase.DeleteArtifactUsecase,
 	resolveRepo func(c echo.Context, owner, repo string) (*entity.Repository, error),
 ) *ArtifactHandler {
 	return &ArtifactHandler{
-		artifactRepo: artifactRepo,
-		storage:      storage,
-		resolveRepo:  resolveRepo,
+		createArtifactUC:   createArtifactUC,
+		completeArtifactUC: completeArtifactUC,
+		listArtifactsUC:    listArtifactsUC,
+		getDownloadURLUC:   getDownloadURLUC,
+		deleteArtifactUC:   deleteArtifactUC,
+		resolveRepo:        resolveRepo,
 	}
 }
 
 func (h *ArtifactHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	readScope := middleware.RequireScope("read")
+	writeScope := middleware.RequireScope("write")
+
+	g.POST("/repos/:owner/:repo/actions/runs/:run_id/artifacts", h.CreateArtifact, auth, writeScope)
+	g.PATCH("/repos/:owner/:repo/actions/runs/:run_id/artifacts/:artifact_id", h.CompleteArtifact, auth, writeScope)
 	g.GET("/repos/:owner/:repo/actions/runs/:run_id/artifacts", h.ListArtifacts, auth, readScope)
 	g.GET("/repos/:owner/:repo/actions/artifacts/:artifact_id/zip", h.DownloadArtifact, auth, readScope)
+	g.DELETE("/repos/:owner/:repo/actions/artifacts/:artifact_id", h.DeleteArtifact, auth, writeScope)
+}
+
+type createArtifactRequest struct {
+	Name          string `json:"name"`
+	RetentionDays int    `json:"retention_days"`
+}
+
+type createArtifactResponse struct {
+	ID        string `json:"id"`
+	UploadURL string `json:"upload_url"`
+	Name      string `json:"name"`
+}
+
+type completeArtifactRequest struct {
+	Status string `json:"status"`
+	Size   int64  `json:"size"`
 }
 
 type listArtifactsResponse struct {
-	TotalCount int                 `json:"total_count"`
-	Artifacts  []artifactResponse  `json:"artifacts"`
+	TotalCount int                `json:"total_count"`
+	Artifacts  []artifactResponse `json:"artifacts"`
 }
 
 type artifactResponse struct {
@@ -58,6 +79,65 @@ type artifactResponse struct {
 	SizeInBytes int64  `json:"size_in_bytes"`
 	ExpiresAt   string `json:"expires_at"`
 	CreatedAt   string `json:"created_at"`
+	Expired     bool   `json:"expired"`
+}
+
+func (h *ArtifactHandler) CreateArtifact(c echo.Context) error {
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+
+	runID, err := uuid.Parse(c.Param("run_id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid run_id"})
+	}
+
+	var req createArtifactRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid request body"})
+	}
+
+	retentionDays := req.RetentionDays
+	if retentionDays == 0 {
+		retentionDays = 90
+	}
+
+	artifact, uploadURL, err := h.createArtifactUC.Execute(
+		c.Request().Context(),
+		repo.OrganizationID,
+		repo.ID,
+		runID,
+		req.Name,
+		retentionDays,
+	)
+	if err != nil {
+		return err
+	}
+
+	return c.JSON(http.StatusCreated, createArtifactResponse{
+		ID:        artifact.ID.String(),
+		UploadURL: uploadURL,
+		Name:      artifact.Name,
+	})
+}
+
+func (h *ArtifactHandler) CompleteArtifact(c echo.Context) error {
+	artifactID, err := parseArtifactID(c.Param("artifact_id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid artifact_id"})
+	}
+
+	var req completeArtifactRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid request body"})
+	}
+
+	if err := h.completeArtifactUC.Execute(c.Request().Context(), artifactID, req.Size); err != nil {
+		return err
+	}
+
+	return c.NoContent(http.StatusOK)
 }
 
 func (h *ArtifactHandler) ListArtifacts(c echo.Context) error {
@@ -68,10 +148,10 @@ func (h *ArtifactHandler) ListArtifacts(c echo.Context) error {
 
 	runID, err := uuid.Parse(c.Param("run_id"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid run_id")
+		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid run_id"})
 	}
 
-	artifacts, err := h.artifactRepo.ListByRunID(c.Request().Context(), repo.OrganizationID, repo.ID, runID)
+	artifacts, err := h.listArtifactsUC.Execute(c.Request().Context(), runID, repo.OrganizationID)
 	if err != nil {
 		return err
 	}
@@ -88,37 +168,62 @@ func (h *ArtifactHandler) ListArtifacts(c echo.Context) error {
 }
 
 func (h *ArtifactHandler) DownloadArtifact(c echo.Context) error {
-	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	orgID, err := h.resolveOrgID(c)
 	if err != nil {
 		return err
 	}
 
 	artifactID, err := parseArtifactID(c.Param("artifact_id"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid artifact_id")
+		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid artifact_id"})
 	}
 
-	artifact, err := h.artifactRepo.GetByID(c.Request().Context(), repo.OrganizationID, artifactID)
+	signedURL, err := h.getDownloadURLUC.Execute(c.Request().Context(), artifactID, orgID)
 	if err != nil {
-		if errors.Is(err, apperror.ErrNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		if errors.Is(err, artifactusecase.ErrArtifactExpired) {
+			return echo.NewHTTPError(http.StatusGone, map[string]string{"message": "artifact expired"})
 		}
 		return err
 	}
-	if artifact == nil {
-		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
-	}
 
-	if h.storage == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "storage unavailable"})
-	}
+	return c.Redirect(http.StatusFound, signedURL)
+}
 
-	signedURL, err := h.storage.PresignedGetURL(c.Request().Context(), artifact.StorageKey, artifactDownloadExpiry)
+func (h *ArtifactHandler) DeleteArtifact(c echo.Context) error {
+	orgID, err := h.resolveOrgID(c)
 	if err != nil {
 		return err
 	}
 
-	return c.Redirect(http.StatusFound, signedURL.String())
+	artifactID, err := parseArtifactID(c.Param("artifact_id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid artifact_id"})
+	}
+
+	if err := h.deleteArtifactUC.Execute(c.Request().Context(), artifactID, orgID); err != nil {
+		return err
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *ArtifactHandler) resolveOrgID(c echo.Context) (uuid.UUID, error) {
+	if raw, ok := c.Get("org_id").(uuid.UUID); ok && raw != uuid.Nil {
+		return raw, nil
+	}
+	if raw, ok := c.Get("org_id").(string); ok && raw != "" {
+		orgID, err := uuid.Parse(raw)
+		if err != nil {
+			return uuid.Nil, echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid org_id"})
+		}
+		return orgID, nil
+	}
+
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return repo.OrganizationID, nil
 }
 
 func parseArtifactID(raw string) (uuid.UUID, error) {
@@ -133,11 +238,13 @@ func parseArtifactID(raw string) (uuid.UUID, error) {
 }
 
 func toArtifactResponse(artifact *entity.Artifact) artifactResponse {
+	now := time.Now().UTC()
 	return artifactResponse{
 		ID:          middleware.UUIDToInt64(artifact.ID),
 		Name:        artifact.Name,
 		SizeInBytes: artifact.SizeBytes,
 		ExpiresAt:   artifact.ExpiresAt.UTC().Format(time.RFC3339),
 		CreatedAt:   artifact.CreatedAt.UTC().Format(time.RFC3339),
+		Expired:     now.After(artifact.ExpiresAt),
 	}
 }
