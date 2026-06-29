@@ -1,3 +1,14 @@
+{{- define "open-git.repositoriesMountPath" -}}
+{{- $path := .Values.persistence.repositories.mountPath | default "/data/repositories" -}}
+{{- if or (not (hasPrefix "/" $path)) (contains ".." $path) (contains "\n" $path) -}}
+{{- fail (printf "invalid persistence.repositories.mountPath %q: must be an absolute path without .. or newlines" $path) -}}
+{{- end -}}
+{{- $path -}}
+{{- end -}}
+{{- $appEnv := .Values.config.appEnv | default "production" -}}
+{{- if regexMatch "[\r\n]" $appEnv }}{{- fail "config.appEnv must not contain newlines" -}}{{- end -}}
+{{- $logLevel := .Values.config.logLevel | default "info" -}}
+{{- if regexMatch "[\r\n]" $logLevel }}{{- fail "config.logLevel must not contain newlines" -}}{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,14 +18,6 @@ metadata:
     {{- include "open-git.labels" . | nindent 4 }}
 data:
   # Non-secret environment configuration only. Do not store credentials or API keys here; use Secrets instead.
-  {{- $appEnv := .Values.config.appEnv | default "production" -}}
-  {{- if regexMatch "[\r\n]" $appEnv -}}
-  {{- fail "config.appEnv must not contain newlines" -}}
-  {{- end -}}
   APP_ENV: {{ $appEnv | quote }}
   GIT_REPOS_PATH: {{ include "open-git.repositoriesMountPath" . | quote }}
-  {{- $logLevel := .Values.config.logLevel | default "info" -}}
-  {{- if regexMatch "[\r\n]" $logLevel -}}
-  {{- fail "config.logLevel must not contain newlines" -}}
-  {{- end -}}
   LOG_LEVEL: {{ $logLevel | quote }}

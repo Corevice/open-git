@@ -1,4 +1,5 @@
 import Link from "next/link";
+import IssueFilters from "@/components/issue/IssueFilters";
 import IssueList from "@/components/issue/IssueList";
 
 type Props = {
@@ -7,13 +8,15 @@ type Props = {
     state?: string;
     labels?: string;
     milestone?: string;
+    assignee?: string;
     page?: string;
   }>;
 };
 
 export default async function IssuesPage({ params, searchParams }: Props) {
   const { owner, repo } = await params;
-  const { state, labels, milestone, page } = await searchParams;
+  const { state, labels, milestone, assignee, page } = await searchParams;
+  const basePath = `/${owner}/${repo}/issues`;
 
   return (
     <div className="min-h-screen bg-[#f6f8fa] text-[#1f2328]">
@@ -32,12 +35,23 @@ export default async function IssuesPage({ params, searchParams }: Props) {
           </Link>
         </div>
 
+        <IssueFilters
+          owner={owner}
+          repo={repo}
+          state={state ?? "open"}
+          labels={labels}
+          milestone={milestone}
+          assignee={assignee}
+          basePath={basePath}
+        />
+
         <IssueList
           owner={owner}
           repo={repo}
           state={state ?? "open"}
           labels={labels}
           milestone={milestone}
+          assignee={assignee}
           page={page ?? "1"}
         />
       </div>

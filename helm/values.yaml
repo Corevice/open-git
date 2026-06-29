@@ -2,6 +2,10 @@ global:
   databaseType: internal
   storageClass: ""
 
+config:
+  appEnv: production
+  logLevel: info
+
 replicaCount: 1
 
 image:

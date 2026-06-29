@@ -2,80 +2,43 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { z } from "zod";
+import { useEffect, useMemo, useState } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { API_TOKEN_KEY, ApiClient, ApiError } from "@/lib/api";
+import { ApiClient } from "@/lib/api";
 import type { OAuthApp } from "@/lib/api-types";
 import { useAuth } from "@/lib/auth";
+import { env } from "@/lib/env";
 
-const oauthAppFormSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(1, "Name is required")
-    .max(100, "Name must be at most 100 characters"),
-  url: z.union([
-    z.literal(""),
-    z.string().url("Enter a valid homepage URL"),
-  ]),
-  callback_url: z.string().url("Enter a valid callback URL"),
-});
-
-type FormErrors = Partial<Record<"name" | "url" | "callback_url", string>>;
-
-function formatDate(value: string): string {
+function formatDate(value: string | null): string {
+  if (!value) {
+    return "—";
+  }
   return new Date(value).toLocaleString();
 }
 
-function createApiClient(): ApiClient {
-  const baseURL =
-    process.env.NEXT_PUBLIC_API_BASE_URL ??
-    process.env.NEXT_PUBLIC_API_URL ??
-    "http://localhost:8080";
-  const client = new ApiClient(baseURL);
-  if (typeof window !== "undefined") {
-    const storedToken = localStorage.getItem(API_TOKEN_KEY);
-    if (storedToken) {
-      client.setToken(storedToken);
-    }
-  }
-  return client;
-}
-
-export default function OAuthAppsSettingsPage() {
-  const { isAuthenticated } = useAuth();
+export default function OAuthAppsListPage() {
+  const { token } = useAuth();
   const router = useRouter();
-  const api = useMemo(() => createApiClient(), []);
+  const apiClient = useMemo(
+    () => new ApiClient(env.NEXT_PUBLIC_API_BASE_URL, router),
+    [router],
+  );
 
   const [apps, setApps] = useState<OAuthApp[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [newAppSecret, setNewAppSecret] = useState<string | null>(null);
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [formErrors, setFormErrors] = useState<FormErrors>({});
-
-  const [name, setName] = useState("");
-  const [url, setUrl] = useState("");
-  const [callbackUrl, setCallbackUrl] = useState("");
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.push("/login");
+    if (token) {
+      apiClient.setToken(token);
     }
-  }, [isAuthenticated, router]);
+  }, [apiClient, token]);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!token) {
+      setLoading(false);
       return;
     }
 
@@ -85,7 +48,7 @@ export default function OAuthAppsSettingsPage() {
       setLoading(true);
       setError(null);
       try {
-        const list = await api.oauthApps.list();
+        const list = await apiClient.oauthApps.list();
         if (!cancelled) {
           setApps(list);
         }
@@ -107,253 +70,46 @@ export default function OAuthAppsSettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [api, isAuthenticated]);
+  }, [apiClient, token]);
 
-  const handleCreate = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (submitting) {
+  const handleDelete = async (app: OAuthApp) => {
+    if (
+      !window.confirm(
+        `Delete OAuth app "${app.name}"? This will permanently revoke all associated access tokens and cannot be undone.`,
+      )
+    ) {
       return;
     }
 
-    const parsed = oauthAppFormSchema.safeParse({
-      name,
-      url,
-      callback_url: callbackUrl,
-    });
-
-    if (!parsed.success) {
-      const nextErrors: FormErrors = {};
-      for (const issue of parsed.error.issues) {
-        const field = issue.path[0];
-        if (
-          field === "name" ||
-          field === "url" ||
-          field === "callback_url"
-        ) {
-          nextErrors[field] = issue.message;
-        }
-      }
-      setFormErrors(nextErrors);
-      return;
-    }
-
-    setFormErrors({});
-    setSubmitting(true);
-    setError(null);
-    setCopied(false);
-
-    try {
-      const result = await api.oauthApps.create({
-        name: parsed.data.name,
-        homepage_url: parsed.data.url,
-        callback_urls: [parsed.data.callback_url],
-        owner_type: "user",
-      });
-
-      setNewAppSecret(result.client_secret);
-      setApps((prev) => [result, ...prev]);
-      setName("");
-      setUrl("");
-      setCallbackUrl("");
-      setShowForm(false);
-    } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Failed to register OAuth app.",
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleRegenerateSecret = async (clientId: string) => {
-    setRegeneratingId(clientId);
-    setError(null);
-    setCopied(false);
-
-    try {
-      const result = await api.oauthApps.regenerateSecret(clientId);
-      setNewAppSecret(result.client_secret);
-    } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? err.message
-          : "Failed to regenerate client secret.",
-      );
-    } finally {
-      setRegeneratingId(null);
-    }
-  };
-
-  const handleDelete = async (clientId: string, appName: string) => {
-    const confirmed = window.confirm(
-      `Delete OAuth app "${appName}"? This action cannot be undone.`,
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setDeletingId(clientId);
+    setDeletingId(app.id);
     setError(null);
 
     try {
-      await api.oauthApps.delete(clientId);
-      setApps((prev) => prev.filter((app) => app.client_id !== clientId));
+      await apiClient.oauthApps.delete(app.id);
+      setApps((prev) => prev.filter((item) => item.id !== app.id));
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "Failed to delete OAuth app.",
+        err instanceof Error ? err.message : "Failed to delete OAuth app.",
       );
     } finally {
       setDeletingId(null);
     }
   };
 
-  const handleCopySecret = async () => {
-    if (!newAppSecret) {
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(newAppSecret);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  };
-
-  if (!isAuthenticated) {
-    return null;
-  }
-
   return (
     <main className="mx-auto max-w-[960px] px-6 py-8">
-      <div className="mb-6 border-b border-[#d1d9e0] pb-4">
-        <h1 className="mb-2 text-2xl font-semibold">OAuth Apps</h1>
-        <p className="text-sm text-[#59636e]">
-          Register OAuth applications and manage client credentials for
-          authorization code flows.
-        </p>
-      </div>
-
-      <nav className="mb-6 flex gap-4 text-sm">
-        <Link href="/settings/profile" className="text-[#0969da] hover:underline">
-          Profile
-        </Link>
-        <Link href="/settings/tokens" className="text-[#0969da] hover:underline">
-          Personal Access Tokens
-        </Link>
-        <span className="font-semibold text-[#0969da]">OAuth Apps</span>
-      </nav>
-
-      {newAppSecret !== null && (
-        <Alert className="mb-6 border-amber-300 bg-amber-50 text-amber-950">
-          <AlertTitle>Your client secret will only be shown once. Copy it now.</AlertTitle>
-          <AlertDescription>
-            <code className="mt-2 block break-all rounded bg-white px-3 py-2 font-mono text-sm text-[#24292f]">
-              {newAppSecret}
-            </code>
-            <div className="mt-3 flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleCopySecret}
-              >
-                {copied ? "Copied" : "Copy"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setNewAppSecret(null);
-                  setCopied(false);
-                }}
-              >
-                Dismiss
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {!showForm ? (
-        <div className="mb-6">
-          <Button type="button" onClick={() => setShowForm(true)}>
-            Register new OAuth app
-          </Button>
+      <div className="mb-6 flex items-start justify-between border-b border-[#d1d9e0] pb-4">
+        <div>
+          <h1 className="mb-2 text-2xl font-semibold">OAuth Apps</h1>
+          <p className="text-sm text-[#59636e]">
+            Manage OAuth applications you own. Client secrets are shown only at
+            creation or regeneration.
+          </p>
         </div>
-      ) : (
-        <form
-          onSubmit={handleCreate}
-          className="mb-6 rounded-lg border border-[#d1d9e0] bg-white p-5"
-        >
-          <h2 className="mb-4 text-lg font-semibold">Register OAuth app</h2>
-
-          <div className="mb-4">
-            <Label htmlFor="oauth-app-name">Application name</Label>
-            <Input
-              id="oauth-app-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="My OAuth App"
-              required
-              className="mt-1.5"
-            />
-            {formErrors.name && (
-              <p className="mt-1 text-sm text-[#cf222e]">{formErrors.name}</p>
-            )}
-          </div>
-
-          <div className="mb-4">
-            <Label htmlFor="oauth-app-url">Homepage URL</Label>
-            <Input
-              id="oauth-app-url"
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://example.com"
-              className="mt-1.5"
-            />
-            {formErrors.url && (
-              <p className="mt-1 text-sm text-[#cf222e]">{formErrors.url}</p>
-            )}
-          </div>
-
-          <div className="mb-4">
-            <Label htmlFor="oauth-app-callback">Authorization callback URL</Label>
-            <Input
-              id="oauth-app-callback"
-              type="url"
-              value={callbackUrl}
-              onChange={(e) => setCallbackUrl(e.target.value)}
-              placeholder="https://example.com/oauth/callback"
-              required
-              className="mt-1.5"
-            />
-            {formErrors.callback_url && (
-              <p className="mt-1 text-sm text-[#cf222e]">
-                {formErrors.callback_url}
-              </p>
-            )}
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setShowForm(false);
-                setFormErrors({});
-              }}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={submitting}>
-              {submitting ? "Registering…" : "Register application"}
-            </Button>
-          </div>
-        </form>
-      )}
+        <Button asChild>
+          <Link href="/settings/developers/oauth-apps/new">New OAuth App</Link>
+        </Button>
+      </div>
 
       {error && (
         <p className="mb-4 text-sm text-[#cf222e]" role="alert">
@@ -364,7 +120,7 @@ export default function OAuthAppsSettingsPage() {
       {loading ? (
         <p className="text-sm text-[#59636e]">Loading…</p>
       ) : apps.length === 0 ? (
-        <p className="text-sm text-[#59636e]">No OAuth apps registered yet.</p>
+        <p className="text-sm text-[#59636e]">No OAuth apps yet.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-[#d1d9e0]">
           <table className="min-w-full text-left text-sm">
@@ -378,34 +134,26 @@ export default function OAuthAppsSettingsPage() {
             </thead>
             <tbody>
               {apps.map((app) => (
-                <tr
-                  key={app.client_id}
-                  className="border-b border-[#d1d9e0] last:border-b-0"
-                >
+                <tr key={app.id} className="border-b border-[#d1d9e0] last:border-b-0">
                   <td className="px-4 py-3 font-medium">{app.name}</td>
                   <td className="px-4 py-3 font-mono text-xs">{app.client_id}</td>
                   <td className="px-4 py-3">{formatDate(app.created_at)}</td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleRegenerateSecret(app.client_id)}
-                        disabled={regeneratingId === app.client_id}
+                    <div className="flex items-center gap-3">
+                      <Link
+                        href={`/settings/developers/oauth-apps/${app.id}`}
+                        className="text-[#0969da] hover:underline"
                       >
-                        {regeneratingId === app.client_id
-                          ? "Regenerating…"
-                          : "Regenerate Secret"}
-                      </Button>
+                        Edit
+                      </Link>
                       <Button
                         type="button"
                         variant="destructive"
                         size="sm"
-                        onClick={() => handleDelete(app.client_id, app.name)}
-                        disabled={deletingId === app.client_id}
+                        onClick={() => handleDelete(app)}
+                        disabled={deletingId === app.id}
                       >
-                        {deletingId === app.client_id ? "Deleting…" : "Delete"}
+                        {deletingId === app.id ? "Deleting…" : "Delete"}
                       </Button>
                     </div>
                   </td>

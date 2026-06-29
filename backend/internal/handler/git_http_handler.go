@@ -14,6 +14,7 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
@@ -23,6 +24,7 @@ import (
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
+	obs "github.com/open-git/backend/observability"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
@@ -116,7 +118,7 @@ func (h *GitHTTPHandler) resolveRepo(c echo.Context) (*ResolvedGitRepository, er
 // InfoRefs handles GET /:owner/:repo.git/info/refs?service=
 func (h *GitHTTPHandler) InfoRefs(c echo.Context) error {
 	service := c.QueryParam("service")
-	if service != transport.UploadPackService.String() && service != transport.ReceivePackService.String() {
+	if service != transport.UploadPackServiceName && service != transport.ReceivePackServiceName {
 		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid service"})
 	}
 
@@ -124,7 +126,7 @@ func (h *GitHTTPHandler) InfoRefs(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if service == transport.ReceivePackService.String() {
+	if service == transport.ReceivePackServiceName {
 		userID, err := middleware.GetUserID(c)
 		if err != nil {
 			return err
@@ -137,7 +139,7 @@ func (h *GitHTTPHandler) InfoRefs(c echo.Context) error {
 	}
 
 	contentType := "application/x-git-upload-pack-advertisement"
-	if service == transport.ReceivePackService.String() {
+	if service == transport.ReceivePackServiceName {
 		contentType = "application/x-git-receive-pack-advertisement"
 	}
 	c.Response().Header().Set("Content-Type", contentType)
@@ -150,21 +152,20 @@ func advertiseRefs(w http.ResponseWriter, ctx context.Context, repoPath, service
 	if err != nil {
 		return err
 	}
-	root := filepath.Dir(abs)
-	name := filepath.Base(abs)
-
-	loader := server.NewFilesystemLoader(osfs.New(root))
+	// Use the repository's absolute path against a root filesystem so the
+	// loader resolves it regardless of the process working directory.
+	loader := server.NewFilesystemLoader(osfs.New("/"))
 	svr := server.NewServer(loader)
-	ep, err := transport.NewEndpoint(name)
+	ep, err := transport.NewEndpoint(abs)
 	if err != nil {
 		return fmt.Errorf("transport endpoint: %w", err)
 	}
 
 	var sess transport.Session
 	switch service {
-	case transport.UploadPackService.String():
+	case transport.UploadPackServiceName:
 		sess, err = svr.NewUploadPackSession(ep, nil)
-	case transport.ReceivePackService.String():
+	case transport.ReceivePackServiceName:
 		sess, err = svr.NewReceivePackSession(ep, nil)
 	default:
 		return fmt.Errorf("unsupported service: %s", service)
@@ -178,20 +179,34 @@ func advertiseRefs(w http.ResponseWriter, ctx context.Context, repoPath, service
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(w, refs)
-	return err
+
+	// Smart HTTP requires a service announcement header preceding the refs.
+	enc := pktline.NewEncoder(w)
+	if err := enc.EncodeString("# service=" + service + "\n"); err != nil {
+		return err
+	}
+	if err := enc.Flush(); err != nil {
+		return err
+	}
+	return refs.Encode(w)
 }
 
 // UploadPack handles POST /:owner/:repo.git/git-upload-pack
 func (h *GitHTTPHandler) UploadPack(c echo.Context) error {
+	result := "success"
+	defer func() { obs.RecordGitOperation("upload_pack", result) }()
+
 	repo, err := h.resolveRepo(c)
 	if err != nil {
+		result = "error"
 		return err
 	}
 	if err := h.ensureReadAccess(c, repo); err != nil {
+		result = "error"
 		return err
 	}
 	if err := infragit.ServeUploadPack(c.Response().Writer, c.Request(), repo.DiskPath); err != nil {
+		result = "error"
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": err.Error()})
 	}
 	return nil
@@ -199,26 +214,34 @@ func (h *GitHTTPHandler) UploadPack(c echo.Context) error {
 
 // ReceivePack handles POST /:owner/:repo.git/git-receive-pack
 func (h *GitHTTPHandler) ReceivePack(c echo.Context) error {
+	result := "success"
+	defer func() { obs.RecordGitOperation("receive_pack", result) }()
+
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
+		result = "error"
 		return err
 	}
 
 	repo, err := h.resolveRepo(c)
 	if err != nil {
+		result = "error"
 		return err
 	}
 
 	if err := h.ensureWriteAccess(c.Request().Context(), userID, repo); err != nil {
+		result = "error"
 		return err
 	}
 
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {
+		result = "error"
 		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid request body"})
 	}
 
 	if err := h.rejectProtectedForcePush(c.Request().Context(), repo, body); err != nil {
+		result = "error"
 		var httpErr *echo.HTTPError
 		if errors.As(err, &httpErr) {
 			return httpErr
@@ -228,6 +251,7 @@ func (h *GitHTTPHandler) ReceivePack(c echo.Context) error {
 
 	c.Request().Body = io.NopCloser(bytes.NewReader(body))
 	if err := infragit.ServeReceivePack(c.Response().Writer, c.Request(), repo.DiskPath); err != nil {
+		result = "error"
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": err.Error()})
 	}
 	return nil
@@ -320,7 +344,15 @@ func (h *GitHTTPHandler) rejectProtectedForcePush(ctx context.Context, repo *Res
 		if !protected {
 			continue
 		}
-		if isForcePush(grepo, cmd.Old, cmd.New) {
+		forced, ferr := isForcePush(grepo, cmd.Old, cmd.New)
+		if ferr != nil {
+			// We cannot prove this is a force-push (e.g. the packfile that
+			// carries the new commit hasn't been processed yet at this point of
+			// receive-pack, or the bare repo is shallow). Fall back to allowing
+			// the update so that legitimate non-force pushes are not rejected.
+			continue
+		}
+		if forced {
 			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{
 				"message": fmt.Sprintf("force-push is not allowed on protected branch: %s", branch),
 			})
@@ -337,13 +369,33 @@ func branchFromRef(ref string) (string, bool) {
 	return strings.TrimPrefix(ref, prefix), true
 }
 
-func isForcePush(repo *gogit.Repository, oldHash, newHash plumbing.Hash) bool {
+// isForcePush reports whether updating a ref from oldHash to newHash is a
+// non-fast-forward (force) push. The boolean is only meaningful when err is
+// nil; when err is non-nil the caller cannot decide and should not treat the
+// update as a force-push (e.g. the receive-pack packfile has not yet been
+// written to the bare repo, or the repo is a shallow clone missing ancestors).
+func isForcePush(repo *gogit.Repository, oldHash, newHash plumbing.Hash) (bool, error) {
 	if oldHash == plumbing.ZeroHash || newHash == plumbing.ZeroHash {
-		return false
+		return false, nil
 	}
-	merged, err := repo.MergeBase(oldHash, newHash)
+	oldCommit, err := repo.CommitObject(oldHash)
 	if err != nil {
-		return true
+		return false, fmt.Errorf("look up old commit %s: %w", oldHash, err)
 	}
-	return merged != oldHash
+	newCommit, err := repo.CommitObject(newHash)
+	if err != nil {
+		return false, fmt.Errorf("look up new commit %s: %w", newHash, err)
+	}
+	// A non-force (fast-forward) update requires the old commit to be an
+	// ancestor of the new one, i.e. the merge base equals the old commit.
+	bases, err := oldCommit.MergeBase(newCommit)
+	if err != nil {
+		return false, fmt.Errorf("compute merge base: %w", err)
+	}
+	for _, base := range bases {
+		if base.Hash == oldHash {
+			return false, nil
+		}
+	}
+	return true, nil
 }

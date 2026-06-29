@@ -14,6 +14,7 @@ CREATE TABLE reviews (
     submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+DROP INDEX IF EXISTS idx_reviews_organization_id;
 CREATE INDEX idx_reviews_organization_id ON reviews(organization_id);
 
 INSERT INTO reviews (id, organization_id, pull_request_id, reviewer_id, state, body, submitted_at)
@@ -38,6 +39,7 @@ CREATE TABLE pull_requests (
     UNIQUE(repository_id, number)
 );
 
+DROP INDEX IF EXISTS idx_pull_requests_organization_id;
 CREATE INDEX idx_pull_requests_organization_id ON pull_requests(organization_id);
 
 INSERT INTO pull_requests (
