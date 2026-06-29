@@ -18,14 +18,28 @@ import (
 )
 
 const (
-	userIDContextKey = "user_id"
-	scopesContextKey = "scopes"
+	userIDContextKey         = "user_id"
+	scopesContextKey         = "scopes"
+	organizationIDContextKey = "organization_id"
 )
+
+// Actor identifies the authenticated user and their active organization scope.
+type Actor struct {
+	UserID         uuid.UUID
+	OrganizationID uuid.UUID
+}
 
 type jwtClaims struct {
 	UserID int64 `json:"sub"`
 	jwt.StandardClaims
 }
+
+type githubAuthError struct {
+	Message          string `json:"message"`
+	DocumentationURL string `json:"documentation_url"`
+}
+
+const githubDocsURL = "https://docs.github.com/rest"
 
 type patTokenLookup interface {
 	FindByTokenHash(ctx context.Context, tokenHash string) (*domain.AccessToken, error)
@@ -36,7 +50,10 @@ func AuthMiddleware(tokens patTokenLookup) echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			raw, ok := bearerToken(c.Request().Header.Get("Authorization"))
 			if !ok {
-				return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "missing authorization token"})
+				return echo.NewHTTPError(http.StatusUnauthorized, githubAuthError{
+					Message:          "missing authorization token",
+					DocumentationURL: githubDocsURL,
+				})
 			}
 
 			if userID, scopes, ok := parseJWTAuth(raw); ok {
@@ -48,16 +65,28 @@ func AuthMiddleware(tokens patTokenLookup) echo.MiddlewareFunc {
 			tokenHash := hashToken(raw)
 			record, err := tokens.FindByTokenHash(c.Request().Context(), tokenHash)
 			if err != nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "invalid authorization token"})
+				return echo.NewHTTPError(http.StatusUnauthorized, githubAuthError{
+					Message:          "invalid authorization token",
+					DocumentationURL: githubDocsURL,
+				})
 			}
 			if record == nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "invalid authorization token"})
+				return echo.NewHTTPError(http.StatusUnauthorized, githubAuthError{
+					Message:          "invalid authorization token",
+					DocumentationURL: githubDocsURL,
+				})
 			}
 			if record.RevokedAt != nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "token has been revoked"})
+				return echo.NewHTTPError(http.StatusUnauthorized, githubAuthError{
+					Message:          "token has been revoked",
+					DocumentationURL: githubDocsURL,
+				})
 			}
 			if record.ExpiresAt != nil && !record.ExpiresAt.After(time.Now().UTC()) {
-				return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "token has expired"})
+				return echo.NewHTTPError(http.StatusUnauthorized, githubAuthError{
+					Message:          "token has expired",
+					DocumentationURL: githubDocsURL,
+				})
 			}
 
 			c.Set(userIDContextKey, record.UserID)
@@ -152,19 +181,40 @@ func SetAuthContext(c echo.Context, userID int64, scopes []string) {
 	c.Set(scopesContextKey, scopes)
 }
 
+func SetActorContext(c echo.Context, userID int64, organizationID uuid.UUID, scopes []string) {
+	c.Set(userIDContextKey, userID)
+	c.Set(organizationIDContextKey, organizationID)
+	c.Set(scopesContextKey, scopes)
+}
+
+func GetActor(c echo.Context) (Actor, error) {
+	userID, err := GetUserID(c)
+	if err != nil {
+		return Actor{}, err
+	}
+
+	actor := Actor{UserID: Int64ToUUID(userID)}
+	if v := c.Get(organizationIDContextKey); v != nil {
+		if organizationID, ok := v.(uuid.UUID); ok {
+			actor.OrganizationID = organizationID
+		}
+	}
+	return actor, nil
+}
+
 func bearerToken(header string) (string, bool) {
-	if header == "" {
+	lower := strings.ToLower(header)
+	var raw string
+	switch {
+	case strings.HasPrefix(lower, "bearer "):
+		raw = header[7:]
+	case strings.HasPrefix(lower, "token "):
+		raw = header[6:]
+	default:
 		return "", false
 	}
-	const prefix = "Bearer "
-	if !strings.HasPrefix(header, prefix) {
-		return "", false
-	}
-	token := strings.TrimSpace(header[len(prefix):])
-	if token == "" {
-		return "", false
-	}
-	return token, true
+	raw = strings.TrimSpace(raw)
+	return raw, raw != ""
 }
 
 func hashToken(raw string) string {
