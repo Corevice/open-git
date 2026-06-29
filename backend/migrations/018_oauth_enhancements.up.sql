@@ -1,5 +1,5 @@
--- Migration 017_oauth_enhancements (task spec: 015_oauth_enhancements).
--- Numbering: 015=security_tables, 016=system_settings+perf_tables; golang-migrate orders by numeric prefix.
+-- Migration 018_oauth_enhancements (task spec: 015_oauth_enhancements).
+-- Numbering: 015=security_tables, 016=system_settings+perf_tables, 017=repository_collaborators.
 -- oauth_app deletion cascades to oauth_grants and linked access_tokens (consistent revocation lifecycle).
 -- token_prefix/token_last_eight store display metadata only; full token hash remains in token_hash.
 
