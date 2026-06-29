@@ -232,10 +232,10 @@ func (h *RepositoryHandler) CreateForOrg(c echo.Context) error {
 	})
 	if err != nil {
 		if errors.Is(err, repoUC.ErrDuplicateName) {
-			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "Repository name already exists"})
+			return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", []GitHubFieldError{{Resource: "Repository", Field: "name", Code: "already_exists"}})
 		}
 		if errors.Is(err, repoUC.ErrInvalidName) {
-			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": err.Error()})
+			return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", []GitHubFieldError{{Resource: "Repository", Field: "name", Code: "invalid"}})
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to create repository"})
 	}
@@ -271,10 +271,10 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 	})
 	if err != nil {
 		if errors.Is(err, repoUC.ErrDuplicateName) {
-			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "Repository name already exists"})
+			return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", []GitHubFieldError{{Resource: "Repository", Field: "name", Code: "already_exists"}})
 		}
 		if errors.Is(err, repoUC.ErrInvalidName) {
-			return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": err.Error()})
+			return RespondGitHubError(c, http.StatusUnprocessableEntity, "Validation Failed", []GitHubFieldError{{Resource: "Repository", Field: "name", Code: "invalid"}})
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to create repository"})
 	}
