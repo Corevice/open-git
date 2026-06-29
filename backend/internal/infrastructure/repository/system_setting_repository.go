@@ -26,10 +26,10 @@ func NewSystemSettingRepository(db *sqlx.DB) domainrepo.SystemSettingRepository 
 }
 
 type systemSettingRow struct {
-	Key       string    `db:"key"`
-	Value     []byte    `db:"value"`
-	UpdatedBy string    `db:"updated_by"`
-	UpdatedAt time.Time `db:"updated_at"`
+	Key       string   `db:"key"`
+	Value     []byte   `db:"value"`
+	UpdatedBy string   `db:"updated_by"`
+	UpdatedAt nullTime `db:"updated_at"`
 }
 
 func (r *sqlxSystemSettingRepository) Get(ctx context.Context, key string) (*entity.SystemSetting, error) {
@@ -77,7 +77,7 @@ func (r *sqlxSystemSettingRepository) Get(ctx context.Context, key string) (*ent
 		Key:       row.Key,
 		Value:     value,
 		UpdatedBy: updatedBy,
-		UpdatedAt: row.UpdatedAt,
+		UpdatedAt: row.UpdatedAt.Time,
 	}, nil
 }
 
