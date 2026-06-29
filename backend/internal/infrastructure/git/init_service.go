@@ -49,20 +49,13 @@ func AutoInitRepository(bareRepoPath string, opts AutoInitOpts) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	repo, err := gogit.PlainInit(tmpDir, false)
+	repo, err := gogit.PlainInitWithOptions(tmpDir, &gogit.PlainInitOptions{
+		InitOptions: gogit.InitOptions{
+			DefaultBranch: plumbing.NewBranchReferenceName("main"),
+		},
+	})
 	if err != nil {
 		return fmt.Errorf("init working repo: %w", err)
-	}
-
-	wt, err := repo.Worktree()
-	if err != nil {
-		return fmt.Errorf("open worktree: %w", err)
-	}
-	if err := wt.Checkout(&gogit.CheckoutOptions{
-		Branch: plumbing.NewBranchReferenceName("main"),
-		Create: true,
-	}); err != nil {
-		return fmt.Errorf("create main branch: %w", err)
 	}
 
 	wroteFiles := false
@@ -83,6 +76,11 @@ func AutoInitRepository(bareRepoPath string, opts AutoInitOpts) error {
 			return fmt.Errorf("write LICENSE: %w", err)
 		}
 		wroteFiles = true
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("open worktree: %w", err)
 	}
 
 	if wroteFiles {

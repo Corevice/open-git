@@ -20,7 +20,6 @@ const (
 	conclusionSuccess   = "success"
 	conclusionFailure   = "failure"
 	conclusionCancelled = "cancelled"
-	conclusionTimedOut  = "timed_out"
 )
 
 type schedulableJob struct {
@@ -87,6 +86,7 @@ func (a *domainJobRepoAdapter) ListByRunID(ctx context.Context, orgID, runID str
 	if err != nil {
 		return nil, fmt.Errorf("parse run id: %w", err)
 	}
+
 	jobs, err := a.repo.ListByRunID(ctx, orgUUID, runUUID)
 	if err != nil {
 		return nil, err

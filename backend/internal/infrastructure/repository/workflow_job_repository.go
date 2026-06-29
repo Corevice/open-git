@@ -26,6 +26,30 @@ func NewWorkflowJobRepository(db *sqlx.DB) domainrepo.IWorkflowJobRepository {
 }
 
 func (r *sqlxWorkflowJobRepository) Create(ctx context.Context, job *entity.WorkflowJob) error {
+	return r.createJob(ctx, r.db, job)
+}
+
+func (r *sqlxWorkflowJobRepository) CreateBatch(ctx context.Context, jobs []*entity.WorkflowJob) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return dbErrors.MapDBError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, job := range jobs {
+		if err := r.createJob(ctx, tx, job); err != nil {
+			return err
+		}
+	}
+
+	return dbErrors.MapDBError(tx.Commit())
+}
+
+func (r *sqlxWorkflowJobRepository) createJob(ctx context.Context, exec sqlx.ExtContext, job *entity.WorkflowJob) error {
 	if job.ID == uuid.Nil {
 		job.ID = uuid.New()
 	}
@@ -54,7 +78,7 @@ func (r *sqlxWorkflowJobRepository) Create(ctx context.Context, job *entity.Work
 		)
 	`
 
-	_, err = r.db.NamedExecContext(ctx, query, map[string]any{
+	_, err = sqlx.NamedExecContext(ctx, exec, query, map[string]any{
 		"id":                   job.ID,
 		"workflow_run_id":      runID,
 		"organization_id":      job.OrganizationID,
@@ -185,6 +209,25 @@ func (r *sqlxWorkflowJobRepository) Cancel(ctx context.Context, jobID uuid.UUID)
 	return nil
 }
 
+func (r *sqlxWorkflowJobRepository) ListByRunID(ctx context.Context, orgID, runID uuid.UUID) ([]*entity.WorkflowJob, error) {
+	const query = `
+		SELECT id, workflow_run_id, organization_id, repository_id, name, status, conclusion,
+			assigned_runner_id, runs_on, acquire_lock_version, started_at, finished_at,
+			timeout_minutes, created_at
+		FROM workflow_jobs
+		WHERE organization_id = ? AND workflow_run_id = ?
+		ORDER BY created_at ASC
+	`
+	q := r.db.Rebind(query)
+	rows, err := r.db.QueryxContext(ctx, q, orgID, runID)
+	if err != nil {
+		return nil, dbErrors.MapDBError(err)
+	}
+	defer rows.Close()
+
+	return scanWorkflowJobRows(rows)
+}
+
 func (r *sqlxWorkflowJobRepository) ListQueued(ctx context.Context, orgID uuid.UUID) ([]*entity.WorkflowJob, error) {
 	const query = `
 		SELECT id, workflow_run_id, organization_id, repository_id, name, status, conclusion,
@@ -196,25 +239,6 @@ func (r *sqlxWorkflowJobRepository) ListQueued(ctx context.Context, orgID uuid.U
 	`
 	q := r.db.Rebind(query)
 	rows, err := r.db.QueryxContext(ctx, q, orgID)
-	if err != nil {
-		return nil, dbErrors.MapDBError(err)
-	}
-	defer rows.Close()
-
-	return scanWorkflowJobRows(rows)
-}
-
-func (r *sqlxWorkflowJobRepository) ListByRunID(ctx context.Context, orgID uuid.UUID, runID uuid.UUID) ([]*entity.WorkflowJob, error) {
-	const query = `
-		SELECT id, workflow_run_id, organization_id, repository_id, name, status, conclusion,
-			assigned_runner_id, runs_on, acquire_lock_version, started_at, finished_at,
-			timeout_minutes, created_at
-		FROM workflow_jobs
-		WHERE organization_id = ? AND workflow_run_id = ?
-		ORDER BY created_at ASC
-	`
-	q := r.db.Rebind(query)
-	rows, err := r.db.QueryxContext(ctx, q, orgID, runID)
 	if err != nil {
 		return nil, dbErrors.MapDBError(err)
 	}

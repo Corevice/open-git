@@ -16,9 +16,9 @@ import (
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
+	"github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
-	"github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
 	domainservice "github.com/open-git/backend/internal/domain/service"
@@ -447,8 +447,15 @@ func DeleteBranch(repoPath, name string) error {
 		return err
 	}
 
-	err = repo.Storer.RemoveReference(plumbing.NewBranchReferenceName(name))
-	if err != nil {
+	refName := plumbing.NewBranchReferenceName(name)
+	if _, err := repo.Reference(refName, false); err != nil {
+		if errors.Is(err, plumbing.ErrReferenceNotFound) {
+			return ErrPathNotFound
+		}
+		return err
+	}
+
+	if err := repo.Storer.RemoveReference(refName); err != nil {
 		if errors.Is(err, plumbing.ErrReferenceNotFound) {
 			return ErrPathNotFound
 		}
@@ -527,7 +534,7 @@ func GetDiff(repoPath, baseRef, headRef string) ([]FileDiff, error) {
 			case diff.Delete:
 				status = "delete"
 			default:
-				if chunk.Type() != diff.Equal && status != "delete" {
+				if status != "delete" && status != "add" {
 					status = "modify"
 				}
 			}

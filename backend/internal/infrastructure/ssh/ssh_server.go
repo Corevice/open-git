@@ -11,13 +11,13 @@ import (
 
 	gossh "github.com/gliderlabs/ssh"
 	"github.com/google/uuid"
-	xssh "golang.org/x/crypto/ssh"
+	cryptossh "golang.org/x/crypto/ssh"
 
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/repository"
 )
 
-var gitSSHCommandPattern = regexp.MustCompile(`^git-(upload-pack|receive-pack)\s+'?/?([^/]+)/([^'\s]+?)'?\.?$`)
+var gitSSHCommandPattern = regexp.MustCompile(`^git-(upload-pack|receive-pack)\s+'?/?([^/'\s]+)/([^'\s]+?)'?\.?$`)
 
 type GitSSHResolver interface {
 	Resolve(ctx context.Context, ownerLogin, repoName string) (diskPath string, ownerID uuid.UUID, err error)
@@ -110,7 +110,7 @@ func (h *SSHServer) Close() error {
 }
 
 func (h *SSHServer) authenticateKey(ctx gossh.Context, key gossh.PublicKey) bool {
-	fingerprint := xssh.FingerprintSHA256(key)
+	fingerprint := cryptossh.FingerprintSHA256(key)
 	stored, err := h.keyStore.FindByFingerprint(ctx, fingerprint)
 	if err != nil || stored == nil {
 		return false

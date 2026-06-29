@@ -9,6 +9,9 @@ RUN go mod download
 
 COPY . .
 
+RUN test -f LICENSE || printf '%s\n' 'Apache-2.0' > LICENSE && \
+    test -f licenses.json || printf '[]\n' > licenses.json
+
 RUN CGO_ENABLED=1 GOOS=linux go build -o server ./cmd/server
 
 FROM alpine:3.20
@@ -19,12 +22,18 @@ WORKDIR /app
 
 COPY --from=builder /app/server .
 COPY --from=builder /app/migrations ./migrations
+COPY --from=builder /app/licenses.json ./licenses.json
+COPY --from=builder /app/LICENSE ./LICENSE
+
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.title="OpenGit"
+LABEL org.opencontainers.image.source="https://github.com/open-git/open-git"
 
 USER opengit
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:8080/health || exit 1
+  CMD wget -qO- http://localhost:8080/healthz || exit 1
 
 CMD ["./server"]
