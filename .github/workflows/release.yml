@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
   packages: write
+  security-events: write
 
 jobs:
   build-and-push:
@@ -49,6 +50,27 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Scan frontend image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/open-git/web:sha-${{ github.sha }}
+          format: sarif
+          output: trivy-frontend.sarif
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+      - name: Upload frontend Trivy scan results
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-frontend-results
+          path: trivy-frontend.sarif
+
+      - name: Upload frontend Trivy SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-frontend.sarif
+          category: trivy-frontend
+
       - name: Build and push backend (api)
         uses: docker/build-push-action@v6
         with:
@@ -60,3 +82,24 @@ jobs:
             ${{ steps.meta.outputs.is_tag == 'true' && format('ghcr.io/{0}/api:{1}', github.repository, github.ref_name) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Scan backend image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/open-git/api:sha-${{ github.sha }}
+          format: sarif
+          output: trivy-backend.sarif
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+      - name: Upload backend Trivy scan results
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-backend-results
+          path: trivy-backend.sarif
+
+      - name: Upload backend Trivy SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-backend.sarif
+          category: trivy-backend

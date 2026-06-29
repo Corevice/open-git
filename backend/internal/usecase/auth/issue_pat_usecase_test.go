@@ -28,6 +28,15 @@ func (m *mockTokenRepo) Revoke(_ context.Context, _, _ int64) error {
 	return nil
 }
 
+func (m *mockTokenRepo) FindByTokenHash(_ context.Context, tokenHash string) (*domain.AccessToken, error) {
+	for _, token := range m.created {
+		if token.TokenHash == tokenHash {
+			return token, nil
+		}
+	}
+	return nil, nil
+}
+
 func sha256Hex(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])

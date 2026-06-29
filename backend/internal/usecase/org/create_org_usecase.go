@@ -3,7 +3,6 @@ package org
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
@@ -16,14 +15,6 @@ var (
 	ErrDuplicateLogin = errors.New("duplicate login")
 	ErrReservedLogin  = errors.New("reserved login")
 )
-
-var reservedLogins = map[string]struct{}{
-	"admin":    {},
-	"api":      {},
-	"settings": {},
-	"new":      {},
-	"login":    {},
-}
 
 type CreateOrgInput struct {
 	CreatorID   uuid.UUID
@@ -49,10 +40,10 @@ func NewCreateOrgUsecase(
 
 func (u *CreateOrgUsecase) Execute(ctx context.Context, input CreateOrgInput) (*entity.Organization, error) {
 	if err := validator.ValidateLogin(input.Login); err != nil {
+		if errors.Is(err, validator.ErrReservedLogin) {
+			return nil, ErrReservedLogin
+		}
 		return nil, err
-	}
-	if isReservedLogin(input.Login) {
-		return nil, ErrReservedLogin
 	}
 
 	existing, err := u.orgs.GetByLogin(ctx, input.Login)
@@ -87,9 +78,4 @@ func (u *CreateOrgUsecase) Execute(ctx context.Context, input CreateOrgInput) (*
 	}
 
 	return org, nil
-}
-
-func isReservedLogin(login string) bool {
-	_, ok := reservedLogins[strings.ToLower(login)]
-	return ok
 }

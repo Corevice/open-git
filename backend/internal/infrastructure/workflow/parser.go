@@ -3,21 +3,96 @@ package workflow
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
+const maxWorkflowSize = 512 * 1024
+const maxMatrixCombinations = 256
+
 var yamlLineRegexp = regexp.MustCompile(`line (\d+)`)
 
 type Step struct {
-	Name string `yaml:"name"`
-	Run  string `yaml:"run"`
-	Uses string `yaml:"uses"`
+	ID              string            `yaml:"id"`
+	Name            string            `yaml:"name"`
+	Uses            string            `yaml:"uses"`
+	Run             string            `yaml:"run"`
+	With            map[string]string `yaml:"with"`
+	Env             map[string]string `yaml:"env"`
+	If              string            `yaml:"if"`
+	ContinueOnError bool              `yaml:"continue-on-error"`
+	WorkingDir      string            `yaml:"working-directory"`
+	Shell           string            `yaml:"shell"`
 }
 
 type Job struct {
-	Steps []Step `yaml:"steps"`
+	RunsOn         yaml.Node         `yaml:"runs-on"`
+	Needs          yaml.Node         `yaml:"needs"`
+	If             string            `yaml:"if"`
+	Steps          []Step            `yaml:"steps"`
+	Strategy       StrategyConfig    `yaml:"strategy"`
+	Env            map[string]string `yaml:"env"`
+	Outputs        map[string]string `yaml:"outputs"`
+	TimeoutMinutes int               `yaml:"timeout-minutes"`
+	Container      string            `yaml:"container"`
+	Services       map[string]string `yaml:"services"`
+}
+
+type StrategyConfig struct {
+	Matrix      yaml.Node `yaml:"matrix"`
+	FailFast    *bool     `yaml:"fail-fast"`
+	MaxParallel int       `yaml:"max-parallel"`
+}
+
+type Diagnostic struct {
+	Line     int
+	Col      int
+	Severity string
+	Message  string
+}
+
+type UsesRef struct {
+	Kind      string
+	Owner     string
+	Name      string
+	Ref       string
+	LocalPath string
+	Image     string
+}
+
+type WorkflowIR struct {
+	On   map[string]any
+	Env  map[string]string
+	Jobs map[string]IRJob
+	DAG  DAGInfo
+}
+
+type IRJob struct {
+	RunsOn          string
+	Needs           []string
+	MatrixExpansion []map[string]any
+	Steps           []IRStep
+	Env             map[string]string
+}
+
+type IRStep struct {
+	ID         string
+	Uses       string
+	UsesRef    *UsesRef
+	Run        string
+	Env        map[string]string
+	With       map[string]string
+	If         string
+	IfExprAST  []ExprNode
+	RunExprAST []ExprNode
+}
+
+type DAGInfo struct {
+	Order []string
+	Edges [][2]string
 }
 
 type Workflow struct {
@@ -39,6 +114,13 @@ func (e *ParseError) Error() string {
 }
 
 func ParseWorkflow(data []byte) (*Workflow, error) {
+	if len(data) > maxWorkflowSize {
+		return nil, &ParseError{
+			Line:    1,
+			Message: fmt.Sprintf("workflow file exceeds maximum size of %d bytes", maxWorkflowSize),
+		}
+	}
+
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
 		line := extractLineFromMessage(err.Error())
@@ -55,15 +137,18 @@ func ParseWorkflow(data []byte) (*Workflow, error) {
 		return nil, &ParseError{Line: 1, Message: "empty workflow document"}
 	}
 
-	doc := &root
-	if root.Kind == yaml.DocumentNode {
-		if len(root.Content) == 0 {
-			return nil, &ParseError{Line: 1, Message: "empty workflow document"}
-		}
-		doc = root.Content[0]
+	doc := documentContent(&root)
+	if doc == nil {
+		return nil, &ParseError{Line: 1, Message: "empty workflow document"}
 	}
 	if doc.Kind != yaml.MappingNode {
 		return nil, &ParseError{Line: doc.Line, Message: "workflow root must be a mapping"}
+	}
+
+	for _, d := range validateWorkflowDocument(doc) {
+		if d.Severity == "error" {
+			return nil, &ParseError{Line: d.Line, Message: d.Message}
+		}
 	}
 
 	var wf Workflow
@@ -72,8 +157,9 @@ func ParseWorkflow(data []byte) (*Workflow, error) {
 	}
 
 	if len(wf.Jobs) == 0 {
-		return nil, &ParseError{Line: doc.Line, Message: "workflow must define at least one job"}
+		return nil, &ParseError{Line: doc.Line, Message: "workflow must contain at least one job"}
 	}
+
 	for jobID, job := range wf.Jobs {
 		if len(job.Steps) == 0 {
 			return nil, &ParseError{Line: doc.Line, Message: fmt.Sprintf("job %q must define at least one step", jobID)}
@@ -81,6 +167,599 @@ func ParseWorkflow(data []byte) (*Workflow, error) {
 	}
 
 	return &wf, nil
+}
+
+func validateWorkflowDocument(doc *yaml.Node) []Diagnostic {
+	var diags []Diagnostic
+	var onNode *yaml.Node
+	var jobsNode *yaml.Node
+	for i := 0; i < len(doc.Content)-1; i += 2 {
+		key := doc.Content[i].Value
+		val := doc.Content[i+1]
+		switch key {
+		case "on":
+			onNode = val
+		case "jobs":
+			jobsNode = val
+		}
+	}
+	if onNode == nil {
+		diags = append(diags, Diagnostic{
+			Line:     doc.Line,
+			Col:      1,
+			Severity: "error",
+			Message:  "workflow must define trigger 'on'",
+		})
+	}
+	if jobsNode == nil {
+		diags = append(diags, Diagnostic{
+			Line:     doc.Line,
+			Col:      1,
+			Severity: "error",
+			Message:  "workflow must contain at least one job",
+		})
+	}
+	return diags
+}
+
+func ParseWorkflowFull(data []byte) (*WorkflowIR, []Diagnostic, error) {
+	var diags []Diagnostic
+
+	if len(data) > maxWorkflowSize {
+		diags = append(diags, Diagnostic{
+			Line:     1,
+			Col:      1,
+			Severity: "error",
+			Message:  fmt.Sprintf("workflow file exceeds maximum size of %d bytes", maxWorkflowSize),
+		})
+		return nil, diags, nil
+	}
+
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		line := extractLineFromMessage(err.Error())
+		if line == 0 {
+			line = 1
+		}
+		diags = append(diags, Diagnostic{Line: line, Col: 1, Severity: "error", Message: err.Error()})
+		return nil, diags, nil
+	}
+
+	doc := documentContent(&root)
+	if doc == nil {
+		diags = append(diags, Diagnostic{Line: 1, Col: 1, Severity: "error", Message: "empty workflow document"})
+		return nil, diags, nil
+	}
+	if doc.Kind != yaml.MappingNode {
+		diags = append(diags, Diagnostic{Line: doc.Line, Col: 1, Severity: "error", Message: "workflow root must be a mapping"})
+		return nil, diags, nil
+	}
+
+	var onNode *yaml.Node
+	var env map[string]string
+	var jobsNode *yaml.Node
+	for i := 0; i < len(doc.Content)-1; i += 2 {
+		key := doc.Content[i].Value
+		val := doc.Content[i+1]
+		switch key {
+		case "on":
+			onNode = val
+		case "env":
+			_ = val.Decode(&env)
+		case "jobs":
+			jobsNode = val
+		}
+	}
+
+	if onNode == nil {
+		diags = append(diags, Diagnostic{Line: doc.Line, Col: 1, Severity: "error", Message: "workflow must define trigger 'on'"})
+	}
+	if jobsNode == nil {
+		diags = append(diags, Diagnostic{Line: doc.Line, Col: 1, Severity: "error", Message: "workflow must contain at least one job"})
+		return nil, diags, nil
+	}
+
+	var on map[string]any
+	if onNode != nil {
+		on = normalizeOnTrigger(*onNode)
+	}
+
+	var rawJobs map[string]Job
+	if err := jobsNode.Decode(&rawJobs); err != nil {
+		diags = append(diags, Diagnostic{Line: jobsNode.Line, Col: 1, Severity: "error", Message: err.Error()})
+		return nil, diags, nil
+	}
+	if len(rawJobs) == 0 {
+		diags = append(diags, Diagnostic{Line: jobsNode.Line, Col: 1, Severity: "error", Message: "workflow must contain at least one job"})
+		return nil, diags, nil
+	}
+
+	ir := &WorkflowIR{
+		On:   on,
+		Env:  env,
+		Jobs: make(map[string]IRJob, len(rawJobs)),
+	}
+
+	stepLines := extractStepLines(jobsNode)
+
+	for jobID, job := range rawJobs {
+		irJob := IRJob{
+			RunsOn: nodeToString(job.RunsOn),
+			Needs:  decodeNeeds(job.Needs),
+			Env:    job.Env,
+		}
+
+		if job.Strategy.Matrix.Kind != 0 {
+			expansion, matrixDiags := expandMatrix(job.Strategy.Matrix)
+			diags = append(diags, matrixDiags...)
+			irJob.MatrixExpansion = expansion
+		}
+
+		for i, step := range job.Steps {
+			stepLine := jobsNode.Line
+			if lines, ok := stepLines[jobID]; ok && i < len(lines) {
+				stepLine = lines[i]
+			}
+			if step.Uses != "" && step.Run != "" {
+				diags = append(diags, Diagnostic{
+					Line:     stepLine,
+					Col:      1,
+					Severity: "error",
+					Message:  "step cannot define both 'uses' and 'run'",
+				})
+			}
+
+			irStep := IRStep{
+				ID:   step.ID,
+				Uses: step.Uses,
+				Run:  step.Run,
+				Env:  step.Env,
+				With: step.With,
+				If:   step.If,
+			}
+
+			if step.Uses != "" {
+				ref, useDiag := resolveUses(step.Uses, stepLine)
+				if useDiag != nil {
+					diags = append(diags, *useDiag)
+				}
+				irStep.UsesRef = &ref
+			}
+
+			if step.If != "" {
+				ifAST, ifDiags := ExtractExpressions(step.If, stepLine)
+				if len(ifAST) == 0 && !strings.Contains(step.If, "${{") {
+					parsed, parseDiags := ParseExpression(strings.TrimSpace(step.If))
+					for j := range parseDiags {
+						if parseDiags[j].Line > 0 {
+							parseDiags[j].Line += stepLine - 1
+						}
+					}
+					ifDiags = append(ifDiags, parseDiags...)
+					ifAST = parsed
+				}
+				diags = append(diags, ifDiags...)
+				irStep.IfExprAST = ifAST
+			}
+			if step.Run != "" {
+				runAST, runDiags := ExtractExpressions(step.Run, stepLine)
+				diags = append(diags, runDiags...)
+				irStep.RunExprAST = runAST
+			}
+
+			irJob.Steps = append(irJob.Steps, irStep)
+		}
+
+		if job.If != "" {
+			_, ifDiags := ExtractExpressions(job.If, jobsNode.Line)
+			diags = append(diags, ifDiags...)
+		}
+
+		ir.Jobs[jobID] = irJob
+	}
+
+	dag, dagDiags := buildDAG(ir.Jobs)
+	diags = append(diags, dagDiags...)
+	ir.DAG = dag
+
+	return ir, diags, nil
+}
+
+func normalizeOnTrigger(node yaml.Node) map[string]any {
+	result := make(map[string]any)
+	switch node.Kind {
+	case yaml.ScalarNode:
+		result[node.Value] = map[string]any{}
+	case yaml.SequenceNode:
+		for _, item := range node.Content {
+			result[item.Value] = map[string]any{}
+		}
+	case yaml.MappingNode:
+		_ = node.Decode(&result)
+	}
+	return result
+}
+
+func resolveUses(s string, line int) (UsesRef, *Diagnostic) {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "docker://") {
+		return UsesRef{Kind: "docker", Image: strings.TrimPrefix(s, "docker://")}, nil
+	}
+	if strings.HasPrefix(s, "./") {
+		if strings.Contains(s, "..") {
+			return UsesRef{}, &Diagnostic{
+				Line:     line,
+				Col:      1,
+				Severity: "error",
+				Message:  "local action path must not contain '..'",
+			}
+		}
+		return UsesRef{Kind: "local", LocalPath: s}, nil
+	}
+	if strings.Contains(s, "@") {
+		idx := strings.LastIndex(s, "@")
+		action := s[:idx]
+		ref := s[idx+1:]
+		parts := strings.SplitN(action, "/", 2)
+		ur := UsesRef{Kind: "remote", Ref: ref}
+		if len(parts) == 2 {
+			ur.Owner = parts[0]
+			ur.Name = parts[1]
+		} else {
+			ur.Name = action
+		}
+		return ur, nil
+	}
+	return UsesRef{Kind: "remote"}, &Diagnostic{
+		Line:     line,
+		Col:      1,
+		Severity: "error",
+		Message:  "remote action reference missing @ref",
+	}
+}
+
+func expandMatrix(node yaml.Node) ([]map[string]any, []Diagnostic) {
+	var diags []Diagnostic
+	var raw map[string]any
+	if err := node.Decode(&raw); err != nil {
+		diags = append(diags, Diagnostic{Line: node.Line, Col: 1, Severity: "error", Message: err.Error()})
+		return nil, diags
+	}
+
+	var include []map[string]any
+	var exclude []map[string]any
+	axes := make(map[string][]any)
+
+	for key, val := range raw {
+		switch key {
+		case "include":
+			include = decodeMatrixRows(val, node.Line, &diags)
+		case "exclude":
+			exclude = decodeMatrixRows(val, node.Line, &diags)
+		default:
+			if arr, ok := val.([]any); ok {
+				axes[key] = arr
+			} else {
+				axes[key] = []any{val}
+			}
+		}
+	}
+
+	combos, overflow := cartesianProduct(axes)
+	if overflow {
+		diags = append(diags, Diagnostic{
+			Line:     node.Line,
+			Col:      1,
+			Severity: "error",
+			Message:  fmt.Sprintf("matrix expansion exceeds maximum of %d combinations", maxMatrixCombinations),
+		})
+		return nil, diags
+	}
+	combos = applyInclude(combos, include)
+	combos = applyExclude(combos, exclude)
+
+	if len(combos) > maxMatrixCombinations {
+		diags = append(diags, Diagnostic{
+			Line:     node.Line,
+			Col:      1,
+			Severity: "error",
+			Message:  fmt.Sprintf("matrix expansion exceeds maximum of %d combinations (got %d)", maxMatrixCombinations, len(combos)),
+		})
+		return combos[:maxMatrixCombinations], diags
+	}
+
+	return combos, diags
+}
+
+func decodeMatrixRows(val any, line int, diags *[]Diagnostic) []map[string]any {
+	items, ok := val.([]any)
+	if !ok {
+		*diags = append(*diags, Diagnostic{Line: line, Col: 1, Severity: "error", Message: "matrix include/exclude must be a sequence"})
+		return nil
+	}
+	rows := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		row, ok := item.(map[string]any)
+		if !ok {
+			*diags = append(*diags, Diagnostic{Line: line, Col: 1, Severity: "error", Message: "matrix include/exclude row must be a mapping"})
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func cartesianProduct(axes map[string][]any) ([]map[string]any, bool) {
+	keys := make([]string, 0, len(axes))
+	for k := range axes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) == 0 {
+		return []map[string]any{{}}, false
+	}
+
+	result := []map[string]any{{}}
+	for _, key := range keys {
+		values := axes[key]
+		var next []map[string]any
+		for _, combo := range result {
+			for _, val := range values {
+				newCombo := make(map[string]any, len(combo)+1)
+				for k, v := range combo {
+					newCombo[k] = v
+				}
+				newCombo[key] = val
+				next = append(next, newCombo)
+				if len(next) > maxMatrixCombinations {
+					return next, true
+				}
+			}
+		}
+		result = next
+	}
+	return result, false
+}
+
+func applyInclude(combos []map[string]any, include []map[string]any) []map[string]any {
+	if len(include) == 0 {
+		return combos
+	}
+	result := append([]map[string]any(nil), combos...)
+	for _, row := range include {
+		if len(combos) == 0 {
+			result = append(result, mergeMatrixCombo(nil, row))
+			continue
+		}
+		matched := false
+		for _, combo := range combos {
+			if includeRowMatches(combo, row) {
+				result = append(result, mergeMatrixCombo(combo, row))
+				matched = true
+			}
+		}
+		if !matched {
+			if len(row) >= len(combos[0]) {
+				result = append(result, mergeMatrixCombo(nil, row))
+			} else {
+				for _, combo := range combos {
+					result = append(result, mergeMatrixCombo(combo, row))
+				}
+			}
+		}
+	}
+	return result
+}
+
+func includeRowMatches(combo, include map[string]any) bool {
+	for k, v := range include {
+		if cv, ok := combo[k]; ok && cv != v {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeMatrixCombo(base, overlay map[string]any) map[string]any {
+	merged := make(map[string]any, len(base)+len(overlay))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range overlay {
+		merged[k] = v
+	}
+	return merged
+}
+
+func applyExclude(combos []map[string]any, exclude []map[string]any) []map[string]any {
+	if len(exclude) == 0 {
+		return combos
+	}
+	var result []map[string]any
+outer:
+	for _, combo := range combos {
+		for _, ex := range exclude {
+			if rowMatches(combo, ex) {
+				continue outer
+			}
+		}
+		result = append(result, combo)
+	}
+	return result
+}
+
+func rowMatches(combo, pattern map[string]any) bool {
+	for k, v := range pattern {
+		if combo[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func buildDAG(jobs map[string]IRJob) (DAGInfo, []Diagnostic) {
+	var diags []Diagnostic
+	inDegree := make(map[string]int, len(jobs))
+	adj := make(map[string][]string, len(jobs))
+	var edges [][2]string
+
+	for jobID := range jobs {
+		inDegree[jobID] = 0
+	}
+
+	for jobID, job := range jobs {
+		for _, need := range job.Needs {
+			if _, ok := jobs[need]; !ok {
+				diags = append(diags, Diagnostic{
+					Line:     1,
+					Col:      1,
+					Severity: "error",
+					Message:  fmt.Sprintf("job %q needs unknown job %q", jobID, need),
+				})
+				inDegree[jobID]++
+				continue
+			}
+			adj[need] = append(adj[need], jobID)
+			inDegree[jobID]++
+			edges = append(edges, [2]string{need, jobID})
+		}
+	}
+
+	queue := make([]string, 0, len(jobs))
+	for jobID, deg := range inDegree {
+		if deg == 0 {
+			queue = append(queue, jobID)
+		}
+	}
+	sort.Strings(queue)
+
+	var order []string
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		order = append(order, cur)
+		for _, next := range adj[cur] {
+			inDegree[next]--
+			if inDegree[next] == 0 {
+				queue = append(queue, next)
+				sort.Strings(queue)
+			}
+		}
+	}
+
+	if len(order) < len(jobs) {
+		cycleMsg := detectCycleMessage(jobs)
+		diags = append(diags, Diagnostic{
+			Line:     1,
+			Col:      1,
+			Severity: "error",
+			Message:  cycleMsg,
+		})
+	}
+
+	return DAGInfo{Order: order, Edges: edges}, diags
+}
+
+func detectCycleMessage(jobs map[string]IRJob) string {
+	visited := make(map[string]int)
+	var stack []string
+	var cyclePath []string
+
+	var dfs func(node string) bool
+	dfs = func(node string) bool {
+		visited[node] = 1
+		stack = append(stack, node)
+		for _, need := range jobs[node].Needs {
+			if _, ok := jobs[need]; !ok {
+				continue
+			}
+			if visited[need] == 1 {
+				cyclePath = append([]string{}, stack...)
+				cyclePath = append(cyclePath, need)
+				return true
+			}
+			if visited[need] == 0 && dfs(need) {
+				return true
+			}
+		}
+		stack = stack[:len(stack)-1]
+		visited[node] = 2
+		return false
+	}
+
+	for jobID := range jobs {
+		if visited[jobID] == 0 && dfs(jobID) && len(cyclePath) >= 2 {
+			return fmt.Sprintf("cyclic dependency detected: %s", strings.Join(cyclePath, " → "))
+		}
+	}
+
+	return "cyclic dependency detected"
+}
+
+func extractStepLines(jobsNode *yaml.Node) map[string][]int {
+	result := make(map[string][]int)
+	if jobsNode == nil || jobsNode.Kind != yaml.MappingNode {
+		return result
+	}
+	for i := 0; i < len(jobsNode.Content)-1; i += 2 {
+		jobID := jobsNode.Content[i].Value
+		jobVal := jobsNode.Content[i+1]
+		if jobVal.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j < len(jobVal.Content)-1; j += 2 {
+			if jobVal.Content[j].Value != "steps" {
+				continue
+			}
+			stepsNode := jobVal.Content[j+1]
+			if stepsNode.Kind != yaml.SequenceNode {
+				continue
+			}
+			for _, stepNode := range stepsNode.Content {
+				result[jobID] = append(result[jobID], stepNode.Line)
+			}
+		}
+	}
+	return result
+}
+
+func decodeNeeds(node yaml.Node) []string {
+	if node.Kind == 0 {
+		return nil
+	}
+	if node.Kind == yaml.ScalarNode {
+		return []string{node.Value}
+	}
+	var needs []string
+	_ = node.Decode(&needs)
+	return needs
+}
+
+func nodeToString(node yaml.Node) string {
+	if node.Kind == 0 {
+		return ""
+	}
+	if node.Kind == yaml.ScalarNode {
+		return node.Value
+	}
+	if node.Kind == yaml.SequenceNode {
+		parts := make([]string, 0, len(node.Content))
+		for _, n := range node.Content {
+			parts = append(parts, n.Value)
+		}
+		return strings.Join(parts, ",")
+	}
+	return ""
+}
+
+func documentContent(root *yaml.Node) *yaml.Node {
+	if root.Kind == yaml.DocumentNode {
+		if len(root.Content) == 0 {
+			return nil
+		}
+		return root.Content[0]
+	}
+	return root
 }
 
 func extractLineFromMessage(msg string) int {

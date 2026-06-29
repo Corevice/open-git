@@ -50,28 +50,32 @@ export default function OwnerPage() {
       setError(null);
 
       try {
-        let kind: "user" | "org" = "user";
-        let profile: User | OrgProfile;
+        let ownerData: OwnerProfile;
 
         try {
-          profile = await apiClient.users.getByLogin(owner);
+          ownerData = {
+            kind: "user",
+            profile: await apiClient.users.getByLogin(owner),
+          };
         } catch (err) {
           if (err instanceof ApiError && err.status === 404) {
-            profile = await apiClient.orgs.get(owner);
-            kind = "org";
+            ownerData = {
+              kind: "org",
+              profile: await apiClient.orgs.get(owner),
+            };
           } else {
             throw err;
           }
         }
 
         const reposPath =
-          kind === "user"
+          ownerData.kind === "user"
             ? `/api/v3/users/${owner}/repos`
             : `/api/v3/orgs/${owner}/repos`;
         const repoList = await apiClient.get<Repository[]>(reposPath);
 
         if (!cancelled) {
-          setOwnerProfile({ kind, profile });
+          setOwnerProfile(ownerData);
           setRepos(repoList);
         }
       } catch (err) {
