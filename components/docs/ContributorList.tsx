@@ -24,6 +24,7 @@ function ContributorItem({ contributor }: { contributor: Contributor }) {
           {initials(contributor.login)}
         </span>
       ) : (
+        // eslint-disable-next-line @next/next/no-img-element -- external avatar URLs are not served through the Next image loader
         <img
           src={contributor.avatar_url}
           alt={contributor.login}

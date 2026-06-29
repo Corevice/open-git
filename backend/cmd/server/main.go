@@ -32,6 +32,7 @@ import (
 
 	"github.com/open-git/backend/internal/compat"
 	"github.com/open-git/backend/internal/config"
+	"github.com/open-git/backend/graph"
 	obs "github.com/open-git/backend/observability"
 	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain"
@@ -49,7 +50,9 @@ import (
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
+	labelusecase "github.com/open-git/backend/internal/usecase/label"
 	mcpusecase "github.com/open-git/backend/internal/usecase/mcp"
+	milestoneusecase "github.com/open-git/backend/internal/usecase/milestone"
 	orgUC "github.com/open-git/backend/internal/usecase/org"
 	prusecase "github.com/open-git/backend/internal/usecase/pr"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
@@ -60,6 +63,7 @@ import (
 	"github.com/open-git/backend/internal/infrastructure/queue"
 	"github.com/open-git/backend/internal/worker"
 	artifactusecase "github.com/open-git/backend/internal/usecase/artifact"
+	secretusecase "github.com/open-git/backend/internal/usecase/secret"
 )
 
 var (
@@ -425,10 +429,12 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	)
 
 	contentHandler := handler.NewContentHandler(repoGitResolver)
+	branchHandler := handler.NewBranchHandler(repoGitResolver, repoRepo, membershipAdapter)
 
 	issuePATUC := authUC.NewIssuePATUsecase(tokenRepo)
 	revokePATUC := authUC.NewRevokePATUsecase(tokenRepo)
-	tokenHandler := handler.NewTokenHandler(tokenRepo, issuePATUC, revokePATUC)
+	tokenAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	tokenHandler := handler.NewTokenHandler(tokenRepo, issuePATUC, revokePATUC, tokenAuditRepo, entityUserRepo)
 
 	resolveRepo := func(c echo.Context, owner, name string) (*entity.Repository, error) {
 		return getRepoUC.Execute(c.Request().Context(), repoUC.GetRepositoryInput{
@@ -438,11 +444,36 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		})
 	}
 
+	listLabelsUC := labelusecase.NewListLabelsUsecase(labelRepo)
+	createLabelUC := labelusecase.NewCreateLabelUsecase(labelRepo)
+	updateLabelUC := labelusecase.NewUpdateLabelUsecase(labelRepo)
+	deleteLabelUC := labelusecase.NewDeleteLabelUsecase(labelRepo, issueAuditRepo)
+	labelHandler := handler.NewLabelHandler(
+		listLabelsUC,
+		createLabelUC,
+		updateLabelUC,
+		deleteLabelUC,
+		resolveRepo,
+	)
+
+	listMilestonesUC := milestoneusecase.NewListMilestonesUsecase(milestoneRepo)
+	createMilestoneUC := milestoneusecase.NewCreateMilestoneUsecase(milestoneRepo, issueAuditRepo)
+	updateMilestoneUC := milestoneusecase.NewUpdateMilestoneUsecase(milestoneRepo)
+	deleteMilestoneUC := milestoneusecase.NewDeleteMilestoneUsecase(milestoneRepo, issueAuditRepo)
+	milestoneHandler := handler.NewMilestoneHandler(
+		listMilestonesUC,
+		createMilestoneUC,
+		updateMilestoneUC,
+		deleteMilestoneUC,
+		resolveRepo,
+	)
+
 	createIssueUC := issueusecase.NewCreateIssueUsecase(issueRepo, issueAuditRepo, txManager)
 	updateIssueUC := issueusecase.NewUpdateIssueUsecase(issueRepo, labelRepo, milestoneRepo, issueAuditRepo)
 	createCommentUC := issueusecase.NewCreateCommentUsecase(issueRepo, commentRepo, issueAuditRepo)
 	listIssuesUC := issueusecase.NewListIssuesUsecase(issueRepo)
-	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, createCommentUC, updateIssueUC, resolveRepo)
+	getIssueUC := issueusecase.NewGetIssueUsecase(issueRepo)
+	issueHandler := handler.NewIssueHandler(createIssueUC, listIssuesUC, getIssueUC, updateIssueUC, createCommentUC, resolveRepo)
 
 	gitSvc := infragit.NewGitServiceAdapter()
 	prRepo := infrarepo.NewPullRequestRepository(sqlxDB)
@@ -496,6 +527,39 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		updateWebhookUC,
 		deleteWebhookUC,
 		resolveRepo,
+	)
+
+	actionSecretEnc := newActionSecretEncryptorFromEnv()
+	actionSecretRepo := infrarepo.NewActionSecretRepository(sqlxDB, actionSecretEnc.SecretEncryptor)
+	actionSecretAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	listRepoSecretsUC := secretusecase.NewListRepoSecretsUsecase(actionSecretRepo)
+	listOrgSecretsUC := secretusecase.NewListOrgSecretsUsecase(actionSecretRepo)
+	getActionSecretUC := secretusecase.NewGetActionSecretUsecase(actionSecretRepo)
+	upsertActionSecretUC := secretusecase.NewUpsertActionSecretUsecase(actionSecretRepo, actionSecretAuditRepo, actionSecretEnc)
+	deleteActionSecretUC := secretusecase.NewDeleteActionSecretUsecase(actionSecretRepo, actionSecretAuditRepo)
+	getActionSecretPublicKeyUC := secretusecase.NewGetPublicKeyUsecase(actionSecretEnc)
+	resolveOrg := func(c echo.Context, orgLogin string) (uuid.UUID, error) {
+		org, err := entityOrgRepo.GetByLogin(c.Request().Context(), orgLogin)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		if org == nil {
+			return uuid.Nil, apperror.ErrNotFound
+		}
+		return org.ID, nil
+	}
+	secretHandler := handler.NewSecretHandler(
+		listRepoSecretsUC,
+		listOrgSecretsUC,
+		getActionSecretUC,
+		upsertActionSecretUC,
+		deleteActionSecretUC,
+		getActionSecretPublicKeyUC,
+		actionSecretRepo,
+		repoRepo,
+		actionSecretEnc,
+		resolveRepo,
+		resolveOrg,
 	)
 
 	compatRepo := infrarepo.NewCompatRepository(sqlxDB)
@@ -656,9 +720,12 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	repositoryHandler.RegisterRoutes(api, authMiddleware)
+	branchHandler.RegisterRoutes(api, authMiddleware)
 	collaboratorHandler.RegisterRoutes(api, authMiddleware)
 	contentHandler.RegisterRoutes(api)
 	issueHandler.RegisterRoutes(api, authMiddleware)
+	labelHandler.RegisterRoutes(api, authMiddleware)
+	milestoneHandler.RegisterRoutes(api, authMiddleware)
 	pullRequestHandler.RegisterRoutes(api, authMiddleware)
 	oauthHandler.RegisterRoutes(api, authMiddleware)
 	api.GET("/rate_limit", rateLimitHandler.Get)
@@ -680,12 +747,16 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	securityAdvisoryHandler.RegisterRoutes(v3, authMiddleware)
 	dependabotAlertHandler.RegisterRoutes(v3, authMiddleware)
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
+	branchHandler.RegisterRoutes(v3, authMiddleware)
 	collaboratorHandler.RegisterRoutes(v3, authMiddleware)
 	contentHandler.RegisterRoutes(v3)
 	issueHandler.RegisterRoutes(v3, authMiddleware)
+	labelHandler.RegisterRoutes(v3, authMiddleware)
+	milestoneHandler.RegisterRoutes(v3, authMiddleware)
 	pullRequestHandler.RegisterRoutes(v3, authMiddleware)
 	branchProtectionHandler.RegisterRoutes(v3, authMiddleware)
 	webhookHandler.RegisterRoutes(v3, authMiddleware)
+	secretHandler.RegisterRoutes(v3, authMiddleware)
 	artifactHandler.RegisterRoutes(v3, authMiddleware)
 	v3.GET("/rate_limit", rateLimitHandler.Get)
 	v3.GET("", rootHandler.Get)
@@ -701,6 +772,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v3Keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
 	v1 := e.Group("/api/v1")
+
+	contributorsHandler := handler.NewContributorsHandler(repoGitResolver, membershipAdapter)
+	contributorsHandler.RegisterRoutes(v1)
 
 	var healthMinioClient *minio.Client
 	if cfg.MinioEndpoint != "" {
@@ -724,9 +798,43 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	v1.GET("/health", apiV1HealthHandler.Handle)
 	v1.GET("/version", apiV1VersionHandler.Handle)
 
+	var asynqInspector *asynq.Inspector
+	if cfg.RedisAddr != "" {
+		asynqInspector = asynq.NewInspector(asynq.RedisClientOpt{Addr: cfg.RedisAddr})
+	}
+	adminStatusHandler := handler.NewAPIV1AdminStatusHandler(
+		sqlxDB,
+		healthMinioClient,
+		healthRedisClient,
+		asynqInspector,
+		getenv("MINIO_DATA_PATH", "/"),
+	)
+	v1Ops := v1.Group("", authMiddleware)
+	v1Ops.GET("/admin/status", adminStatusHandler.Handle)
+
 	compatHandler.RegisterRoutes(v1, authMiddleware)
 	mcpVerificationHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
+
+	gqlResolver := &graph.Resolver{
+		UserRepo:         entityUserRepo,
+		LabelRepo:        labelRepo,
+		MilestoneRepo:    milestoneRepo,
+		RepositoryRepo:   repoRepo,
+		GetCurrentUserUC: getCurrentUserUC,
+		GetUserByLoginUC: getUserByLoginUC,
+		GetRepositoryUC:  getRepoUC,
+		GetOrgUC:         getOrgUC,
+		CreateIssueUC:    createIssueUC,
+		UpdateIssueUC:    updateIssueUC,
+		CreateCommentUC:  createCommentUC,
+		ListIssuesUC:     listIssuesUC,
+		CreatePRUC:       createPRUC,
+		MergePRUC:        mergePRUC,
+	}
+	gqlHandler := graph.NewHandler(gqlResolver, &cfg)
+	e.POST("/api/graphql", gqlHandler, authMiddleware)
+	e.GET("/api/graphql", gqlHandler)
 
 	workflowJobRepo := infrarepo.NewWorkflowJobRepository(sqlxDB)
 	var jobLogRepo domainrepo.IJobLogRepository
@@ -1059,6 +1167,28 @@ func (r *branchProtectionWriteRepo) DeleteByPattern(ctx context.Context, orgID, 
 		return apperror.ErrNotFound
 	}
 	return nil
+}
+
+// actionSecretEncryptor adapts SecretEncryptor for GitHub-compatible secrets API wiring.
+type actionSecretEncryptor struct {
+	*crypto.SecretEncryptor
+}
+
+func newActionSecretEncryptorFromEnv() *actionSecretEncryptor {
+	return &actionSecretEncryptor{SecretEncryptor: crypto.NewSecretEncryptorFromEnv()}
+}
+
+func (e *actionSecretEncryptor) KeyID() string {
+	return "open-git-action-secrets-v1"
+}
+
+func (e *actionSecretEncryptor) PublicKeyBase64() string {
+	// Placeholder public key for GitHub API shape compatibility.
+	return "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+}
+
+func (e *actionSecretEncryptor) DecryptSealedBox(ciphertext []byte) ([]byte, error) {
+	return e.Decrypt(ciphertext)
 }
 
 func httpStatusToCode(status int) string {

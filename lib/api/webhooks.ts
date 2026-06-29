@@ -35,7 +35,11 @@ export interface CreateWebhookPayload {
   };
 }
 
-export type UpdateWebhookPayload = Partial<CreateWebhookPayload>;
+export type UpdateWebhookPayload = Partial<
+  Omit<CreateWebhookPayload, "config">
+> & {
+  config?: Partial<CreateWebhookPayload["config"]>;
+};
 
 export interface WebhookValidationError extends ApiError {
   fieldErrors: Record<string, string>;

@@ -24,6 +24,7 @@ import (
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
+	obs "github.com/open-git/backend/observability"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
@@ -192,14 +193,20 @@ func advertiseRefs(w http.ResponseWriter, ctx context.Context, repoPath, service
 
 // UploadPack handles POST /:owner/:repo.git/git-upload-pack
 func (h *GitHTTPHandler) UploadPack(c echo.Context) error {
+	result := "success"
+	defer func() { obs.RecordGitOperation("upload_pack", result) }()
+
 	repo, err := h.resolveRepo(c)
 	if err != nil {
+		result = "error"
 		return err
 	}
 	if err := h.ensureReadAccess(c, repo); err != nil {
+		result = "error"
 		return err
 	}
 	if err := infragit.ServeUploadPack(c.Response().Writer, c.Request(), repo.DiskPath); err != nil {
+		result = "error"
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": err.Error()})
 	}
 	return nil
@@ -207,26 +214,34 @@ func (h *GitHTTPHandler) UploadPack(c echo.Context) error {
 
 // ReceivePack handles POST /:owner/:repo.git/git-receive-pack
 func (h *GitHTTPHandler) ReceivePack(c echo.Context) error {
+	result := "success"
+	defer func() { obs.RecordGitOperation("receive_pack", result) }()
+
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
+		result = "error"
 		return err
 	}
 
 	repo, err := h.resolveRepo(c)
 	if err != nil {
+		result = "error"
 		return err
 	}
 
 	if err := h.ensureWriteAccess(c.Request().Context(), userID, repo); err != nil {
+		result = "error"
 		return err
 	}
 
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {
+		result = "error"
 		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid request body"})
 	}
 
 	if err := h.rejectProtectedForcePush(c.Request().Context(), repo, body); err != nil {
+		result = "error"
 		var httpErr *echo.HTTPError
 		if errors.As(err, &httpErr) {
 			return httpErr
@@ -236,6 +251,7 @@ func (h *GitHTTPHandler) ReceivePack(c echo.Context) error {
 
 	c.Request().Body = io.NopCloser(bytes.NewReader(body))
 	if err := infragit.ServeReceivePack(c.Response().Writer, c.Request(), repo.DiskPath); err != nil {
+		result = "error"
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": err.Error()})
 	}
 	return nil
