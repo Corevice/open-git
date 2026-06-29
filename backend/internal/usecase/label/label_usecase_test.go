@@ -85,6 +85,14 @@ func (m *mockAuditLogRepo) InsertAuditLog(
 	return nil
 }
 
+func (m *mockAuditLogRepo) Create(context.Context, *entity.AuditLog) error {
+	return nil
+}
+
+func (m *mockAuditLogRepo) List(context.Context, uuid.UUID, string, int, int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 func TestCreateLabelInvalidColor(t *testing.T) {
 	uc := labelusecase.NewCreateLabelUsecase(&mockLabelRepo{})
 
