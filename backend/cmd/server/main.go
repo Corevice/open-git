@@ -32,6 +32,7 @@ import (
 
 	"github.com/open-git/backend/internal/compat"
 	"github.com/open-git/backend/internal/config"
+	"github.com/open-git/backend/graph"
 	obs "github.com/open-git/backend/observability"
 	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain"
@@ -727,6 +728,26 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	compatHandler.RegisterRoutes(v1, authMiddleware)
 	mcpVerificationHandler.RegisterRoutes(v1, authMiddleware)
 	branchProtectionHandler.RegisterInternalRoutes(e.Group("/api/internal"), authMiddleware)
+
+	gqlResolver := &graph.Resolver{
+		UserRepo:         entityUserRepo,
+		LabelRepo:        labelRepo,
+		MilestoneRepo:    milestoneRepo,
+		RepositoryRepo:   repoRepo,
+		GetCurrentUserUC: getCurrentUserUC,
+		GetUserByLoginUC: getUserByLoginUC,
+		GetRepositoryUC:  getRepoUC,
+		GetOrgUC:         getOrgUC,
+		CreateIssueUC:    createIssueUC,
+		UpdateIssueUC:    updateIssueUC,
+		CreateCommentUC:  createCommentUC,
+		ListIssuesUC:     listIssuesUC,
+		CreatePRUC:       createPRUC,
+		MergePRUC:        mergePRUC,
+	}
+	gqlHandler := graph.NewHandler(gqlResolver, &cfg)
+	e.POST("/api/graphql", gqlHandler, authMiddleware)
+	e.GET("/api/graphql", gqlHandler)
 
 	workflowJobRepo := infrarepo.NewWorkflowJobRepository(sqlxDB)
 	var jobLogRepo domainrepo.IJobLogRepository

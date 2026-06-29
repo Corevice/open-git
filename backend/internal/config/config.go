@@ -30,15 +30,16 @@ type Config struct {
 	WebBaseURL        string
 	DocsBaseURL        string
 	WebhookSecretKey   string
-	MetricsEnabled      bool
-	MetricsPath         string
-	MetricsAuthToken    string
-	Domain              string
-	ACMEEmail           string
-	TLSMode             string // acme | custom | selfsigned
-	TLSCertFile         string
-	TLSKeyFile          string
-	TrustedProxyCIDRs   string
+	MetricsEnabled              bool
+	MetricsPath                 string
+	MetricsAuthToken            string
+	GraphQLIntrospectionEnabled bool
+	Domain                      string
+	ACMEEmail                   string
+	TLSMode                     string // acme | custom | selfsigned
+	TLSCertFile                 string
+	TLSKeyFile                  string
+	TrustedProxyCIDRs           string
 }
 
 func Load() Config {
@@ -77,15 +78,16 @@ func Load() Config {
 		WebBaseURL:        getenv("WEB_BASE_URL", "http://localhost:8080"),
 		DocsBaseURL:       getenv("DOCS_BASE_URL", "https://docs.github.com/rest"),
 		WebhookSecretKey:  os.Getenv("WEBHOOK_SECRET_KEY"),
-		MetricsEnabled:      getenvBool("METRICS_ENABLED", true),
-		MetricsPath:         getenv("METRICS_PATH", "/metrics"),
-		MetricsAuthToken:    os.Getenv("METRICS_AUTH_TOKEN"),
-		Domain:              os.Getenv("DOMAIN"),
-		ACMEEmail:           os.Getenv("ACME_EMAIL"),
-		TLSMode:             getenv("TLS_MODE", "acme"),
-		TLSCertFile:         os.Getenv("TLS_CERT_FILE"),
-		TLSKeyFile:          os.Getenv("TLS_KEY_FILE"),
-		TrustedProxyCIDRs:   os.Getenv("TRUSTED_PROXY_CIDRS"),
+		MetricsEnabled:              getenvBool("METRICS_ENABLED", true),
+		MetricsPath:                 getenv("METRICS_PATH", "/metrics"),
+		MetricsAuthToken:            os.Getenv("METRICS_AUTH_TOKEN"),
+		GraphQLIntrospectionEnabled: getenvBool("GRAPHQL_INTROSPECTION_ENABLED", false),
+		Domain:                      os.Getenv("DOMAIN"),
+		ACMEEmail:                   os.Getenv("ACME_EMAIL"),
+		TLSMode:                     getenv("TLS_MODE", "acme"),
+		TLSCertFile:                 os.Getenv("TLS_CERT_FILE"),
+		TLSKeyFile:                  os.Getenv("TLS_KEY_FILE"),
+		TrustedProxyCIDRs:           os.Getenv("TRUSTED_PROXY_CIDRS"),
 	}
 }
 
