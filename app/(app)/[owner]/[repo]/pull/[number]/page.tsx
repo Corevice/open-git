@@ -11,9 +11,11 @@ import {
   ApiError,
   getPullRequest,
   getPullRequestFiles,
+  listPullRequestCommits,
   listReviewComments,
   listReviews,
   mergePullRequest,
+  type CommitListItem,
 } from "@/lib/api";
 import type { PullRequest as MergePanelPullRequest } from "@/lib/api-types";
 import { renderMarkdown } from "@/lib/markdown";
@@ -46,8 +48,10 @@ function toMergePanelPullRequest(pr: PullRequest): MergePanelPullRequest {
     pr.mergeable_state === "dirty" ||
     pr.mergeable_state === "conflicting";
 
+  const parsedId = Number(pr.id);
+
   return {
-    id: Number.isNaN(Number(pr.id)) ? 0 : Number(pr.id),
+    id: !Number.isNaN(parsedId) ? parsedId : pr.number,
     number: pr.number,
     headRef: pr.head_ref,
     baseRef: pr.base_ref,
@@ -93,6 +97,7 @@ export default function PullRequestDetailPage({ params }: Props) {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [reviewComments, setReviewComments] = useState<ReviewComment[]>([]);
   const [files, setFiles] = useState<PullRequestFile[]>([]);
+  const [commits, setCommits] = useState<CommitListItem[]>([]);
   const [tab, setTab] = useState<Tab>("conversation");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -122,9 +127,16 @@ export default function PullRequestDetailPage({ params }: Props) {
       setReviews(reviewsData);
       setReviewComments(commentsData);
       setFiles(filesData);
+      if (prData.head_sha) {
+        listPullRequestCommits(owner, repo, prData.head_sha, 1, 100)
+          .then(setCommits)
+          .catch(() => setCommits([]));
+      } else {
+        setCommits([]);
+      }
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
-        router.push("/404");
+        router.push(`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`);
         return;
       }
       setError(e instanceof Error ? e.message : "Failed to load pull request");
@@ -138,9 +150,14 @@ export default function PullRequestDetailPage({ params }: Props) {
   }, [loadPullRequest]);
 
   const handleMerge = async (method: string) => {
-    await mergePullRequest(owner, repo, parseInt(number, 10), {
-      merge_method: method as "merge" | "squash" | "rebase",
-    });
+    const prNumber = parseInt(number, 10);
+    try {
+      await mergePullRequest(owner, repo, prNumber, {
+        merge_method: method as "merge" | "squash" | "rebase",
+      });
+    } catch (e) {
+      throw e;
+    }
     await loadPullRequest();
   };
 
@@ -201,7 +218,7 @@ export default function PullRequestDetailPage({ params }: Props) {
           {(
             [
               { id: "conversation" as const, label: "Conversation", count: conversationCount },
-              { id: "commits" as const, label: "Commits", count: 0 },
+              { id: "commits" as const, label: "Commits", count: commits.length },
               { id: "files" as const, label: "Files Changed", count: files.length },
             ] as const
           ).map(({ id, label, count }) => (
@@ -293,7 +310,30 @@ export default function PullRequestDetailPage({ params }: Props) {
 
           {tab === "commits" && (
             <div className="divide-y divide-[#d0d7de]">
-              <p className="text-[#656d76] py-4">Commit list will be available in a future update.</p>
+              {commits.length === 0 ? (
+                <p className="text-[#656d76] py-4">No commits found.</p>
+              ) : (
+                commits.map((commit) => (
+                  <div key={commit.sha} className="py-4 flex items-start gap-3">
+                    <span className="w-8 h-8 rounded-full bg-[#eaeef2] text-[#57606a] text-xs font-semibold inline-flex items-center justify-center shrink-0">
+                      {(commit.author?.login ?? commit.commit.author.name).slice(0, 2).toUpperCase()}
+                    </span>
+                    <div className="min-w-0">
+                      <Link
+                        href={`/${owner}/${repo}/commit/${commit.sha}`}
+                        className="text-sm font-semibold text-[#0969da] hover:underline"
+                      >
+                        {commit.commit.message.split("\n")[0]}
+                      </Link>
+                      <div className="text-xs text-[#656d76] mt-1">
+                        {commit.author?.login ?? commit.commit.author.name} committed{" "}
+                        {formatAge(commit.commit.author.date)} ·{" "}
+                        <code className="bg-[#f6f8fa] px-1 rounded">{commit.sha.slice(0, 7)}</code>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           )}
 

@@ -94,7 +94,7 @@ describe("pull request api", () => {
     );
   });
 
-  it("mergePullRequest sends PUT with merge_method", async () => {
+  it("mergePullRequest sends POST with merge_method", async () => {
     const merged = {
       merged: true,
       message: "Pull Request successfully merged",
@@ -112,7 +112,7 @@ describe("pull request api", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8080/api/v3/repos/acme/demo/pulls/7/merge",
       expect.objectContaining({
-        method: "PUT",
+        method: "POST",
         body: JSON.stringify({ merge_method: "squash" }),
       }),
     );

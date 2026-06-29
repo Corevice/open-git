@@ -40,6 +40,36 @@ type RouterLike = {
   push: (path: string) => void;
 };
 
+export type Branch = { name: string };
+
+export type PullRequestListResult = {
+  items: PullRequest[];
+  links: Record<string, string>;
+};
+
+export type CommitListItem = {
+  sha: string;
+  commit: {
+    message: string;
+    author: { name: string; date: string };
+  };
+  author?: { login: string } | null;
+};
+
+function repoApiPath(owner: string, repo: string): string {
+  return `/api/v3/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+}
+
+function parseLinkHeader(header: string | null): Record<string, string> {
+  const links: Record<string, string> = {};
+  if (!header) return links;
+  for (const part of header.split(",")) {
+    const match = part.match(/<([^>]+)>\s*;\s*rel="([^"]+)"/);
+    if (match) links[match[2]] = match[1];
+  }
+  return links;
+}
+
 export class ApiClient {
   private token: string | null = null;
   private router: RouterLike | null;
@@ -128,8 +158,56 @@ export class ApiClient {
     return this.request<T>("PATCH", path, body);
   }
 
-  put<T>(path: string, body?: unknown): Promise<T> {
+  private put<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>("PUT", path, body);
+  }
+
+  private async requestWithResponse<T>(
+    method: HttpMethod,
+    path: string,
+    body?: unknown,
+  ): Promise<{ data: T; response: Response }> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (this.token) {
+      headers.Authorization = `Bearer ${this.token}`;
+    }
+
+    const response = await fetch(`${this.baseURL}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+
+    if (!response.ok) {
+      let message = response.statusText;
+      try {
+        const errorBody = (await response.json()) as { message?: string };
+        message = errorBody.message ?? message;
+      } catch {
+        // ignore JSON parse errors
+      }
+
+      if (response.status === 401) {
+        this.setToken(null);
+        this.router?.push("/login");
+      }
+
+      throw new ApiError(response.status, message);
+    }
+
+    const contentType = response.headers.get("content-type");
+    if (
+      response.status === 204 ||
+      !contentType?.includes("application/json")
+    ) {
+      return { data: undefined as T, response };
+    }
+
+    const data = (await response.json()) as T;
+    return { data, response };
   }
 
   del(path: string): Promise<void> {
@@ -164,6 +242,13 @@ export class ApiClient {
     revoke: (id: number) => this.del(`/api/v3/user/tokens/${id}`),
   };
 
+  branches = {
+    list: (owner: string, repo: string, perPage = 100) =>
+      this.get<Branch[]>(
+        `${repoApiPath(owner, repo)}/branches?per_page=${perPage}`,
+      ),
+  };
+
   pullRequests = {
     list: (
       owner: string,
@@ -178,50 +263,92 @@ export class ApiClient {
       if (perPage !== undefined) params.set("per_page", String(perPage));
       const query = params.toString();
       return this.get<PullRequest[]>(
-        `/api/v3/repos/${owner}/${repo}/pulls${query ? `?${query}` : ""}`,
+        `${repoApiPath(owner, repo)}/pulls${query ? `?${query}` : ""}`,
       );
     },
-    get: (owner: string, repo: string, number: number) =>
-      this.get<PullRequest>(`/api/v3/repos/${owner}/${repo}/pulls/${number}`),
+    listWithPagination: async (
+      owner: string,
+      repo: string,
+      state?: string,
+      page?: number,
+      perPage?: number,
+    ): Promise<PullRequestListResult> => {
+      const params = new URLSearchParams();
+      if (state) params.set("state", state);
+      if (page !== undefined) params.set("page", String(page));
+      if (perPage !== undefined) params.set("per_page", String(perPage));
+      const query = params.toString();
+      const { data, response } = await this.requestWithResponse<PullRequest[]>(
+        "GET",
+        `${repoApiPath(owner, repo)}/pulls${query ? `?${query}` : ""}`,
+      );
+      return {
+        items: data ?? [],
+        links: parseLinkHeader(response.headers.get("Link")),
+      };
+    },
+    get: (owner: string, repo: string, pullNumber: number) =>
+      this.get<PullRequest>(
+        `${repoApiPath(owner, repo)}/pulls/${pullNumber}`,
+      ),
     create: (owner: string, repo: string, input: CreatePullRequestInput) =>
-      this.post<PullRequest>(`/api/v3/repos/${owner}/${repo}/pulls`, input),
+      this.post<PullRequest>(`${repoApiPath(owner, repo)}/pulls`, input),
     update: (
       owner: string,
       repo: string,
-      number: number,
+      pullNumber: number,
       patch: UpdatePullRequestInput,
     ) =>
       this.patch<PullRequest>(
-        `/api/v3/repos/${owner}/${repo}/pulls/${number}`,
+        `${repoApiPath(owner, repo)}/pulls/${pullNumber}`,
         patch,
       ),
-    merge: (owner: string, repo: string, number: number, input: MergeInput) =>
-      this.put<MergeResponse>(
-        `/api/v3/repos/${owner}/${repo}/pulls/${number}/merge`,
+    merge: (
+      owner: string,
+      repo: string,
+      pullNumber: number,
+      input: MergeInput,
+    ) =>
+      this.post<MergeResponse>(
+        `${repoApiPath(owner, repo)}/pulls/${pullNumber}/merge`,
         input,
       ),
-    getFiles: (owner: string, repo: string, number: number) =>
+    getFiles: (owner: string, repo: string, pullNumber: number) =>
       this.get<PullRequestFile[]>(
-        `/api/v3/repos/${owner}/${repo}/pulls/${number}/files`,
+        `${repoApiPath(owner, repo)}/pulls/${pullNumber}/files`,
       ),
-    listReviews: (owner: string, repo: string, number: number) =>
+    listReviews: (owner: string, repo: string, pullNumber: number) =>
       this.get<Review[]>(
-        `/api/v3/repos/${owner}/${repo}/pulls/${number}/reviews`,
+        `${repoApiPath(owner, repo)}/pulls/${pullNumber}/reviews`,
       ),
     createReview: (
       owner: string,
       repo: string,
-      number: number,
+      pullNumber: number,
       input: CreateReviewInput,
     ) =>
       this.post<Review>(
-        `/api/v3/repos/${owner}/${repo}/pulls/${number}/reviews`,
+        `${repoApiPath(owner, repo)}/pulls/${pullNumber}/reviews`,
         input,
       ),
-    listReviewComments: (owner: string, repo: string, number: number) =>
+    listReviewComments: (owner: string, repo: string, pullNumber: number) =>
       this.get<ReviewComment[]>(
-        `/api/v3/repos/${owner}/${repo}/pulls/${number}/comments`,
+        `${repoApiPath(owner, repo)}/pulls/${pullNumber}/comments`,
       ),
+    listCommits: (
+      owner: string,
+      repo: string,
+      sha: string,
+      page?: number,
+      perPage?: number,
+    ) => {
+      const params = new URLSearchParams({ sha });
+      if (page !== undefined) params.set("page", String(page));
+      if (perPage !== undefined) params.set("per_page", String(perPage));
+      return this.get<CommitListItem[]>(
+        `${repoApiPath(owner, repo)}/commits?${params.toString()}`,
+      );
+    },
   };
 }
 
@@ -256,6 +383,14 @@ export function revokeToken(id: number): Promise<void> {
   return createAuthenticatedClient().tokens.revoke(id);
 }
 
+export function listBranches(
+  owner: string,
+  repo: string,
+  perPage?: number,
+): Promise<Branch[]> {
+  return createAuthenticatedClient().branches.list(owner, repo, perPage);
+}
+
 export function listPullRequests(
   owner: string,
   repo: string,
@@ -272,12 +407,28 @@ export function listPullRequests(
   );
 }
 
+export function listPullRequestsWithPagination(
+  owner: string,
+  repo: string,
+  state?: string,
+  page?: number,
+  perPage?: number,
+): Promise<PullRequestListResult> {
+  return createAuthenticatedClient().pullRequests.listWithPagination(
+    owner,
+    repo,
+    state,
+    page,
+    perPage,
+  );
+}
+
 export function getPullRequest(
   owner: string,
   repo: string,
-  number: number,
+  pullNumber: number,
 ): Promise<PullRequest> {
-  return createAuthenticatedClient().pullRequests.get(owner, repo, number);
+  return createAuthenticatedClient().pullRequests.get(owner, repo, pullNumber);
 }
 
 export function createPullRequest(
@@ -291,13 +442,13 @@ export function createPullRequest(
 export function updatePullRequest(
   owner: string,
   repo: string,
-  number: number,
+  pullNumber: number,
   patch: UpdatePullRequestInput,
 ): Promise<PullRequest> {
   return createAuthenticatedClient().pullRequests.update(
     owner,
     repo,
-    number,
+    pullNumber,
     patch,
   );
 }
@@ -305,13 +456,13 @@ export function updatePullRequest(
 export function mergePullRequest(
   owner: string,
   repo: string,
-  number: number,
+  pullNumber: number,
   input: MergeInput,
 ): Promise<MergeResponse> {
   return createAuthenticatedClient().pullRequests.merge(
     owner,
     repo,
-    number,
+    pullNumber,
     input,
   );
 }
@@ -319,33 +470,37 @@ export function mergePullRequest(
 export function getPullRequestFiles(
   owner: string,
   repo: string,
-  number: number,
+  pullNumber: number,
 ): Promise<PullRequestFile[]> {
-  return createAuthenticatedClient().pullRequests.getFiles(owner, repo, number);
+  return createAuthenticatedClient().pullRequests.getFiles(
+    owner,
+    repo,
+    pullNumber,
+  );
 }
 
 export function listReviews(
   owner: string,
   repo: string,
-  number: number,
+  pullNumber: number,
 ): Promise<Review[]> {
   return createAuthenticatedClient().pullRequests.listReviews(
     owner,
     repo,
-    number,
+    pullNumber,
   );
 }
 
 export function createReview(
   owner: string,
   repo: string,
-  number: number,
+  pullNumber: number,
   input: CreateReviewInput,
 ): Promise<Review> {
   return createAuthenticatedClient().pullRequests.createReview(
     owner,
     repo,
-    number,
+    pullNumber,
     input,
   );
 }
@@ -353,11 +508,27 @@ export function createReview(
 export function listReviewComments(
   owner: string,
   repo: string,
-  number: number,
+  pullNumber: number,
 ): Promise<ReviewComment[]> {
   return createAuthenticatedClient().pullRequests.listReviewComments(
     owner,
     repo,
-    number,
+    pullNumber,
+  );
+}
+
+export function listPullRequestCommits(
+  owner: string,
+  repo: string,
+  sha: string,
+  page?: number,
+  perPage?: number,
+): Promise<CommitListItem[]> {
+  return createAuthenticatedClient().pullRequests.listCommits(
+    owner,
+    repo,
+    sha,
+    page,
+    perPage,
   );
 }

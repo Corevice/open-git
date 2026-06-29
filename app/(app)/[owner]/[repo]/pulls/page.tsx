@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { ApiError, listPullRequests } from "@/lib/api";
+import { ApiError, listPullRequests, listPullRequestsWithPagination } from "@/lib/api";
 import type { PullRequest } from "@/types/pull-request";
 
 type Tab = "open" | "closed" | "merged";
@@ -103,6 +103,21 @@ function prStatusBadge(pr: PullRequest): {
   };
 }
 
+function paginationHref(linkUrl: string, basePath: string): string {
+  try {
+    const url = new URL(linkUrl, "http://localhost");
+    const params = new URLSearchParams();
+    const state = url.searchParams.get("state");
+    const pageParam = url.searchParams.get("page");
+    if (state && state !== "open") params.set("state", state);
+    if (pageParam && pageParam !== "1") params.set("page", pageParam);
+    const query = params.toString();
+    return query ? `${basePath}?${query}` : basePath;
+  } catch {
+    return basePath;
+  }
+}
+
 function authorLogin(pr: PullRequest): string {
   return pr.user?.login ?? pr.author_id ?? "unknown";
 }
@@ -134,6 +149,8 @@ export default function PullsPage({ params, searchParams }: Props) {
   const [page, setPage] = useState("1");
 
   const [pulls, setPulls] = useState<PullRequest[]>([]);
+  const [pagination, setPagination] = useState<Record<string, string>>({});
+  const [tabCounts, setTabCounts] = useState({ open: 0, closed: 0, merged: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -149,11 +166,9 @@ export default function PullsPage({ params, searchParams }: Props) {
   const basePath = owner && repo ? `/${owner}/${repo}/pulls` : "";
 
   const buildQuery = useCallback(
-    (overrides: Record<string, string | undefined> = {}) => {
+    (overrides: { state?: Tab; page?: string } = {}) => {
       const qs = new URLSearchParams();
-      const nextTab = overrides.state
-        ? tabFromState(overrides.state)
-        : activeTab;
+      const nextTab = overrides.state ?? activeTab;
       const nextPage = overrides.page ?? page;
 
       if (nextTab !== "open") qs.set("state", nextTab);
@@ -165,10 +180,38 @@ export default function PullsPage({ params, searchParams }: Props) {
     [activeTab, page],
   );
 
-  const navigate = (overrides: Record<string, string | undefined>) => {
+  const navigate = (overrides: { state?: Tab; page?: string }) => {
     if (!basePath) return;
     router.push(`${basePath}${buildQuery(overrides)}`);
   };
+
+  useEffect(() => {
+    if (!owner || !repo) return;
+
+    let cancelled = false;
+
+    async function loadCounts() {
+      try {
+        const [openData, closedData] = await Promise.all([
+          listPullRequests(owner, repo, "open", 1, 100),
+          listPullRequests(owner, repo, "closed", 1, 100),
+        ]);
+        if (cancelled) return;
+        setTabCounts({
+          open: filterByTab(openData, "open").length,
+          closed: filterByTab(closedData, "closed").length,
+          merged: filterByTab(closedData, "merged").length,
+        });
+      } catch {
+        // tab counts are best-effort
+      }
+    }
+
+    loadCounts();
+    return () => {
+      cancelled = true;
+    };
+  }, [owner, repo]);
 
   useEffect(() => {
     if (!owner || !repo) return;
@@ -180,7 +223,7 @@ export default function PullsPage({ params, searchParams }: Props) {
       setError(null);
       try {
         const pageNum = parseInt(page, 10) || 1;
-        const data = await listPullRequests(
+        const { items, links } = await listPullRequestsWithPagination(
           owner,
           repo,
           stateFromTab(activeTab),
@@ -188,7 +231,8 @@ export default function PullsPage({ params, searchParams }: Props) {
           30,
         );
         if (cancelled) return;
-        setPulls(filterByTab(data, activeTab));
+        setPulls(filterByTab(items, activeTab));
+        setPagination(links);
       } catch (e) {
         if (cancelled) return;
         if (e instanceof ApiError && e.status === 404) {
@@ -207,9 +251,9 @@ export default function PullsPage({ params, searchParams }: Props) {
     };
   }, [owner, repo, activeTab, page, router]);
 
-  const openCount = pulls.filter((p) => p.state === "open" && !p.merged_at).length;
-  const closedCount = pulls.filter((p) => p.state === "closed" && !p.merged_at).length;
-  const mergedCount = pulls.filter((p) => p.merged_at).length;
+  const openCount = tabCounts.open;
+  const closedCount = tabCounts.closed;
+  const mergedCount = tabCounts.merged;
 
   if (!owner || !repo) {
     return (
@@ -316,6 +360,27 @@ export default function PullsPage({ params, searchParams }: Props) {
                   </div>
                 );
               })
+            )}
+          </div>
+        )}
+
+        {(pagination.prev || pagination.next) && (
+          <div className="flex justify-center gap-2 py-5">
+            {pagination.prev && (
+              <Link
+                href={paginationHref(pagination.prev, basePath)}
+                className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#0969da]"
+              >
+                ← Prev
+              </Link>
+            )}
+            {pagination.next && (
+              <Link
+                href={paginationHref(pagination.next, basePath)}
+                className="px-3 py-1.5 border border-[#d0d7de] rounded-md text-sm text-[#0969da]"
+              >
+                Next →
+              </Link>
             )}
           </div>
         )}

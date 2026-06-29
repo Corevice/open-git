@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { ApiError, createPullRequest } from "@/lib/api";
+import { ApiError, createPullRequest, listBranches } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
 
 type Branch = { name: string };
@@ -35,9 +35,8 @@ export default function NewPullRequestPage({ params }: Props) {
 
   useEffect(() => {
     if (!owner || !repo) return;
-    fetch(`/repos/${owner}/${repo}/branches?per_page=100`)
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data: Branch[]) => {
+    listBranches(owner, repo)
+      .then((data) => {
         setBranches(data);
         if (data.length > 0) {
           const defaultBranch = data.find((b) => b.name === "main") ?? data[0];
@@ -58,6 +57,12 @@ export default function NewPullRequestPage({ params }: Props) {
     }
     if (branchError) {
       setError(branchError);
+      return;
+    }
+
+    const allowedBranches = new Set(branches.map((branch) => branch.name));
+    if (!allowedBranches.has(base) || !allowedBranches.has(head)) {
+      setError("Selected branches are not valid for this repository");
       return;
     }
 
