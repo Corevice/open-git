@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import OrgPeoplePage from "@/app/(app)/[owner]/people/page";
+import { resolvedParams } from "./support/params";
 
 const mockPush = vi.fn();
 
@@ -60,7 +61,7 @@ describe("OrgPeoplePage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(
-      <OrgPeoplePage params={Promise.resolve({ owner: "acme-corp" })} />,
+      <OrgPeoplePage params={resolvedParams({ owner: "acme-corp" })} />,
     );
 
     expect(await screen.findByText("alice")).toBeInTheDocument();
@@ -121,7 +122,7 @@ describe("OrgPeoplePage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(
-      <OrgPeoplePage params={Promise.resolve({ owner: "acme-corp" })} />,
+      <OrgPeoplePage params={resolvedParams({ owner: "acme-corp" })} />,
     );
 
     await screen.findByRole("heading", { name: "Invite member" });
