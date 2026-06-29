@@ -78,7 +78,7 @@ func mapErrorType(err error) string {
 func inferErrorType(message string) string {
 	lower := strings.ToLower(message)
 	switch {
-	case strings.Contains(lower, "complexity limit"):
+	case strings.Contains(lower, "complexity"):
 		return errorTypeMaxNodeLimitExceeded
 	case strings.Contains(lower, "depth limit"):
 		return errorTypeMaxNodeLimitExceeded

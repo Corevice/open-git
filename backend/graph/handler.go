@@ -15,6 +15,7 @@ import (
 	"github.com/99designs/gqlgen/graphql/handler/transport"
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/labstack/echo/v4"
+	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	"github.com/open-git/backend/graph/dataloader"
@@ -33,7 +34,7 @@ func NewHandler(resolver *Resolver, cfg *config.Config) echo.HandlerFunc {
 	srv.AddTransport(transport.Options{})
 	srv.AddTransport(transport.GET{})
 	srv.AddTransport(transport.POST{})
-	srv.SetQueryCache(lru.New[string](1000))
+	srv.SetQueryCache(lru.New[*ast.QueryDocument](1000))
 	srv.Use(extension.AutomaticPersistedQuery{
 		Cache: lru.New[string](100),
 	})
@@ -103,9 +104,10 @@ func runLoaderMiddleware(mw echo.MiddlewareFunc, c echo.Context) error {
 func blockIntrospectionOperations(ctx context.Context, next graphql.OperationHandler) graphql.ResponseHandler {
 	opCtx := graphql.GetOperationContext(ctx)
 	if opCtx != nil && isIntrospectionOperation(opCtx.OperationName, opCtx.RawQuery) {
-		graphql.AddError(ctx, gqlerror.Errorf("GraphQL introspection is disabled"))
-		return func(ctx context.Context) *graphql.Response {
-			return &graphql.Response{Errors: graphql.GetErrors(ctx)}
+		return func(_ context.Context) *graphql.Response {
+			return &graphql.Response{
+				Errors: gqlerror.List{gqlerror.Errorf("GraphQL introspection is disabled")},
+			}
 		}
 	}
 	return next(ctx)

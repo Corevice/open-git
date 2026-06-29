@@ -5,6 +5,7 @@ import (
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/vektah/gqlparser/v2/ast"
+	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	"github.com/open-git/backend/graph/generated"
 	"github.com/open-git/backend/graph/model"
@@ -18,20 +19,20 @@ const (
 func NewComplexityRoot() generated.ComplexityRoot {
 	root := generated.ComplexityRoot{}
 
-	root.Issue.Comments = func(childComplexity int, first, _ *int, last, _ *string) int {
+	root.Issue.Comments = func(childComplexity int, first *int, _ *string, last *int, _ *string) int {
 		return listFieldComplexity(childComplexity, first, last)
 	}
-	root.Issue.Labels = func(childComplexity int, first, _ *int, last, _ *string) int {
+	root.Issue.Labels = func(childComplexity int, first *int, _ *string, last *int, _ *string) int {
 		return listFieldComplexity(childComplexity, first, last)
 	}
 
-	root.Repository.Issues = func(childComplexity int, first, _ *int, last, _ *string, _ []model.IssueState, _ []string) int {
+	root.Repository.Issues = func(childComplexity int, first *int, _ *string, last *int, _ *string, _ []model.IssueState, _ []string) int {
 		return listFieldComplexity(childComplexity, first, last)
 	}
-	root.Repository.PullRequests = func(childComplexity int, first, _ *int, last, _ *string, _ []model.PullRequestState) int {
+	root.Repository.PullRequests = func(childComplexity int, first *int, _ *string, last *int, _ *string, _ []model.PullRequestState) int {
 		return listFieldComplexity(childComplexity, first, last)
 	}
-	root.Repository.Labels = func(childComplexity int, first, _ *int, last, _ *string) int {
+	root.Repository.Labels = func(childComplexity int, first *int, _ *string, last *int, _ *string) int {
 		return listFieldComplexity(childComplexity, first, last)
 	}
 
@@ -56,18 +57,19 @@ func (d depthLimiter) ExtensionName() string {
 	return "DepthLimiter"
 }
 
-func (d depthLimiter) Validate(_ *ast.Schema) error {
+func (d depthLimiter) Validate(_ graphql.ExecutableSchema) error {
 	return nil
 }
 
 func (d depthLimiter) InterceptOperation(ctx context.Context, next graphql.OperationHandler) graphql.ResponseHandler {
 	opCtx := graphql.GetOperationContext(ctx)
-	if opCtx != nil {
+	if opCtx != nil && opCtx.Operation != nil {
 		depth := selectionDepth(opCtx.Operation.SelectionSet, 0)
 		if depth > d.maxDepth {
-			graphql.AddError(ctx, &domainDepthError{limit: d.maxDepth})
-			return func(ctx context.Context) *graphql.Response {
-				return &graphql.Response{Errors: graphql.GetErrors(ctx)}
+			return func(_ context.Context) *graphql.Response {
+				return &graphql.Response{
+					Errors: gqlerror.List{gqlerror.Errorf("query depth limit exceeded")},
+				}
 			}
 		}
 	}

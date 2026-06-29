@@ -55,10 +55,10 @@ func newLoaders(
 	repoRepo domainrepo.IRepositoryRepository,
 ) *Loaders {
 	return &Loaders{
-		UserByID:       dataloadgen.NewLoader(batchLoad(userRepo)),
-		LabelByID:      dataloadgen.NewLoader(batchLoadOptional(labelRepo)),
-		MilestoneByID:  dataloadgen.NewLoader(batchLoadOptional(milestoneRepo)),
-		RepositoryByID: dataloadgen.NewLoader(batchLoadOptional(repoRepo)),
+		UserByID:       dataloadgen.NewLoader(batchLoad[entity.User](userRepo)),
+		LabelByID:      dataloadgen.NewLoader(batchLoadOptional[entity.Label](labelRepo)),
+		MilestoneByID:  dataloadgen.NewLoader(batchLoadOptional[entity.Milestone](milestoneRepo)),
+		RepositoryByID: dataloadgen.NewLoader(batchLoadOptional[entity.Repository](repoRepo)),
 	}
 }
 
