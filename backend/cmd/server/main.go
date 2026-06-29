@@ -936,15 +936,16 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 }
 
 func loadLicensesFromFile(path string) []handler.LicenseEntry {
+	log := logger.Global()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		logger.Global().Warn().Err(err).Str("path", path).Msg("failed to load licenses file")
+		log.Warn().Err(err).Str("path", path).Msg("failed to load licenses file")
 		return []handler.LicenseEntry{}
 	}
 
 	var entries []handler.LicenseEntry
 	if err := json.Unmarshal(data, &entries); err != nil {
-		logger.Global().Warn().Err(err).Str("path", path).Msg("failed to parse licenses file")
+		log.Warn().Err(err).Str("path", path).Msg("failed to parse licenses file")
 		return []handler.LicenseEntry{}
 	}
 	return entries
