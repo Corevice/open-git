@@ -414,16 +414,19 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	keys.POST("", sshKeyHandler.Add)
 	keys.DELETE("/:key_id", sshKeyHandler.Delete)
 
-	resolveOwner := appmiddleware.ResolveOwner(orgRepo)
+	resolveOwner := appmiddleware.ResolveOwner(orgRepo, orgRepo)
+	// noopAuth is a deliberate no-op: authMiddleware is already applied on the
+	// parent group (apiOwnerScoped / v3OwnerScoped). Issue/PR handlers require an
+	// auth middleware parameter for route registration but must not double-apply auth.
 	noopAuth := func(next echo.HandlerFunc) echo.HandlerFunc { return next }
 
-	apiOwnerOrg := api.Group("", resolveOwner)
-	repositoryHandler.RegisterRoutes(apiOwnerOrg, authMiddleware)
-	contentHandler.RegisterRoutes(apiOwnerOrg)
+	apiRepos := api.Group("")
+	repositoryHandler.RegisterRoutes(apiRepos, authMiddleware)
+	contentHandler.RegisterRoutes(apiRepos)
 
-	apiOwnerOrgAuth := api.Group("", authMiddleware, resolveOwner)
-	issueHandler.RegisterRoutes(apiOwnerOrgAuth, noopAuth)
-	pullRequestHandler.RegisterRoutes(apiOwnerOrgAuth, noopAuth)
+	apiOwnerScoped := api.Group("", authMiddleware, resolveOwner)
+	issueHandler.RegisterRoutes(apiOwnerScoped, noopAuth)
+	pullRequestHandler.RegisterRoutes(apiOwnerScoped, noopAuth)
 	oauthHandler.RegisterRoutes(api, authMiddleware)
 	e.GET("/:owner/:repo.git/info/refs", gitHTTPHandler.InfoRefs, realOptionalGitAuth)
 	e.POST("/:owner/:repo.git/git-upload-pack", gitHTTPHandler.UploadPack, realOptionalGitAuth)
@@ -435,14 +438,14 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 
 	userHandler.RegisterRoutes(v3, authMiddleware)
 
-	v3OwnerOrg := v3.Group("", resolveOwner)
-	orgHandler.RegisterRoutes(v3OwnerOrg, authMiddleware)
-	repositoryHandler.RegisterRoutes(v3OwnerOrg, authMiddleware)
-	contentHandler.RegisterRoutes(v3OwnerOrg)
+	v3Repos := v3.Group("")
+	orgHandler.RegisterRoutes(v3Repos, authMiddleware)
+	repositoryHandler.RegisterRoutes(v3Repos, authMiddleware)
+	contentHandler.RegisterRoutes(v3Repos)
 
-	v3OwnerOrgAuth := v3.Group("", authMiddleware, resolveOwner)
-	issueHandler.RegisterRoutes(v3OwnerOrgAuth, noopAuth)
-	pullRequestHandler.RegisterRoutes(v3OwnerOrgAuth, noopAuth)
+	v3OwnerScoped := v3.Group("", authMiddleware, resolveOwner)
+	issueHandler.RegisterRoutes(v3OwnerScoped, noopAuth)
+	pullRequestHandler.RegisterRoutes(v3OwnerScoped, noopAuth)
 
 	v3Tokens := v3.Group("/user/tokens", authMiddleware)
 	v3Tokens.GET("", tokenHandler.List)

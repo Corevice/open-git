@@ -6,8 +6,13 @@ import (
 )
 
 type Actor struct {
-	UserID         uuid.UUID
+	UserID         int64
 	OrganizationID uuid.UUID
+}
+
+// UserUUID returns the entity-layer UUID encoding of UserID.
+func (a Actor) UserUUID() uuid.UUID {
+	return Int64ToUUID(a.UserID)
 }
 
 const actorContextKey = "actor"
