@@ -1,0 +1,4 @@
+requests==2.31.0
+django==4.2.7
+# pinned utility library
+flask==3.0.0
