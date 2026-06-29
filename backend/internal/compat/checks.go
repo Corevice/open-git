@@ -19,6 +19,10 @@ const (
 	checkValidationErrorFormat = "validation_error_format"
 	checkSnakeCaseFields       = "snake_case_fields"
 	checkDatetimeFields        = "datetime_fields"
+	checkIntegerID             = "integer_id"
+	checkRequiredFields        = "required_fields"
+	checkHTTPSURLField         = "https_url_field"
+	checkDocumentationURL      = "documentation_url"
 )
 
 // CheckStatusCode verifies the response status matches expected.
@@ -290,4 +294,148 @@ func collectInvalidDatetimeFields(v any, prefix string, invalid *[]string) {
 
 func isDatetimeKey(key string) bool {
 	return strings.HasSuffix(key, "_at") || strings.HasSuffix(key, "_on")
+}
+
+// CheckIntegerID verifies the top-level id field is a JSON number, not a string.
+func CheckIntegerID() CheckFunc {
+	return func(_ *http.Response, body []byte) CheckResult {
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return CheckResult{
+				Name:   checkIntegerID,
+				Passed: false,
+				Diff:   fmt.Sprintf("invalid JSON: %v", err),
+			}
+		}
+
+		idRaw, ok := payload["id"]
+		if !ok {
+			return CheckResult{
+				Name:   checkIntegerID,
+				Passed: false,
+				Diff:   "missing field: id",
+			}
+		}
+
+		switch idRaw.(type) {
+		case float64, json.Number:
+			return CheckResult{Name: checkIntegerID, Passed: true}
+		default:
+			return CheckResult{
+				Name:   checkIntegerID,
+				Passed: false,
+				Diff:   fmt.Sprintf("id is not a JSON number, got %T", idRaw),
+			}
+		}
+	}
+}
+
+// CheckRequiredFields verifies every named field is present and non-null in the top-level JSON object.
+func CheckRequiredFields(fields ...string) CheckFunc {
+	return func(_ *http.Response, body []byte) CheckResult {
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return CheckResult{
+				Name:   checkRequiredFields,
+				Passed: false,
+				Diff:   fmt.Sprintf("invalid JSON: %v", err),
+			}
+		}
+
+		var missing []string
+		for _, field := range fields {
+			val, ok := payload[field]
+			if !ok {
+				missing = append(missing, field)
+				continue
+			}
+			if val == nil {
+				missing = append(missing, field+"(null)")
+			}
+		}
+
+		if len(missing) == 0 {
+			return CheckResult{Name: checkRequiredFields, Passed: true}
+		}
+		return CheckResult{
+			Name:   checkRequiredFields,
+			Passed: false,
+			Diff:   fmt.Sprintf("missing or null fields: %s", strings.Join(missing, ", ")),
+		}
+	}
+}
+
+// CheckHTTPSURLField verifies the named field exists and starts with "https://".
+func CheckHTTPSURLField(field string) CheckFunc {
+	return func(_ *http.Response, body []byte) CheckResult {
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return CheckResult{
+				Name:   checkHTTPSURLField,
+				Passed: false,
+				Diff:   fmt.Sprintf("invalid JSON: %v", err),
+			}
+		}
+
+		val, ok := payload[field]
+		if !ok {
+			return CheckResult{
+				Name:   checkHTTPSURLField,
+				Passed: false,
+				Diff:   fmt.Sprintf("missing field: %s", field),
+			}
+		}
+
+		urlStr, ok := val.(string)
+		if !ok {
+			return CheckResult{
+				Name:   checkHTTPSURLField,
+				Passed: false,
+				Diff:   fmt.Sprintf("field %s is not a string", field),
+			}
+		}
+
+		if !strings.HasPrefix(urlStr, "https://") {
+			return CheckResult{
+				Name:   checkHTTPSURLField,
+				Passed: false,
+				Diff:   fmt.Sprintf("field %s does not start with https://, got %q", field, urlStr),
+			}
+		}
+
+		return CheckResult{Name: checkHTTPSURLField, Passed: true}
+	}
+}
+
+// CheckDocumentationURL verifies documentation_url is present in the response body.
+func CheckDocumentationURL() CheckFunc {
+	return func(_ *http.Response, body []byte) CheckResult {
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return CheckResult{
+				Name:   checkDocumentationURL,
+				Passed: false,
+				Diff:   fmt.Sprintf("invalid JSON: %v", err),
+			}
+		}
+
+		doc, ok := payload["documentation_url"]
+		if !ok {
+			return CheckResult{
+				Name:   checkDocumentationURL,
+				Passed: false,
+				Diff:   "missing field: documentation_url",
+			}
+		}
+
+		if doc == nil {
+			return CheckResult{
+				Name:   checkDocumentationURL,
+				Passed: false,
+				Diff:   "field documentation_url is null",
+			}
+		}
+
+		return CheckResult{Name: checkDocumentationURL, Passed: true}
+	}
 }

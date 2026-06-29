@@ -9,6 +9,14 @@ import (
 )
 
 func TestValidate(t *testing.T) {
+	validBase := config.Config{
+		DBType:    "sqlite",
+		Port:      "8080",
+		JWTSecret: "secret",
+		Domain:    "git.example.com",
+		TLSMode:   "selfsigned",
+	}
+
 	tests := []struct {
 		name    string
 		cfg     config.Config
@@ -35,12 +43,7 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name: "sqlite allows empty DSN",
-			cfg: config.Config{
-				DBType:    "sqlite",
-				DBDSN:     "",
-				Port:      "8080",
-				JWTSecret: "secret",
-			},
+			cfg: validBase,
 		},
 		{
 			name: "port out of range",
@@ -50,6 +53,93 @@ func TestValidate(t *testing.T) {
 				JWTSecret: "secret",
 			},
 			wantErr: "port",
+		},
+		{
+			name: "domain empty returns error",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "",
+				TLSMode:   "selfsigned",
+			},
+			wantErr: "DOMAIN",
+		},
+		{
+			name: "tls_mode=acme without email returns error",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "git.example.com",
+				TLSMode:   "acme",
+				ACMEEmail: "",
+			},
+			wantErr: "ACME_EMAIL",
+		},
+		{
+			name: "tls_mode=acme with invalid email returns error",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "git.example.com",
+				TLSMode:   "acme",
+				ACMEEmail: "not-an-email",
+			},
+			wantErr: "ACME_EMAIL",
+		},
+		{
+			name: "tls_mode=custom without cert returns error",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "git.example.com",
+				TLSMode:   "custom",
+				TLSCertFile: "",
+				TLSKeyFile:  "/path/to/key.pem",
+			},
+			wantErr: "TLS_CERT_FILE",
+		},
+		{
+			name: "tls_mode=custom without key returns error",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "git.example.com",
+				TLSMode:   "custom",
+				TLSCertFile: "/path/to/cert.pem",
+				TLSKeyFile:  "",
+			},
+			wantErr: "TLS_KEY_FILE",
+		},
+		{
+			name: "tls_mode=invalid returns error",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "git.example.com",
+				TLSMode:   "invalid",
+			},
+			wantErr: "TLS_MODE",
+		},
+		{
+			name: "tls_mode=selfsigned domain set passes",
+			cfg:  validBase,
+		},
+		{
+			name: "all valid acme config passes",
+			cfg: config.Config{
+				DBType:    "sqlite",
+				Port:      "8080",
+				JWTSecret: "secret",
+				Domain:    "git.example.com",
+				TLSMode:   "acme",
+				ACMEEmail: "admin@example.com",
+			},
 		},
 	}
 

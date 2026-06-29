@@ -2,50 +2,33 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
-import LogViewer from "@/components/actions/LogViewer";
-import { API_TOKEN_KEY } from "@/lib/api";
-import { env } from "@/lib/env";
-import type { WorkflowJobResponse } from "@/types/runner";
+import { useCallback, useEffect, useState } from "react";
+import { ArtifactList } from "@/components/actions/ArtifactList";
+import { JobLogViewer } from "@/components/actions/JobLogViewer";
+import { RunActions } from "@/components/actions/RunActions";
+import { RunStatusBadge } from "@/components/actions/RunStatusBadge";
+import {
+  getRun,
+  listArtifacts,
+  listJobs,
+  type Artifact,
+  type WorkflowJob,
+  type WorkflowRun,
+} from "@/lib/api/actions";
 
-type WorkflowStep = {
-  name: string;
-  status: string;
-  conclusion: string | null;
-  number: number;
-};
-
-type WorkflowJob = {
-  id: number;
-  name: string;
-  status: string;
-  conclusion: string | null;
-  steps?: WorkflowStep[];
-};
-
-type WorkflowRunDetail = {
-  id: number;
-  name: string;
-  run_number: number;
-  status: string;
-  conclusion: string | null;
-  head_branch: string;
-  head_sha: string;
-  parse_error_line?: number;
-  parse_error_message?: string;
-  jobs?: WorkflowJob[];
-};
-
-function stepStatusIcon(status: string, conclusion: string | null): string {
-  if (status === "in_progress" || status === "queued") return "🟡";
-  if (conclusion === "success") return "✅";
-  if (conclusion === "failure") return "❌";
-  if (conclusion === "skipped" || conclusion === "cancelled") return "⊘";
-  return "○";
+function getUserCanWrite(): boolean {
+  if (typeof window === "undefined") return true;
+  const stored = localStorage.getItem("open-git-user-can-write");
+  return stored === null ? true : stored === "true";
 }
 
-function jobStatusIcon(job: WorkflowJob): string {
-  return stepStatusIcon(job.status, job.conclusion);
+function EmptyState({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-md border border-[#d0d7de] bg-white px-6 py-12 text-center">
+      <h2 className="text-base font-semibold text-[#1f2328]">{title}</h2>
+      <p className="mt-2 text-sm text-[#656d76]">{description}</p>
+    </div>
+  );
 }
 
 export default function ActionRunDetailPage() {
@@ -54,97 +37,91 @@ export default function ActionRunDetailPage() {
   const repo = params.repo as string;
   const runId = params.id as string;
 
-  const [run, setRun] = useState<WorkflowRunDetail | null>(null);
+  const [run, setRun] = useState<WorkflowRun | null>(null);
+  const [jobs, setJobs] = useState<WorkflowJob[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [artifactsLoading, setArtifactsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expandedJobIds, setExpandedJobIds] = useState<Set<number>>(new Set());
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
-  const [runnerInfo, setRunnerInfo] = useState<WorkflowJobResponse | null>(
-    null,
-  );
-  const [runnerError, setRunnerError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
 
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch(`/api/repos/${owner}/${repo}/actions/runs/${runId}`);
-        if (!res.ok) throw new Error("Failed to load workflow run");
-        const data = (await res.json()) as WorkflowRunDetail;
-        if (cancelled) return;
-        setRun(data);
-        if (data.jobs?.length) {
-          setSelectedJobId(data.jobs[0].id);
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Failed to load workflow run");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+    try {
+      const [runData, jobsData] = await Promise.all([
+        getRun(owner, repo, runId),
+        listJobs(owner, repo, runId),
+      ]);
+
+      setRun(runData);
+      const loadedJobs = jobsData.jobs ?? [];
+      setJobs(loadedJobs);
+
+      const inProgressJob = loadedJobs.find(
+        (job) => job.status === "in_progress" || job.status === "queued",
+      );
+      const initialJob = inProgressJob ?? loadedJobs[0] ?? null;
+      if (initialJob) {
+        setSelectedJobId(initialJob.id);
+        setExpandedJobIds(new Set([initialJob.id]));
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load workflow run");
+    } finally {
+      setLoading(false);
     }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
   }, [owner, repo, runId]);
 
   useEffect(() => {
-    if (selectedJobId === null) {
-      setRunnerInfo(null);
-      setRunnerError(null);
-      return;
-    }
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!run) return;
 
     let cancelled = false;
 
-    async function loadRunnerInfo() {
-      setRunnerError(null);
+    async function loadArtifacts() {
+      setArtifactsLoading(true);
       try {
-        const headers: Record<string, string> = {
-          Accept: "application/json",
-        };
-        const token = localStorage.getItem(API_TOKEN_KEY);
-        if (token) {
-          headers.Authorization = `Bearer ${token}`;
-        }
-
-        const baseUrl = env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, "");
-        const response = await fetch(
-          `${baseUrl}/api/v1/${owner}/actions/jobs/${selectedJobId}`,
-          { headers },
-        );
-
-        if (response.status === 404) {
-          if (!cancelled) setRunnerInfo(null);
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error("Failed to load workflow job");
-        }
-
-        const data = (await response.json()) as WorkflowJobResponse;
-        if (!cancelled) setRunnerInfo(data);
-      } catch (e) {
+        const data = await listArtifacts(owner, repo, runId);
         if (!cancelled) {
-          setRunnerInfo(null);
-          setRunnerError(
-            e instanceof Error ? e.message : "Failed to load runner info",
-          );
+          setArtifacts(data.artifacts ?? []);
+        }
+      } catch {
+        if (!cancelled) {
+          setArtifacts([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setArtifactsLoading(false);
         }
       }
     }
 
-    loadRunnerInfo();
+    loadArtifacts();
+
     return () => {
       cancelled = true;
     };
-  }, [owner, selectedJobId]);
+  }, [owner, repo, runId, run]);
+
+  const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? null;
+
+  function toggleJobExpanded(jobId: number) {
+    setExpandedJobIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) {
+        next.delete(jobId);
+      } else {
+        next.add(jobId);
+      }
+      return next;
+    });
+  }
 
   if (loading) {
     return (
@@ -170,11 +147,14 @@ export default function ActionRunDetailPage() {
     );
   }
 
-  const selectedJob = run.jobs?.find((j) => j.id === selectedJobId) ?? run.jobs?.[0];
+  const parseErrorRun = run as WorkflowRun & {
+    parse_error_line?: number;
+    parse_error_message?: string;
+  };
 
   return (
     <div className="min-h-screen bg-[#f6f8fa] text-[#1f2328]">
-      <div className="max-w-[1280px] mx-auto px-6 py-6">
+      <div className="mx-auto max-w-[1280px] px-6 py-6">
         <div className="mb-4">
           <Link
             href={`/${owner}/${repo}/actions`}
@@ -182,12 +162,12 @@ export default function ActionRunDetailPage() {
           >
             ← Actions
           </Link>
-          <h1 className="text-2xl font-semibold mt-2">
+          <h1 className="mt-2 text-2xl font-semibold">
             {run.name}{" "}
-            <span className="text-[#656d76] font-normal">#{run.run_number}</span>
+            <span className="font-normal text-[#656d76]">#{run.run_number}</span>
           </h1>
-          <p className="text-sm text-[#656d76] mt-1">
-            <span className="bg-[#ddf4ff] text-[#0969da] px-1.5 py-0.5 rounded font-mono text-[11px]">
+          <p className="mt-1 text-sm text-[#656d76]">
+            <span className="rounded bg-[#ddf4ff] px-1.5 py-0.5 font-mono text-[11px] text-[#0969da]">
               {run.head_branch}
             </span>
             {" · "}
@@ -200,93 +180,85 @@ export default function ActionRunDetailPage() {
             role="alert"
             className="mb-4 rounded-md border border-[#cf222e] bg-[#ffebe9] px-4 py-3 text-sm text-[#cf222e]"
           >
-            Workflow parse error on line {run.parse_error_line ?? "?"}:{" "}
-            {run.parse_error_message ?? "Unknown parse error"}
+            Workflow parse error on line {parseErrorRun.parse_error_line ?? "?"}:{" "}
+            {parseErrorRun.parse_error_message ?? "Unknown parse error"}
           </div>
         )}
 
-        <div className="grid grid-cols-[280px_1fr] gap-6">
-          <div className="space-y-4">
-            <aside className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">
-              <div className="px-4 py-3 bg-[#f6f8fa] border-b border-[#d0d7de] text-sm font-semibold">
-                Jobs
+        <RunActions
+          owner={owner}
+          repo={repo}
+          runId={runId}
+          status={run.status}
+          conclusion={run.conclusion}
+          userCanWrite={getUserCanWrite()}
+          onActionComplete={load}
+        />
+
+        {jobs.length === 0 ? (
+          <EmptyState
+            title="No jobs found"
+            description="This workflow run does not have any jobs yet."
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_1fr]">
+            <aside className="space-y-2">
+              {jobs.map((job) => {
+                const isExpanded = expandedJobIds.has(job.id);
+                const isSelected = selectedJobId === job.id;
+
+                return (
+                  <section
+                    key={job.id}
+                    className="overflow-hidden rounded-md border border-[#d0d7de] bg-white"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedJobId(job.id);
+                        toggleJobExpanded(job.id);
+                      }}
+                      className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm hover:bg-[#fafbfc] ${
+                        isSelected ? "bg-[#ddf4ff]" : ""
+                      }`}
+                      aria-expanded={isExpanded}
+                    >
+                      <span className="font-medium">{job.name}</span>
+                      <RunStatusBadge status={job.status} conclusion={job.conclusion} />
+                    </button>
+                    {isExpanded && (
+                      <div className="border-t border-[#d8dee4] bg-[#f6f8fa] px-4 py-3 text-xs text-[#656d76]">
+                        Job #{job.id}
+                      </div>
+                    )}
+                  </section>
+                );
+              })}
+            </aside>
+
+            <main>
+              <div className="mb-3 text-sm font-semibold text-[#656d76]">
+                {selectedJob ? `Logs — ${selectedJob.name}` : "Logs"}
               </div>
-              {run.jobs && run.jobs.length > 0 ? (
-                <ul>
-                  {run.jobs.map((job) => (
-                    <li key={job.id} className="border-b border-[#d8dee4] last:border-b-0">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedJobId(job.id)}
-                        className={`w-full text-left px-4 py-3 text-sm hover:bg-[#fafbfc] ${
-                          selectedJob?.id === job.id ? "bg-[#ddf4ff] font-semibold" : ""
-                        }`}
-                      >
-                        <span className="mr-2">{jobStatusIcon(job)}</span>
-                        {job.name}
-                      </button>
-                      {selectedJob?.id === job.id && job.steps && job.steps.length > 0 && (
-                        <ul className="bg-[#f6f8fa] border-t border-[#d8dee4]">
-                          {job.steps.map((step) => (
-                            <li
-                              key={step.number}
-                              className="flex items-center gap-2 px-6 py-2 text-xs text-[#656d76]"
-                            >
-                              <span>{stepStatusIcon(step.status, step.conclusion)}</span>
-                              <span>{step.name}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="px-4 py-6 text-sm text-[#656d76]">No jobs</div>
+              {selectedJobId != null && (
+                <JobLogViewer
+                  owner={owner}
+                  repo={repo}
+                  jobId={String(selectedJobId)}
+                  isActive={selectedJob?.status === "in_progress"}
+                />
               )}
-            </aside>
-
-            <aside className="bg-white border border-[#d0d7de] rounded-md overflow-hidden">
-              <div className="px-4 py-3 bg-[#f6f8fa] border-b border-[#d0d7de] text-sm font-semibold">
-                Runner
-              </div>
-              <div className="space-y-3 px-4 py-4 text-sm">
-                {runnerError ? (
-                  <p className="text-[#cf222e]">{runnerError}</p>
-                ) : runnerInfo ? (
-                  <>
-                    <div>
-                      <div className="text-xs uppercase text-[#656d76]">
-                        Assigned runner
-                      </div>
-                      <div className="mt-1 font-mono text-xs">
-                        {runnerInfo.assigned_runner_id ?? "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs uppercase text-[#656d76]">
-                        Runner type
-                      </div>
-                      <div className="mt-1">{runnerInfo.runner_type ?? "—"}</div>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-[#656d76]">
-                    {selectedJob
-                      ? "No runner assignment for this job."
-                      : "Select a job to view runner assignment."}
-                  </p>
-                )}
-              </div>
-            </aside>
+            </main>
           </div>
+        )}
 
-          <main>
-            <div className="mb-3 text-sm font-semibold text-[#656d76]">
-              {selectedJob ? `Logs — ${selectedJob.name}` : "Logs"}
-            </div>
-            <LogViewer runId={runId} repoOwner={owner} repoName={repo} />
-          </main>
+        <div className="mt-6">
+          <ArtifactList
+            owner={owner}
+            repo={repo}
+            artifacts={artifacts}
+            loading={artifactsLoading}
+          />
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@ package pr_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -131,6 +132,24 @@ func (m *mockAuditLogRepo) Create(_ context.Context, log *entity.AuditLog) error
 	m.calls = append(m.calls, auditLogCall{
 		action:     log.Action,
 		targetType: log.TargetType,
+	})
+	return nil
+}
+
+func (m *mockAuditLogRepo) List(_ context.Context, _ uuid.UUID, _ string, _, _ int) ([]*entity.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockAuditLogRepo) InsertAuditLog(
+	_ context.Context,
+	_, _ uuid.UUID,
+	action, targetType string,
+	_ uuid.UUID,
+	_ json.RawMessage,
+) error {
+	m.calls = append(m.calls, auditLogCall{
+		action:     action,
+		targetType: targetType,
 	})
 	return nil
 }

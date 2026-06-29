@@ -309,7 +309,7 @@ func (r *sqlxWebhookRepository) scanWebhook(row *sqlx.Row) (*entity.Webhook, err
 		repositoryID      sql.NullString
 		secretEncrypted   []byte
 		eventsRaw         any
-		updatedAt         sql.NullTime
+		updatedAt         nullTime
 	)
 
 	err := row.Scan(
@@ -359,7 +359,7 @@ func (r *sqlxWebhookRepository) scanWebhookRows(rows *sqlx.Rows) ([]*entity.Webh
 			repositoryID    sql.NullString
 			secretEncrypted []byte
 			eventsRaw       any
-			updatedAt       sql.NullTime
+			updatedAt       nullTime
 		)
 
 		if err := rows.Scan(
