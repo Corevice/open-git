@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { pathToFileURL } from 'url'
 import fs from 'fs'
 import path from 'path'
 
@@ -12,11 +13,16 @@ function findMetaFiles(dir: string): string[] {
     const fullPath = path.join(dir, entry.name)
     if (entry.isDirectory()) {
       results.push(...findMetaFiles(fullPath))
-    } else if (entry.name === '_meta.json') {
+    } else if (/^_meta\.(js|jsx|ts|tsx)$/.test(entry.name)) {
       results.push(fullPath)
     }
   }
   return results
+}
+
+async function loadMeta(metaFile: string): Promise<Record<string, unknown>> {
+  const mod = await import(pathToFileURL(metaFile).href)
+  return (mod.default ?? mod) as Record<string, unknown>
 }
 
 function findMdxFiles(dir: string): string[] {
@@ -53,20 +59,18 @@ function hasTitleFrontmatter(content: string): boolean {
 }
 
 describe('meta validation', () => {
-  it('all _meta.json entries resolve to existing files', () => {
+  it('all _meta entries resolve to existing files', async () => {
     const metaFiles = findMetaFiles(PAGES_DIR)
+    expect(metaFiles.length).toBeGreaterThan(0)
 
     for (const metaFile of metaFiles) {
       const dir = path.dirname(metaFile)
-      const meta = JSON.parse(fs.readFileSync(metaFile, 'utf-8')) as Record<
-        string,
-        string
-      >
+      const meta = await loadMeta(metaFile)
 
       for (const key of Object.keys(meta)) {
         expect(
           metaKeyResolvesToFile(dir, key),
-          `_meta.json key "${key}" in ${path.relative(PAGES_DIR, metaFile)} does not resolve to a file`
+          `_meta key "${key}" in ${path.relative(PAGES_DIR, metaFile)} does not resolve to a file`
         ).toBe(true)
       }
     }
