@@ -1,5 +1,5 @@
 CREATE TABLE job_log_lines(
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY,
     organization_id TEXT NOT NULL,
     repository_id TEXT NOT NULL,
     run_id TEXT NOT NULL,

@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/domain/entity"
+	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
@@ -67,8 +68,9 @@ type createRepositoryRequest struct {
 }
 
 type updateRepositoryRequest struct {
-	Private *bool   `json:"private"`
-	Name    *string `json:"name"`
+	Private       *bool   `json:"private"`
+	Name          *string `json:"name"`
+	DefaultBranch *string `json:"default_branch"`
 }
 
 type repositoryOwnerResponse struct {
@@ -282,12 +284,18 @@ func (h *RepositoryHandler) CreateRepository(c echo.Context) error {
 }
 
 func (h *RepositoryHandler) GetRepository(c echo.Context) error {
+	owner := c.Param("owner")
+	repoName := c.Param("repo")
+	if err := ValidateOwnerRepo(owner, repoName); err != nil {
+		return err
+	}
+
 	requestUserID := middleware.UserUUIDFromContext(c)
 
 	repository, err := h.get.Execute(c.Request().Context(), repoUC.GetRepositoryInput{
 		RequestUserID: requestUserID,
-		OwnerLogin:    c.Param("owner"),
-		Name:          c.Param("repo"),
+		OwnerLogin:    owner,
+		Name:          repoName,
 	})
 	if err != nil {
 		if errors.Is(err, repoUC.ErrNotFound) {
@@ -314,7 +322,7 @@ func (h *RepositoryHandler) UpdateRepository(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid request"})
 	}
-	if req.Private == nil && req.Name == nil {
+	if req.Private == nil && req.Name == nil && req.DefaultBranch == nil {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": "invalid request"})
 	}
 
@@ -353,6 +361,16 @@ func (h *RepositoryHandler) UpdateRepository(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to update repository"})
 		}
 		repository.Visibility = visibility
+	}
+
+	if req.DefaultBranch != nil {
+		if err := h.repos.UpdateDefaultBranch(ctx, repository.ID, *req.DefaultBranch); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to update repository"})
+		}
+		if repository.GitPath != "" {
+			_ = infragit.SetDefaultBranch(repository.GitPath, *req.DefaultBranch)
+		}
+		repository.DefaultBranch = *req.DefaultBranch
 	}
 
 	return c.JSON(http.StatusOK, toRepositoryResponse(repository, c.Request().Host))

@@ -29,7 +29,13 @@ func openPostgresTestDB(t *testing.T) *sqlx.DB {
 		postgres.WithUsername("test"),
 		postgres.WithPassword("test"),
 		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready").WithStartupTimeout(60*time.Second),
+			// Postgres logs "ready to accept connections" twice: once for the
+			// temporary init server (which then shuts down) and once for the
+			// real server. Wait for the second occurrence, otherwise the first
+			// query races the init-server shutdown ("connection reset by peer").
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(60*time.Second),
 		),
 	)
 	if err != nil {

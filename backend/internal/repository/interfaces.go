@@ -32,6 +32,7 @@ type IRepositoryRepository interface {
 	CountByOwner(ctx context.Context, ownerID uuid.UUID) (int, error)
 	UpdateVisibility(ctx context.Context, id uuid.UUID, visibility string) error
 	UpdateName(ctx context.Context, id uuid.UUID, newName string) error
+	UpdateDefaultBranch(ctx context.Context, id uuid.UUID, branch string) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
@@ -60,4 +61,11 @@ type ISSHKeyStore interface {
 	ListByUserID(ctx context.Context, userID uuid.UUID) ([]*entity.SSHKey, error)
 	Create(ctx context.Context, key *entity.SSHKey) error
 	Delete(ctx context.Context, id, userID uuid.UUID) error
+}
+
+type IRepositoryCollaboratorRepository interface {
+	AddCollaborator(ctx context.Context, repoID, userID uuid.UUID, permission string) error
+	RemoveCollaborator(ctx context.Context, repoID, userID uuid.UUID) error
+	GetPermission(ctx context.Context, repoID, userID uuid.UUID) (string, error)
+	ListCollaborators(ctx context.Context, repoID uuid.UUID) ([]*entity.RepositoryCollaborator, error)
 }
