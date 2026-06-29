@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/apperror"
@@ -15,23 +16,23 @@ import (
 )
 
 type MilestoneHandler struct {
-	createMilestoneUC  *milestoneusecase.CreateMilestoneUsecase
-	listMilestonesUC   *milestoneusecase.ListMilestonesUsecase
-	updateMilestoneUC  *milestoneusecase.UpdateMilestoneUsecase
-	deleteMilestoneUC  *milestoneusecase.DeleteMilestoneUsecase
-	resolveRepo        func(c echo.Context, owner, repo string) (*entity.Repository, error)
+	listMilestonesUC  *milestoneusecase.ListMilestonesUsecase
+	createMilestoneUC *milestoneusecase.CreateMilestoneUsecase
+	updateMilestoneUC *milestoneusecase.UpdateMilestoneUsecase
+	deleteMilestoneUC *milestoneusecase.DeleteMilestoneUsecase
+	resolveRepo       func(c echo.Context, owner, repo string) (*entity.Repository, error)
 }
 
 func NewMilestoneHandler(
-	createMilestoneUC *milestoneusecase.CreateMilestoneUsecase,
 	listMilestonesUC *milestoneusecase.ListMilestonesUsecase,
+	createMilestoneUC *milestoneusecase.CreateMilestoneUsecase,
 	updateMilestoneUC *milestoneusecase.UpdateMilestoneUsecase,
 	deleteMilestoneUC *milestoneusecase.DeleteMilestoneUsecase,
 	resolveRepo func(c echo.Context, owner, repo string) (*entity.Repository, error),
 ) *MilestoneHandler {
 	return &MilestoneHandler{
-		createMilestoneUC: createMilestoneUC,
 		listMilestonesUC:  listMilestonesUC,
+		createMilestoneUC: createMilestoneUC,
 		updateMilestoneUC: updateMilestoneUC,
 		deleteMilestoneUC: deleteMilestoneUC,
 		resolveRepo:       resolveRepo,
@@ -60,15 +61,18 @@ type updateMilestoneRequest struct {
 }
 
 type milestoneResponse struct {
-	ID           int64      `json:"id"`
+	ID           uuid.UUID  `json:"id"`
 	Number       int        `json:"number"`
 	Title        string     `json:"title"`
-	State        string     `json:"state"`
 	Description  string     `json:"description"`
+	State        string     `json:"state"`
+	DueOn        *time.Time `json:"due_on"`
 	OpenIssues   int        `json:"open_issues"`
 	ClosedIssues int        `json:"closed_issues"`
+	NodeID       string     `json:"node_id"`
 	CreatedAt    time.Time  `json:"created_at"`
-	DueOn        *time.Time `json:"due_on"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	ClosedAt     *time.Time `json:"closed_at"`
 }
 
 func (h *MilestoneHandler) ListMilestones(c echo.Context) error {
@@ -77,12 +81,17 @@ func (h *MilestoneHandler) ListMilestones(c echo.Context) error {
 		return err
 	}
 
+	state := c.QueryParam("state")
+	if state == "" {
+		state = "open"
+	}
+
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
 
 	output, err := h.listMilestonesUC.Execute(c.Request().Context(), milestoneusecase.ListMilestonesInput{
 		RepositoryID: repo.ID,
-		State:        c.QueryParam("state"),
+		State:        state,
 		Page:         page,
 		PerPage:      perPage,
 	})
@@ -110,7 +119,7 @@ func (h *MilestoneHandler) CreateMilestone(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
-	dueOn, err := parseDueOn(req.DueOn)
+	dueOn, err := parseMilestoneDueOn(req.DueOn)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid due_on")
 	}
@@ -151,11 +160,10 @@ func (h *MilestoneHandler) UpdateMilestone(c echo.Context) error {
 
 	var dueOn *time.Time
 	if req.DueOn != nil {
-		parsed, parseErr := parseDueOn(req.DueOn)
-		if parseErr != nil {
+		dueOn, err = parseMilestoneDueOn(req.DueOn)
+		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid due_on")
 		}
-		dueOn = parsed
 	}
 
 	milestone, err := h.updateMilestoneUC.Execute(c.Request().Context(), milestoneusecase.UpdateMilestoneInput{
@@ -169,9 +177,6 @@ func (h *MilestoneHandler) UpdateMilestone(c echo.Context) error {
 	if err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
-		}
-		if errors.Is(err, apperror.ErrValidation) {
-			return echo.NewHTTPError(http.StatusUnprocessableEntity, err.Error())
 		}
 		return err
 	}
@@ -211,31 +216,31 @@ func (h *MilestoneHandler) DeleteMilestone(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func parseDueOn(raw *string) (*time.Time, error) {
+func parseMilestoneDueOn(raw *string) (*time.Time, error) {
 	if raw == nil || *raw == "" {
 		return nil, nil
 	}
 	parsed, err := time.Parse(time.RFC3339, *raw)
 	if err != nil {
-		parsed, err = time.Parse("2006-01-02", *raw)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	return &parsed, nil
 }
 
 func toMilestoneResponse(milestone *entity.Milestone) milestoneResponse {
 	return milestoneResponse{
-		ID:           middleware.UUIDToInt64(milestone.ID),
+		ID:           milestone.ID,
 		Number:       milestone.Number,
 		Title:        milestone.Title,
-		State:        milestone.State,
 		Description:  milestone.Description,
+		State:        milestone.State,
+		DueOn:        milestone.DueOn,
 		OpenIssues:   milestone.OpenIssues,
 		ClosedIssues: milestone.ClosedIssues,
+		NodeID:       MilestoneNodeID(milestone.ID),
 		CreatedAt:    milestone.CreatedAt,
-		DueOn:        milestone.DueOn,
+		UpdatedAt:    milestone.UpdatedAt,
+		ClosedAt:     milestone.ClosedAt,
 	}
 }
 
@@ -246,3 +251,5 @@ func toMilestoneResponses(milestones []*entity.Milestone) []milestoneResponse {
 	}
 	return result
 }
+
+func MilestoneNodeID(id uuid.UUID) string { return NodeID("Milestone", id.String()) }

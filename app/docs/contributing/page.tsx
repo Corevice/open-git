@@ -1,5 +1,9 @@
 import Link from 'next/link';
 
+// Rendered on demand: the contributing content is served by the backend API,
+// which is not available during the static build.
+export const dynamic = 'force-dynamic';
+
 type DocSection = {
   slug: string;
   title: string;

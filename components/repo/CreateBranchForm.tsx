@@ -9,7 +9,7 @@ export interface BranchItem {
   commit: { sha: string };
 }
 
-const BRANCH_NAME_PATTERN = /^(?!.*\.\.)[a-zA-Z0-9._\/-]+$/;
+const BRANCH_NAME_PATTERN = /^(?!.*\.\.)[a-zA-Z0-9._/-]+$/;
 
 interface CreateBranchFormProps {
   owner: string;

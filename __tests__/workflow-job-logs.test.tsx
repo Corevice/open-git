@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { JobLogsPageContent } from "@/app/12-actions-job/page";
+import { JobLogsPageContent } from "@/app/12-actions-job/JobLogsPageContent";
 
 type MockEventSourceInstance = {
   url: string;
@@ -87,7 +87,7 @@ describe("workflow job logs page", () => {
           return {
             ok: true,
             status: 200,
-            text: async () => "existing line\n",
+            text: async (): Promise<string> => "existing line\n",
           };
         }
 
@@ -95,7 +95,7 @@ describe("workflow job logs page", () => {
           ok: false,
           status: 404,
           json: async () => ({ message: "Not Found" }),
-          text: async () => "Not Found",
+          text: async (): Promise<string> => "Not Found",
         };
       }),
     );
@@ -182,5 +182,92 @@ describe("workflow job logs page", () => {
     await user.click(screen.getByRole("button", { name: "Paused" }));
 
     expect(screen.getByRole("button", { name: "Live" })).toBeInTheDocument();
+  });
+
+  it("strips ANSI escape sequences from initial fetch logs", async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.endsWith("/actions/jobs/42")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => jobResponse,
+        };
+      }
+
+      if (url.endsWith("/actions/jobs/42/logs")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async (): Promise<string> => "\x1b[31mcolored line\x1b[0m\n",
+        };
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ message: "Not Found" }),
+        text: async (): Promise<string> => "Not Found",
+      };
+    });
+
+    render(<JobLogsPageContent />);
+
+    expect(await screen.findByText("colored line")).toBeInTheDocument();
+    expect(screen.queryByText(/\x1b/)).not.toBeInTheDocument();
+  });
+
+  it("strips ANSI escape sequences from SSE-appended lines", async () => {
+    render(<JobLogsPageContent />);
+
+    await waitFor(() => {
+      expect(mockInstances).toHaveLength(1);
+    });
+
+    act(() => {
+      mockInstances[0].emitMessage("\x1b[32mstreamed green\x1b[0m");
+    });
+
+    expect(await screen.findByText("streamed green")).toBeInTheDocument();
+    expect(screen.queryByText(/\x1b/)).not.toBeInTheDocument();
+  });
+
+  it("renders HTML-like log strings as plain text without creating DOM elements", async () => {
+    const htmlPayload =
+      '<img src=x onerror="alert(1)"><script>alert("xss")</script>';
+
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.endsWith("/actions/jobs/42")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => jobResponse,
+        };
+      }
+
+      if (url.endsWith("/actions/jobs/42/logs")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async (): Promise<string> => `${htmlPayload}\n`,
+        };
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ message: "Not Found" }),
+        text: async (): Promise<string> => "Not Found",
+      };
+    });
+
+    render(<JobLogsPageContent />);
+
+    expect(await screen.findByText(htmlPayload)).toBeInTheDocument();
+    expect(document.querySelector("script")).toBeNull();
+    expect(document.querySelector("img")).toBeNull();
   });
 });
