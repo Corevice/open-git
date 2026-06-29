@@ -185,7 +185,7 @@ describe("workflow job logs page", () => {
   });
 
   it("strips ANSI escape sequences from initial fetch logs", async () => {
-    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+    vi.mocked(fetch).mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
 
       if (url.endsWith("/actions/jobs/42")) {
@@ -210,11 +210,12 @@ describe("workflow job logs page", () => {
         json: async () => ({ message: "Not Found" }),
         text: async (): Promise<string> => "Not Found",
       };
-    });
+    }) as unknown as typeof fetch);
 
     render(<JobLogsPageContent />);
 
     expect(await screen.findByText("colored line")).toBeInTheDocument();
+    // eslint-disable-next-line no-control-regex -- intentionally matching ANSI escape control char
     expect(screen.queryByText(/\x1b/)).not.toBeInTheDocument();
   });
 
@@ -230,6 +231,7 @@ describe("workflow job logs page", () => {
     });
 
     expect(await screen.findByText("streamed green")).toBeInTheDocument();
+    // eslint-disable-next-line no-control-regex -- intentionally matching ANSI escape control char
     expect(screen.queryByText(/\x1b/)).not.toBeInTheDocument();
   });
 
@@ -237,7 +239,7 @@ describe("workflow job logs page", () => {
     const htmlPayload =
       '<img src=x onerror="alert(1)"><script>alert("xss")</script>';
 
-    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+    vi.mocked(fetch).mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
 
       if (url.endsWith("/actions/jobs/42")) {
@@ -262,7 +264,7 @@ describe("workflow job logs page", () => {
         json: async () => ({ message: "Not Found" }),
         text: async (): Promise<string> => "Not Found",
       };
-    });
+    }) as unknown as typeof fetch);
 
     render(<JobLogsPageContent />);
 
