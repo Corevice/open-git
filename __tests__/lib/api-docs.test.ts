@@ -14,7 +14,7 @@ describe("api-docs", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ sections }),
+      text: async () => JSON.stringify({ sections }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -39,7 +39,7 @@ describe("api-docs", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => content,
+      text: async () => JSON.stringify(content),
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -67,7 +67,7 @@ describe("api-docs", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => contributors,
+      text: async () => JSON.stringify(contributors),
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -85,7 +85,7 @@ describe("api-docs", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => [],
+      text: async () => JSON.stringify([]),
     });
     vi.stubGlobal("fetch", fetchMock);
 
