@@ -105,17 +105,23 @@ type createReviewCommentRequest struct {
 	Side string `json:"side"`
 }
 
+type prHeadBaseResponse struct {
+	Ref string `json:"ref"`
+	SHA string `json:"sha"`
+}
+
 type pullRequestResponse struct {
-	ID       uuid.UUID `json:"id"`
-	Number   int       `json:"number"`
-	Title    string    `json:"title"`
-	Body     string    `json:"body"`
-	HeadRef  string    `json:"head_ref"`
-	BaseRef  string    `json:"base_ref"`
-	State    string    `json:"state"`
-	NodeID   string    `json:"node_id"`
-	HTMLURL  string    `json:"html_url"`
-	MergedAt *string   `json:"merged_at"`
+	ID        int64              `json:"id"`
+	Number    int                `json:"number"`
+	Title     string             `json:"title"`
+	Body      string             `json:"body"`
+	Head      prHeadBaseResponse `json:"head"`
+	Base      prHeadBaseResponse `json:"base"`
+	State     string             `json:"state"`
+	NodeID    string             `json:"node_id"`
+	HTMLURL   string             `json:"html_url"`
+	MergedAt  *string            `json:"merged_at"`
+	CreatedAt time.Time          `json:"created_at"`
 }
 
 type mergePullRequestResponse struct {
@@ -168,16 +174,9 @@ func (h *PullRequestHandler) ListPullRequests(c echo.Context) error {
 		return err
 	}
 
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 30
-	}
-	if perPage > 100 {
-		perPage = 100
+	page, perPage, err := middleware.ParsePaginationParams(c)
+	if err != nil {
+		return err
 	}
 
 	state := c.QueryParam("state")
@@ -194,7 +193,9 @@ func (h *PullRequestHandler) ListPullRequests(c echo.Context) error {
 		return err
 	}
 
-	setPaginationHeaders(c, page, perPage, total)
+	if link := middleware.BuildAbsoluteLinkHeader(c, page, perPage, total); link != "" {
+		c.Response().Header().Set("Link", link)
+	}
 	return c.JSON(http.StatusOK, toPullRequestResponses(pulls, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
@@ -559,15 +560,22 @@ func (h *PullRequestHandler) CreateReviewComment(c echo.Context) error {
 
 func toPullRequestResponse(pr *entity.PullRequest, owner, repoName, host string) pullRequestResponse {
 	resp := pullRequestResponse{
-		ID:      pr.ID,
-		Number:  pr.Number,
-		Title:   pr.Title,
-		Body:    pr.Body,
-		HeadRef: pr.HeadRef,
-		BaseRef: pr.BaseRef,
-		State:   pr.State,
-		NodeID:  PRNodeID(pr.ID),
-		HTMLURL: "https://" + host + "/" + owner + "/" + repoName + "/pull/" + strconv.Itoa(pr.Number),
+		ID:     middleware.UUIDToInt64(pr.ID),
+		Number: pr.Number,
+		Title:  pr.Title,
+		Body:   pr.Body,
+		Head: prHeadBaseResponse{
+			Ref: pr.HeadRef,
+			SHA: pr.HeadSHA,
+		},
+		Base: prHeadBaseResponse{
+			Ref: pr.BaseRef,
+			SHA: pr.BaseSHA,
+		},
+		State:     pr.State,
+		NodeID:    PRNodeID(pr.ID),
+		HTMLURL:   "https://" + host + "/" + owner + "/" + repoName + "/pull/" + strconv.Itoa(pr.Number),
+		CreatedAt: pr.CreatedAt,
 	}
 	if pr.MergedAt != nil {
 		formatted := pr.MergedAt.UTC().Format("2006-01-02T15:04:05Z")

@@ -435,6 +435,7 @@ func TestListIssuesContainsNodeIDAndHTMLURL(t *testing.T) {
 				Title:        "Bug",
 				State:        "open",
 				AuthorLogin:  issueTestOwner,
+				CreatedAt:    time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 			},
 		},
 	}
@@ -468,5 +469,11 @@ func TestListIssuesContainsNodeIDAndHTMLURL(t *testing.T) {
 	}
 	if htmlURL != "https://git.example.com/"+issueTestOwner+"/"+issueTestRepo+"/issues/1" {
 		t.Fatalf("html_url = %q, want https://git.example.com/%s/%s/issues/1", htmlURL, issueTestOwner, issueTestRepo)
+	}
+	if _, ok := item["id"].(float64); !ok {
+		t.Fatalf("id = %v (%T), want numeric", item["id"], item["id"])
+	}
+	if _, ok := item["created_at"]; !ok {
+		t.Fatalf("created_at missing from response: %v", item)
 	}
 }

@@ -80,8 +80,10 @@ func (h *IssueHandler) ListIssues(c echo.Context) error {
 		return err
 	}
 
-	page, _ := strconv.Atoi(c.QueryParam("page"))
-	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
+	page, perPage, err := middleware.ParsePaginationParams(c)
+	if err != nil {
+		return err
+	}
 
 	output, err := h.listIssuesUC.Execute(c.Request().Context(), issueusecase.ListIssuesInput{
 		OrganizationID: actor.OrganizationID,
@@ -95,7 +97,9 @@ func (h *IssueHandler) ListIssues(c echo.Context) error {
 		return err
 	}
 
-	setPaginationHeaders(c, output.Page, output.PerPage, output.Total)
+	if link := middleware.BuildAbsoluteLinkHeader(c, output.Page, output.PerPage, output.Total); link != "" {
+		c.Response().Header().Set("Link", link)
+	}
 	return c.JSON(http.StatusOK, toIssueResponses(output.Issues, c.Param("owner"), c.Param("repo"), c.Request().Host))
 }
 
@@ -321,7 +325,7 @@ type issueUserResponse struct {
 }
 
 type issueResponse struct {
-	ID          uuid.UUID               `json:"id"`
+	ID          int64                   `json:"id"`
 	NodeID      string                  `json:"node_id"`
 	Number      int                     `json:"number"`
 	Title       string                  `json:"title"`
@@ -346,7 +350,7 @@ type commentResponse struct {
 
 func toIssueResponse(issue *entity.Issue, owner, repoName, host string) issueResponse {
 	resp := issueResponse{
-		ID:          issue.ID,
+		ID:          middleware.UUIDToInt64(issue.ID),
 		NodeID:      IssueNodeID(issue.ID),
 		Number:      issue.Number,
 		Title:       issue.Title,

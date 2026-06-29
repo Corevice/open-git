@@ -75,18 +75,21 @@ type updateRepositoryRequest struct {
 
 type repositoryOwnerResponse struct {
 	Login string `json:"login"`
-	ID    string `json:"id"`
+	ID    int64  `json:"id"`
 }
 
 type repositoryResponse struct {
-	ID            string                  `json:"id"`
+	ID            int64                   `json:"id"`
 	NodeID        string                  `json:"node_id"`
 	Name          string                  `json:"name"`
 	FullName      string                  `json:"full_name"`
 	HTMLURL       string                  `json:"html_url"`
+	URL           string                  `json:"url"`
+	CloneURL      string                  `json:"clone_url"`
 	Private       bool                    `json:"private"`
 	Description   string                  `json:"description"`
 	DefaultBranch string                  `json:"default_branch"`
+	CreatedAt     time.Time               `json:"created_at"`
 	Owner         repositoryOwnerResponse `json:"owner"`
 }
 
@@ -117,7 +120,7 @@ func (h *RepositoryHandler) List(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to count repositories"})
 	}
 
-	if link := middleware.BuildLinkHeader(c.Request().URL.Path, page, perPage, total); link != "" {
+	if link := middleware.BuildAbsoluteLinkHeader(c, page, perPage, total); link != "" {
 		c.Response().Header().Set("Link", link)
 	}
 
@@ -172,7 +175,7 @@ func (h *RepositoryHandler) ListOrg(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to count repositories"})
 	}
 
-	if link := middleware.BuildLinkHeader(c.Request().URL.Path, page, perPage, total); link != "" {
+	if link := middleware.BuildAbsoluteLinkHeader(c, page, perPage, total); link != "" {
 		c.Response().Header().Set("Link", link)
 	}
 
@@ -446,7 +449,7 @@ func (h *RepositoryHandler) GetAuditLog(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to list audit logs"})
 	}
 
-	if link := middleware.BuildLinkHeader(c.Request().URL.Path, page, perPage, output.Total); link != "" {
+	if link := middleware.BuildAbsoluteLinkHeader(c, page, perPage, output.Total); link != "" {
 		c.Response().Header().Set("Link", link)
 	}
 
@@ -514,17 +517,20 @@ func (h *RepositoryHandler) resolveOwnedRepository(c echo.Context, userID uuid.U
 func toRepositoryResponse(r *entity.Repository, host string) repositoryResponse {
 	ownerLogin := r.OwnerLogin
 	return repositoryResponse{
-		ID:            r.ID.String(),
+		ID:            middleware.UUIDToInt64(r.ID),
 		NodeID:        RepoNodeID(r.ID),
 		Name:          r.Name,
 		FullName:      ownerLogin + "/" + r.Name,
 		HTMLURL:       "https://" + host + "/" + ownerLogin + "/" + r.Name,
+		URL:           "https://" + host + "/api/v3/repos/" + ownerLogin + "/" + r.Name,
+		CloneURL:      "https://" + host + "/" + ownerLogin + "/" + r.Name + ".git",
 		Private:       r.Visibility == entity.VisibilityPrivate,
 		Description:   r.Description,
 		DefaultBranch: r.DefaultBranch,
+		CreatedAt:     r.CreatedAt,
 		Owner: repositoryOwnerResponse{
 			Login: ownerLogin,
-			ID:    r.OwnerID.String(),
+			ID:    middleware.UUIDToInt64(r.OwnerID),
 		},
 	}
 }
