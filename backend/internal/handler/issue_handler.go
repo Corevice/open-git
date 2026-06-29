@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Corevice/open-git/backend/internal/apperror"
-	"github.com/Corevice/open-git/backend/internal/domain/entity"
-	"github.com/Corevice/open-git/backend/internal/middleware"
-	issueusecase "github.com/Corevice/open-git/backend/internal/usecase/issue"
+	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/open-git/backend/internal/middleware"
+	issueusecase "github.com/open-git/backend/internal/usecase/issue"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )

@@ -55,6 +55,10 @@ func (m *getMockUserRepo) Create(context.Context, *domain.User) error {
 	return nil
 }
 
+func (m *getMockUserRepo) GetByID(context.Context, int64) (*domain.User, error) {
+	return nil, errors.New("not found")
+}
+
 func (m *getMockUserRepo) GetByLogin(_ context.Context, login string) (*domain.User, error) {
 	if m.users == nil {
 		return nil, errors.New("not found")

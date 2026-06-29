@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
 	"github.com/open-git/backend/internal/domain/entity"
+	domainrepo "github.com/open-git/backend/internal/domain/repository"
 )
 
 const issueNextNumberMaxRetries = 5
@@ -76,40 +77,45 @@ func (r *sqlxIssueRepository) GetByNumber(ctx context.Context, repoID uuid.UUID,
 	return &issue, nil
 }
 
-func (r *sqlxIssueRepository) ListByRepo(ctx context.Context, repoID uuid.UUID, state, labels string, page, perPage int) ([]*entity.Issue, error) {
+func (r *sqlxIssueRepository) ListByRepo(ctx context.Context, filter domainrepo.ListIssuesFilter) ([]*entity.Issue, int, error) {
+	page := filter.Page
 	if page < 1 {
 		page = 1
 	}
+	perPage := filter.PerPage
 	if perPage < 1 {
 		perPage = 30
 	}
 	offset := (page - 1) * perPage
 
-	query := `
-		SELECT id, organization_id, repository_id, number, title, body, state, author_id
-		FROM issues
-		WHERE repository_id = $1
-	`
-	args := []any{repoID}
+	// Build the shared WHERE clause and args for both count and page queries.
+	where := " WHERE repository_id = $1"
+	args := []any{filter.RepositoryID}
 	idx := 2
 
-	if state != "" {
-		query += " AND state = $" + itoa(idx)
-		args = append(args, state)
+	if filter.State != "" {
+		where += " AND state = $" + itoa(idx)
+		args = append(args, filter.State)
 		idx++
 	}
-	if labels != "" {
-		query += " AND id IN (SELECT issue_id FROM issue_labels il JOIN labels l ON il.label_id = l.id WHERE l.name = $" + itoa(idx) + ")"
-		args = append(args, labels)
+	if len(filter.Labels) > 0 {
+		where += " AND id IN (SELECT issue_id FROM issue_labels il JOIN labels l ON il.label_id = l.id WHERE l.name = ANY($" + itoa(idx) + "))"
+		args = append(args, pq.Array(filter.Labels))
 		idx++
 	}
 
-	query += " ORDER BY number DESC LIMIT $" + itoa(idx) + " OFFSET $" + itoa(idx+1)
+	var total int
+	if err := r.DB.QueryRowxContext(ctx, "SELECT COUNT(*) FROM issues"+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	query := "SELECT id, organization_id, repository_id, number, title, body, state, author_id FROM issues" +
+		where + " ORDER BY number DESC LIMIT $" + itoa(idx) + " OFFSET $" + itoa(idx+1)
 	args = append(args, perPage, offset)
 
 	rows, err := r.DB.QueryxContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -126,14 +132,14 @@ func (r *sqlxIssueRepository) ListByRepo(ctx context.Context, repoID uuid.UUID, 
 			&issue.State,
 			&issue.AuthorID,
 		); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		issues = append(issues, &issue)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return issues, nil
+	return issues, total, nil
 }
 
 // NextNumber allocates the next sequential issue number for the given repository.

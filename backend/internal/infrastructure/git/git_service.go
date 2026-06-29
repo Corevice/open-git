@@ -53,7 +53,7 @@ func InitBare(path string) error {
 	return err
 }
 
-func repoServer(repoPath string) (*server.Server, *transport.Endpoint, error) {
+func repoServer(repoPath string) (transport.Transport, *transport.Endpoint, error) {
 	abs, err := filepath.Abs(repoPath)
 	if err != nil {
 		return nil, nil, err
@@ -62,12 +62,12 @@ func repoServer(repoPath string) (*server.Server, *transport.Endpoint, error) {
 		return nil, nil, err
 	}
 
-	root := filepath.Dir(abs)
-	name := filepath.Base(abs)
-	loader := server.NewFilesystemLoader(osfs.New(root))
+	// Use the repository's absolute path against a root filesystem so the
+	// loader resolves it regardless of the process working directory.
+	loader := server.NewFilesystemLoader(osfs.New("/"))
 	svr := server.NewServer(loader)
 
-	ep, err := transport.NewEndpoint(name)
+	ep, err := transport.NewEndpoint(abs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("transport endpoint: %w", err)
 	}

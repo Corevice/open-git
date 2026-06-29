@@ -68,7 +68,7 @@ func TestInfoRefsContentType(t *testing.T) {
 	e := echo.New()
 	h.RegisterRoutes(e)
 
-	req := httptest.NewRequest(http.MethodGet, "/alice/demo.git/info/refs?service="+transport.UploadPackService.String(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/alice/demo.git/info/refs?service="+transport.UploadPackServiceName, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -96,7 +96,7 @@ func TestForceRejectProtectedBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open repo: %v", err)
 	}
-	mainRef, err := repo.Reference(plumbing.Head, true)
+	mainRef, err := repo.Reference(plumbing.HEAD, true)
 	if err != nil {
 		t.Fatalf("head ref: %v", err)
 	}
@@ -168,7 +168,7 @@ func seedMainBranch(t *testing.T, repoPath string) error {
 	if err := repo.Storer.SetReference(ref); err != nil {
 		return err
 	}
-	head := plumbing.NewSymbolicReference(plumbing.Head, plumbing.ReferenceName("refs/heads/main"))
+	head := plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.ReferenceName("refs/heads/main"))
 	return repo.Storer.SetReference(head)
 }
 
