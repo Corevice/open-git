@@ -44,6 +44,10 @@ type Config struct {
 	TLSCertFile                 string
 	TLSKeyFile                  string
 	TrustedProxyCIDRs           string
+	AppName                     string
+	LicenseName                 string
+	SourceURL                   string
+	LicensesFilePath            string
 }
 
 func Load() Config {
@@ -96,6 +100,10 @@ func Load() Config {
 		TLSCertFile:                 os.Getenv("TLS_CERT_FILE"),
 		TLSKeyFile:                  os.Getenv("TLS_KEY_FILE"),
 		TrustedProxyCIDRs:           os.Getenv("TRUSTED_PROXY_CIDRS"),
+		AppName:                     getenv("APP_NAME", "OpenGit"),
+		LicenseName:                 getenv("LICENSE_NAME", "Apache-2.0"),
+		SourceURL:                   getenv("SOURCE_URL", ""),
+		LicensesFilePath:            getenv("LICENSES_FILE_PATH", "./licenses.json"),
 	}
 }
 
