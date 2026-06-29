@@ -1,16 +1,11 @@
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it } from 'vitest';
 
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-describe("Tabs", () => {
-  it("shows the default panel and switches on trigger click", async () => {
+describe('Tabs', () => {
+  it('shows the default panel and switches on trigger click', async () => {
     const user = userEvent.setup();
 
     render(
@@ -21,15 +16,15 @@ describe("Tabs", () => {
         </TabsList>
         <TabsContent value="a">PanelA</TabsContent>
         <TabsContent value="b">PanelB</TabsContent>
-      </Tabs>,
+      </Tabs>
     );
 
-    expect(screen.getByText("PanelB")).toBeVisible();
-    expect(screen.queryByText("PanelA")).not.toBeVisible();
+    expect(screen.getByText('PanelB')).toBeVisible();
+    expect(screen.queryByText('PanelA')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "A" }));
+    await user.click(screen.getByRole('tab', { name: 'A' }));
 
-    expect(screen.getByText("PanelA")).toBeVisible();
-    expect(screen.queryByText("PanelB")).not.toBeVisible();
+    expect(screen.getByText('PanelA')).toBeVisible();
+    expect(screen.queryByText('PanelB')).not.toBeInTheDocument();
   });
 });
