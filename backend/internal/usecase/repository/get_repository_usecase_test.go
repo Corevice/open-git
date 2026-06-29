@@ -3,48 +3,71 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
+	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/usecase/repository"
 )
 
-type getMockRepositoryRepo struct {
-	repos map[string]*domain.Repository
+func repoLoginKey(ownerLogin, name string) string {
+	return fmt.Sprintf("%s:%s", ownerLogin, name)
 }
 
-func (m *getMockRepositoryRepo) Create(context.Context, *domain.Repository) error {
+type getMockRepositoryRepo struct {
+	reposByLogin map[string]*entity.Repository
+}
+
+func (m *getMockRepositoryRepo) Create(context.Context, *entity.Repository) error {
 	return nil
 }
 
-func (m *getMockRepositoryRepo) GetByOwnerAndName(_ context.Context, ownerID int64, name string) (*domain.Repository, error) {
-	if m.repos == nil {
+func (m *getMockRepositoryRepo) GetByOwnerAndName(context.Context, uuid.UUID, string) (*entity.Repository, error) {
+	return nil, errors.New("not found")
+}
+
+func (m *getMockRepositoryRepo) GetByOwnerLoginAndName(_ context.Context, ownerLogin, name string) (*entity.Repository, error) {
+	if m.reposByLogin == nil {
 		return nil, errors.New("not found")
 	}
-	if repo, ok := m.repos[repoKey(ownerID, name)]; ok {
+	if repo, ok := m.reposByLogin[repoLoginKey(ownerLogin, name)]; ok {
 		return repo, nil
 	}
 	return nil, errors.New("not found")
 }
 
-func (m *getMockRepositoryRepo) GetByOwnerLoginAndName(context.Context, string, string) (*domain.Repository, error) {
-	return nil, errors.New("not found")
-}
-
-func (m *getMockRepositoryRepo) ListByOrg(context.Context, int64) ([]*domain.Repository, error) {
+func (m *getMockRepositoryRepo) ListByOrg(context.Context, uuid.UUID, int, int) ([]*entity.Repository, error) {
 	return nil, nil
 }
 
-func (m *getMockRepositoryRepo) UpdateVisibility(context.Context, int64, domain.Visibility) error {
+func (m *getMockRepositoryRepo) CountByOrg(context.Context, uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *getMockRepositoryRepo) ListByOwner(context.Context, uuid.UUID, int, int) ([]*entity.Repository, error) {
+	return nil, nil
+}
+
+func (m *getMockRepositoryRepo) CountByOwner(context.Context, uuid.UUID) (int, error) {
+	return 0, nil
+}
+
+func (m *getMockRepositoryRepo) UpdateVisibility(context.Context, uuid.UUID, string) error {
 	return nil
 }
 
-func (m *getMockRepositoryRepo) Delete(context.Context, int64) error {
+func (m *getMockRepositoryRepo) UpdateName(context.Context, uuid.UUID, string) error {
 	return nil
 }
 
-func (m *getMockRepositoryRepo) NextNumber(context.Context, int64) (int64, error) {
-	return 1, nil
+func (m *getMockRepositoryRepo) UpdateDefaultBranch(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
+func (m *getMockRepositoryRepo) Delete(context.Context, uuid.UUID) error {
+	return nil
 }
 
 type getMockUserRepo struct {
@@ -53,6 +76,10 @@ type getMockUserRepo struct {
 
 func (m *getMockUserRepo) Create(context.Context, *domain.User) error {
 	return nil
+}
+
+func (m *getMockUserRepo) GetByID(context.Context, int64) (*domain.User, error) {
+	return nil, errors.New("not found")
 }
 
 func (m *getMockUserRepo) GetByLogin(_ context.Context, login string) (*domain.User, error) {
@@ -70,25 +97,29 @@ func (m *getMockUserRepo) GetByEmail(context.Context, string) (*domain.User, err
 }
 
 type getMockMembershipRepo struct {
-	readAccess map[int64]bool
+	readAccess map[uuid.UUID]bool
 }
 
-func (m *getMockMembershipRepo) HasReadAccess(_ context.Context, userID, _ int64) (bool, error) {
+func (m *getMockMembershipRepo) HasReadAccess(_ context.Context, userID, _ uuid.UUID) (bool, error) {
 	if m.readAccess == nil {
 		return false, nil
 	}
 	return m.readAccess[userID], nil
 }
 
+func (m *getMockMembershipRepo) HasWriteAccess(_ context.Context, _ uuid.UUID, _ uuid.UUID) (bool, error) {
+	return false, nil
+}
+
 func TestPrivateRepoNoAuth(t *testing.T) {
 	repos := &getMockRepositoryRepo{
-		repos: map[string]*domain.Repository{
-			repoKey(1, "secret"): {
-				ID:             10,
-				OrganizationID: 1,
-				OwnerID:        1,
+		reposByLogin: map[string]*entity.Repository{
+			repoLoginKey("alice", "secret"): {
+				ID:             uuid.MustParse("00000000-0000-0000-0000-000000000010"),
+				OrganizationID: testOrgID,
+				OwnerID:        testOwnerID,
 				Name:           "secret",
-				Visibility:     domain.VisibilityPrivate,
+				Visibility:     entity.VisibilityPrivate,
 			},
 		},
 	}
@@ -100,7 +131,7 @@ func TestPrivateRepoNoAuth(t *testing.T) {
 	uc := repository.NewGetRepositoryUsecase(repos, users, &getMockMembershipRepo{})
 
 	_, err := uc.Execute(context.Background(), repository.GetRepositoryInput{
-		RequestUserID: 0,
+		RequestUserID: uuid.Nil,
 		OwnerLogin:    "alice",
 		Name:          "secret",
 	})

@@ -3,6 +3,7 @@
   "rsc": true,
   "tsx": true,
   "tailwind.config": "tailwind.config.ts",
+  "cssVariables": true,
   "aliases": {
     "components": "@/components",
     "utils": "@/lib/utils"

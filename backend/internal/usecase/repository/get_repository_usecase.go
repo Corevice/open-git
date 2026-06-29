@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 
-	"github.com/open-git/backend/internal/domain"
+	"github.com/google/uuid"
+	"github.com/open-git/backend/internal/domain/entity"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
 var ErrNotFound = errors.New("not found")
 
 type GetRepositoryInput struct {
-	RequestUserID int64
+	RequestUserID uuid.UUID
 	OwnerLogin    string
 	Name          string
 }
@@ -30,19 +31,14 @@ func NewGetRepositoryUsecase(
 	return &GetRepositoryUsecase{repos: repos, users: users, memberships: memberships}
 }
 
-func (u *GetRepositoryUsecase) Execute(ctx context.Context, input GetRepositoryInput) (*domain.Repository, error) {
-	owner, err := u.users.GetByLogin(ctx, input.OwnerLogin)
-	if err != nil || owner == nil {
-		return nil, ErrNotFound
-	}
-
-	repository, err := u.repos.GetByOwnerAndName(ctx, owner.ID, input.Name)
+func (u *GetRepositoryUsecase) Execute(ctx context.Context, input GetRepositoryInput) (*entity.Repository, error) {
+	repository, err := u.repos.GetByOwnerLoginAndName(ctx, input.OwnerLogin, input.Name)
 	if err != nil || repository == nil {
 		return nil, ErrNotFound
 	}
 
-	if repository.Visibility == domain.VisibilityPrivate {
-		if input.RequestUserID == 0 {
+	if repository.Visibility == entity.VisibilityPrivate {
+		if input.RequestUserID == uuid.Nil {
 			return nil, ErrNotFound
 		}
 		hasAccess, err := u.memberships.HasReadAccess(ctx, input.RequestUserID, repository.OrganizationID)
@@ -51,6 +47,5 @@ func (u *GetRepositoryUsecase) Execute(ctx context.Context, input GetRepositoryI
 		}
 	}
 
-	repository.OwnerLogin = owner.Login
 	return repository, nil
 }

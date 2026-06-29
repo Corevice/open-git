@@ -12,9 +12,10 @@ const (
 )
 
 type Organization struct {
-	ID        uuid.UUID
-	Login     string
-	Name      string
-	PlanTier  string
-	CreatedAt time.Time
+	ID          uuid.UUID
+	Login       string
+	Name        string
+	Description string
+	PlanTier    string
+	CreatedAt   time.Time
 }

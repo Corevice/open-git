@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ApiClient } from "@/lib/api";
+import type { SSHKey } from "@/lib/api-types";
 
 export default function SettingsPage() {
   const [profile, setProfile] = useState({
@@ -73,20 +75,13 @@ export default function SettingsPage() {
     { name: "CodeReviewBot", clientId: "9f8e7d6c5b4a3210", created: "2025-06-10" },
   ];
 
-  const sshKeys = [
-    {
-      title: "MacBook Pro 2024",
-      type: "ED25519",
-      fingerprint: "SHA256:aB3xKjF9pQrTvWxYz1234567890AbCdEfGhIjKlMn",
-      meta: "追加: 2025-09-01 / 最終使用: 2時間前",
-    },
-    {
-      title: "Work Desktop",
-      type: "RSA 4096",
-      fingerprint: "SHA256:zY9wVuT8sR7qPoN6mLkJ5hG4fE3dC2bA1zYxWvU",
-      meta: "追加: 2024-11-15 / 最終使用: 5日前",
-    },
-  ];
+  const [sshKeys, setSshKeys] = useState<SSHKey[]>([]);
+  const apiClient = new ApiClient(process.env.NEXT_PUBLIC_API_URL ?? "");
+
+  useEffect(() => {
+    apiClient.sshKeys.list().then(setSshKeys).catch(console.error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount; apiClient is recreated each render
+  }, []);
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,9 +98,20 @@ export default function SettingsPage() {
     // TODO: wire to API
   };
 
-  const handleAddSsh = (e: React.FormEvent) => {
+  const handleAddSsh = async (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO: wire to API
+    try {
+      const key = await apiClient.sshKeys.create(sshForm.title, sshForm.publicKey);
+      setSshKeys((prev) => [...prev, key]);
+      setSshForm({ title: "", keyType: "Authentication Key", publicKey: "" });
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  };
+
+  const handleDeleteSsh = async (id: string) => {
+    await apiClient.sshKeys.remove(id);
+    setSshKeys((prev) => prev.filter((k) => k.id !== id));
   };
 
   return (
@@ -446,18 +452,24 @@ export default function SettingsPage() {
             </div>
             <div>
               {sshKeys.map((k) => (
-                <div key={k.fingerprint} className="flex justify-between items-center px-5 py-3.5 border-b border-[color:var(--border-subtle)] last:border-b-0">
+                <div key={k.id} className="flex justify-between items-center px-5 py-3.5 border-b border-[color:var(--border-subtle)] last:border-b-0">
                   <div>
                     <div className="text-sm font-semibold flex items-center gap-2">
                       {k.title}
                       <span className="px-2 py-0.5 text-xs rounded-full bg-[color:var(--primary-light)] text-[color:var(--primary)]">
-                        {k.type}
+                        {k.key_type}
                       </span>
                     </div>
                     <div className="text-xs text-[color:var(--text-secondary)] mt-1 font-mono break-all">{k.fingerprint}</div>
-                    <div className="text-xs text-[color:var(--text-secondary)]">{k.meta}</div>
+                    <div className="text-xs text-[color:var(--text-secondary)]">
+                      追加: {k.created_at} / 最終使用: {k.last_used_at ?? "未使用"}
+                    </div>
                   </div>
-                  <button type="button" className="px-3 py-1 text-xs rounded-md bg-[color:var(--danger)] text-white hover:opacity-90 shrink-0 ml-3">
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSsh(k.id)}
+                    className="px-3 py-1 text-xs rounded-md bg-[color:var(--danger)] text-white hover:opacity-90 shrink-0 ml-3"
+                  >
                     削除
                   </button>
                 </div>

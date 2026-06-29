@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/open-git/backend/internal/domain"
+	"github.com/open-git/backend/internal/domain/entity"
 )
 
 type IUserRepository interface {
@@ -21,18 +23,86 @@ type IAccessTokenRepository interface {
 }
 
 type IRepositoryRepository interface {
-	Create(ctx context.Context, repo *domain.Repository) error
-	GetByOwnerAndName(ctx context.Context, ownerID int64, name string) (*domain.Repository, error)
-	NextNumber(ctx context.Context, ownerID int64) (int64, error)
-	ListByOrg(ctx context.Context, organizationID int64) ([]*domain.Repository, error)
-	UpdateVisibility(ctx context.Context, id int64, visibility domain.Visibility) error
-	Delete(ctx context.Context, id int64) error
+	Create(ctx context.Context, repo *entity.Repository) error
+	GetByOwnerAndName(ctx context.Context, ownerID uuid.UUID, name string) (*entity.Repository, error)
+	GetByOwnerLoginAndName(ctx context.Context, ownerLogin, name string) (*entity.Repository, error)
+	ListByOrg(ctx context.Context, organizationID uuid.UUID, page, perPage int) ([]*entity.Repository, error)
+	CountByOrg(ctx context.Context, organizationID uuid.UUID) (int, error)
+	ListByOwner(ctx context.Context, ownerID uuid.UUID, page, perPage int) ([]*entity.Repository, error)
+	CountByOwner(ctx context.Context, ownerID uuid.UUID) (int, error)
+	UpdateVisibility(ctx context.Context, id uuid.UUID, visibility string) error
+	UpdateName(ctx context.Context, id uuid.UUID, newName string) error
+	UpdateDefaultBranch(ctx context.Context, id uuid.UUID, branch string) error
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
+type IAuditLogRepository interface {
+	Record(ctx context.Context, orgID, actorID uuid.UUID, action, targetType string, targetID uuid.UUID, metadata map[string]any) error
 }
 
 type IMembershipRepository interface {
-	HasReadAccess(ctx context.Context, userID, organizationID int64) (bool, error)
+	HasReadAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error)
+	HasWriteAccess(ctx context.Context, userID, organizationID uuid.UUID) (bool, error)
 }
 
 type IOAuthAppRepository interface {
+	Create(ctx context.Context, app *domain.OAuthApp) error
+	GetByID(ctx context.Context, id string) (*domain.OAuthApp, error)
 	GetByClientID(ctx context.Context, clientID string) (*domain.OAuthApp, error)
+	ListByOwnerUser(ctx context.Context, userID int64, page, perPage int) ([]*domain.OAuthApp, error)
+	ListByOrganization(ctx context.Context, orgID int64, page, perPage int) ([]*domain.OAuthApp, error)
+	Update(ctx context.Context, app *domain.OAuthApp) error
+	Delete(ctx context.Context, id string, ownerUserID int64) error
+	UpdateSecretHash(ctx context.Context, id, hash string) error
+}
+
+type IOAuthAuthorizationCodeRepository interface {
+	Create(ctx context.Context, code *domain.OAuthAuthorizationCode) error
+	ConsumeByCodeHash(ctx context.Context, codeHash string) (*domain.OAuthAuthorizationCode, error)
+}
+
+type IOAuthAccessTokenRepository interface {
+	Create(ctx context.Context, token *domain.OAuthAccessToken) error
+	FindByTokenHash(ctx context.Context, hash string) (*domain.OAuthAccessToken, error)
+	RevokeByUserAndApp(ctx context.Context, userID int64, appID string) error
+	RevokeAllByAppID(ctx context.Context, appID string, ownerUserID int64) error
+}
+
+type IOAuthAuthorizationRepository interface {
+	Upsert(ctx context.Context, auth *domain.OAuthAuthorization) error
+	GetByUserAndApp(ctx context.Context, userID int64, appID string) (*domain.OAuthAuthorization, error)
+	ListByUser(ctx context.Context, userID int64) ([]*domain.OAuthAuthorization, error)
+	Delete(ctx context.Context, userID int64, appID string) error
+}
+
+type IOrganizationRepository interface {
+	// GetByLogin returns nil, nil when the organization is not found.
+	GetByLogin(ctx context.Context, login string) (*domain.Organization, error)
+	ListByUserID(ctx context.Context, userID int64) ([]*domain.Organization, error)
+	GetMemberRole(ctx context.Context, orgID, userID int64) (string, error)
+}
+
+type ISSHKeyStore interface {
+	FindByFingerprint(ctx context.Context, fingerprint string) (*entity.SSHKey, error)
+	ListByUserID(ctx context.Context, userID uuid.UUID) ([]*entity.SSHKey, error)
+	Create(ctx context.Context, key *entity.SSHKey) error
+	Delete(ctx context.Context, id, userID uuid.UUID) error
+}
+
+type IWorkflowRepository interface {
+	Upsert(ctx context.Context, wf *entity.Workflow) error
+	GetByID(ctx context.Context, orgID, id uuid.UUID) (*entity.Workflow, error)
+	GetByPath(ctx context.Context, orgID, repoID uuid.UUID, path string) (*entity.Workflow, error)
+	ListByRepo(ctx context.Context, orgID, repoID uuid.UUID) ([]*entity.Workflow, error)
+	SaveRevision(ctx context.Context, rev *entity.WorkflowRevision) error
+	GetLatestRevision(ctx context.Context, workflowID uuid.UUID) (*entity.WorkflowRevision, error)
+	SaveDiagnostics(ctx context.Context, revID uuid.UUID, diags []*entity.WorkflowDiagnostic) error
+	ListDiagnosticsByRevision(ctx context.Context, revID uuid.UUID) ([]*entity.WorkflowDiagnostic, error)
+}
+
+type IRepositoryCollaboratorRepository interface {
+	AddCollaborator(ctx context.Context, repoID, userID uuid.UUID, permission string) error
+	RemoveCollaborator(ctx context.Context, repoID, userID uuid.UUID) error
+	GetPermission(ctx context.Context, repoID, userID uuid.UUID) (string, error)
+	ListCollaborators(ctx context.Context, repoID uuid.UUID) ([]*entity.RepositoryCollaborator, error)
 }

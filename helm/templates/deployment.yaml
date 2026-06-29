@@ -17,14 +17,33 @@ spec:
         {{- include "open-git.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: backend
     spec:
+      serviceAccountName: {{ include "open-git.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "open-git.podSecurityContext" . | nindent 8 }}
       containers:
         - name: backend
           image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
           imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          securityContext:
+            {{- include "open-git.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if (.Values.persistence.repositories.enabled | default true) }}
+            - name: repositories
+              mountPath: {{ include "open-git.repositoriesMountPath" . | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8080
               protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ printf "%s-config" (include "open-git.fullname" .) | quote }}
           env:
             - name: PORT
               value: "8080"
@@ -63,22 +82,45 @@ spec:
             - name: MINIO_BUCKET
               value: {{ .Values.minio.bucket | quote }}
             {{- end }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-git.secretName" . }}
+                  key: jwt-secret
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-git.secretName" . }}
+                  key: oauth-client-secret
+            - name: WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-git.secretName" . }}
+                  key: webhook-secret
           readinessProbe:
             httpGet:
-              path: /health
+              path: /readyz
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if (.Values.persistence.repositories.enabled | default true) }}
+        - name: repositories
+          persistentVolumeClaim:
+            claimName: {{ include "open-git.fullname" . }}-repositories
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -111,13 +153,42 @@ spec:
         {{- include "open-git.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: frontend
     spec:
+      serviceAccountName: {{ include "open-git.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "open-git.podSecurityContext" . | nindent 8 }}
       containers:
         - name: frontend
           image: "{{ .Values.image.frontend.repository }}:{{ .Values.image.frontend.tag }}"
           imagePullPolicy: {{ .Values.image.frontend.pullPolicy }}
+          securityContext:
+            {{- include "open-git.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           ports:
             - name: http
               containerPort: 3000
               protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}

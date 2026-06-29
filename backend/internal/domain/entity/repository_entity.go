@@ -21,6 +21,9 @@ type Repository struct {
 	OrganizationID uuid.UUID
 	OwnerID        uuid.UUID
 	Name           string
+	Description    string
+	GitPath        string
+	OwnerLogin     string
 	Visibility     string
 	DefaultBranch  string
 	CreatedAt      time.Time
