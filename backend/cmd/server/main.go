@@ -21,6 +21,7 @@ import (
 
 	gossh "github.com/gliderlabs/ssh"
 	"github.com/google/uuid"
+	cryptossh "golang.org/x/crypto/ssh"
 	"github.com/hibiken/asynq"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
@@ -44,6 +45,7 @@ import (
 	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
 	"github.com/open-git/backend/internal/middleware"
+	repo "github.com/open-git/backend/internal/repository"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
 	issueusecase "github.com/open-git/backend/internal/usecase/issue"
@@ -322,7 +324,7 @@ func domainUserToEntity(user *domain.User) *entity.User {
 
 func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
 	if data, err := os.ReadFile(path); err == nil {
-		signer, err := gossh.ParsePrivateKey(data)
+		signer, err := cryptossh.ParsePrivateKey(data)
 		if err != nil {
 			return nil, fmt.Errorf("parse host key: %w", err)
 		}
@@ -348,7 +350,7 @@ func loadOrGenerateHostKey(path string) (gossh.Signer, error) {
 		return nil, fmt.Errorf("write host key: %w", err)
 	}
 
-	return gossh.NewSignerFromKey(privateKey)
+	return cryptossh.NewSignerFromKey(privateKey)
 }
 
 func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SSHServer, error) {

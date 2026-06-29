@@ -38,7 +38,7 @@ func openLabelTestDB(t *testing.T) *sqlx.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := database.RunMigrations(db, "sqlite", "../../../migrations"); err != nil {
+	if err := database.RunMigrations(db, "sqlite", "../../migrations"); err != nil {
 		_ = db.Close()
 		t.Fatalf("run migrations: %v", err)
 	}

@@ -228,3 +228,52 @@ func (r *sqlxRepositoryRepository) Delete(ctx context.Context, id uuid.UUID) err
 	_, err := r.DB.ExecContext(ctx, query, id)
 	return err
 }
+
+func (r *sqlxRepositoryRepository) GetByID(ctx context.Context, repositoryID, organizationID uuid.UUID) (*entity.Repository, error) {
+	const query = `
+		SELECT id, organization_id, owner_id, name, description, git_path, owner_login, visibility, default_branch, created_at
+		FROM repositories
+		WHERE id = $1 AND organization_id = $2
+	`
+
+	row := r.DB.QueryRowxContext(ctx, query, repositoryID, organizationID)
+
+	var repo entity.Repository
+	err := row.Scan(
+		&repo.ID,
+		&repo.OrganizationID,
+		&repo.OwnerID,
+		&repo.Name,
+		&repo.Description,
+		&repo.GitPath,
+		&repo.OwnerLogin,
+		&repo.Visibility,
+		&repo.DefaultBranch,
+		&repo.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &repo, nil
+}
+
+func (r *sqlxRepositoryRepository) CountByOrg(ctx context.Context, organizationID uuid.UUID) (int, error) {
+	const query = `SELECT COUNT(*) FROM repositories WHERE organization_id = $1`
+	var count int
+	if err := r.DB.QueryRowxContext(ctx, query, organizationID).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *sqlxRepositoryRepository) CountByOwner(ctx context.Context, ownerID uuid.UUID) (int, error) {
+	const query = `SELECT COUNT(*) FROM repositories WHERE owner_id = $1`
+	var count int
+	if err := r.DB.QueryRowxContext(ctx, query, ownerID).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
