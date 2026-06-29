@@ -3,9 +3,18 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+
+import { useToast } from "@/components/ui/toast";
+import { apiClient, isApiError } from "@/lib/api-client";
 import { renderMarkdown } from "@/lib/markdown";
+import { issueSchema } from "@/lib/validations";
 
 type Label = { name: string; color: string };
+
+type IssueFormValues = z.infer<typeof issueSchema>;
 
 type Props = {
   params: Promise<{ owner: string; repo: string }>;
@@ -13,15 +22,20 @@ type Props = {
 
 export default function NewIssuePage({ params }: Props) {
   const router = useRouter();
+  const toast = useToast();
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
   const [showPreview, setShowPreview] = useState(false);
   const [labels, setLabels] = useState<Label[]>([]);
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  const { register, handleSubmit, formState, watch } = useForm<IssueFormValues>({
+    resolver: zodResolver(issueSchema),
+    defaultValues: { title: "", body: "" },
+  });
+
+  const title = watch("title") ?? "";
+  const body = watch("body") ?? "";
 
   useEffect(() => {
     params.then(({ owner: o, repo: r }) => {
@@ -38,46 +52,28 @@ export default function NewIssuePage({ params }: Props) {
       .catch(() => setLabels([]));
   }, [owner, repo]);
 
-  const titleError =
-    title.length === 0 ? null : title.length > 256 ? "Title must be 256 characters or fewer" : null;
-
   const toggleLabel = (name: string) => {
     setSelectedLabels((prev) =>
       prev.includes(name) ? prev.filter((l) => l !== name) : [...prev, name],
     );
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) {
-      setError("Title is required");
-      return;
-    }
-    if (title.length > 256) {
-      setError("Title must be 256 characters or fewer");
-      return;
-    }
-
-    setSubmitting(true);
-    setError(null);
+  const onSubmit = handleSubmit(async (data) => {
     try {
-      const res = await fetch(`/repos/${owner}/${repo}/issues`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: title.trim(),
-          body,
+      const issue = await apiClient.post<{ number: number }>(
+        `/api/v3/repos/${owner}/${repo}/issues`,
+        {
+          title: data.title,
+          body: data.body ?? "",
           labels: selectedLabels,
-        }),
-      });
-      if (!res.ok) throw new Error("Failed to create issue");
-      const issue = (await res.json()) as { number: number };
+        },
+      );
+      toast.success("Issue created");
       router.push(`/${owner}/${repo}/issues/${issue.number}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create issue");
-      setSubmitting(false);
+      toast.error(isApiError(err) ? (err.message ?? "Failed to create issue") : "Failed to create issue");
     }
-  };
+  });
 
   if (!owner || !repo) return null;
 
@@ -97,7 +93,7 @@ export default function NewIssuePage({ params }: Props) {
           </span>
         </h1>
 
-        <form onSubmit={handleSubmit} className="bg-white border border-[#d0d7de] rounded-md p-6">
+        <form onSubmit={onSubmit} className="bg-white border border-[#d0d7de] rounded-md p-6">
           <div className="mb-4">
             <label htmlFor="title" className="block text-sm font-semibold mb-1">
               Title <span className="text-[#d1242f]">*</span>
@@ -105,17 +101,16 @@ export default function NewIssuePage({ params }: Props) {
             <input
               id="title"
               type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              {...register("title")}
               className={`w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#0969da] ${
-                titleError ? "border-[#d1242f]" : "border-[#d0d7de]"
+                formState.errors.title ? "border-[#d1242f]" : "border-[#d0d7de]"
               }`}
               placeholder="Issue title"
               maxLength={256}
             />
             <div className="flex justify-between mt-1">
-              {titleError ? (
-                <span className="text-xs text-[#d1242f]">{titleError}</span>
+              {formState.errors.title?.message ? (
+                <span className="text-xs text-[#d1242f]">{formState.errors.title.message}</span>
               ) : (
                 <span className="text-xs text-[#656d76]">Required</span>
               )}
@@ -148,8 +143,7 @@ export default function NewIssuePage({ params }: Props) {
             ) : (
               <textarea
                 id="body"
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
+                {...register("body")}
                 className="w-full min-h-[200px] px-3 py-2 border border-[#d0d7de] rounded-md text-sm resize-y focus:outline-none focus:ring-2 focus:ring-[#0969da]"
                 placeholder="Write your issue description in GitHub Flavored Markdown"
               />
@@ -179,8 +173,6 @@ export default function NewIssuePage({ params }: Props) {
             </div>
           )}
 
-          {error && <p className="mb-4 text-sm text-[#d1242f]">{error}</p>}
-
           <div className="flex gap-2 justify-end">
             <Link
               href={`/${owner}/${repo}/issues`}
@@ -190,10 +182,11 @@ export default function NewIssuePage({ params }: Props) {
             </Link>
             <button
               type="submit"
-              disabled={!title.trim() || !!titleError || submitting}
-              className="px-4 py-1.5 text-sm bg-[#1f883d] text-white rounded-md font-semibold border border-black/10 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={formState.isSubmitting}
+              className="inline-flex items-center gap-2 px-4 py-1.5 text-sm bg-[#1f883d] text-white rounded-md font-semibold border border-black/10 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {submitting ? "Creating…" : "Submit new issue"}
+              {formState.isSubmitting && <span className="animate-spin">⟳</span>}
+              {formState.isSubmitting ? "Creating…" : "Submit new issue"}
             </button>
           </div>
         </form>
