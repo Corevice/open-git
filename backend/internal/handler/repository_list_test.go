@@ -172,6 +172,14 @@ func (m *listMockAuditLogRepo) Record(_ context.Context, orgID, actorID uuid.UUI
 	return nil
 }
 
+// listOwnerResolverStub resolves any owner id to a fixed login so the create
+// usecase can compute a git path during handler tests.
+type listOwnerResolverStub struct{}
+
+func (listOwnerResolverStub) GetByID(_ context.Context, id uuid.UUID) (*entity.User, error) {
+	return &entity.User{ID: id, Login: listTestOwnerLogin}, nil
+}
+
 func newRepositoryHandlerEcho(
 	t *testing.T,
 	repos *listMockRepositoryRepo,
@@ -183,7 +191,11 @@ func newRepositoryHandlerEcho(
 
 	memberships := &listMockMembershipRepo{}
 	listRepos := repoUC.NewListRepositoriesUsecase(repos, memberships, nil)
-	create := repoUC.NewCreateRepositoryUsecase(repos)
+	create := repoUC.NewCreateRepositoryUsecase(
+		repos,
+		repoUC.WithGitDataRoot(t.TempDir()),
+		repoUC.WithOwnerLoginResolver(listOwnerResolverStub{}),
+	)
 	get := repoUC.NewGetRepositoryUsecase(repos, nil, memberships)
 	listAuditLogs := repoUC.NewListAuditLogsUsecase(&mockListAuditLogsUsecase{})
 

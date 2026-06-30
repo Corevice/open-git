@@ -70,7 +70,16 @@ func InitBare(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	_, err := gogit.PlainInit(path, true)
+	// Default HEAD to "main" so it matches the repository's default branch.
+	// Plain gogit.PlainInit points HEAD at refs/heads/master, which left a
+	// freshly-pushed "main" branch with a dangling HEAD ("remote HEAD refers to
+	// nonexistent ref" on clone).
+	_, err := gogit.PlainInitWithOptions(path, &gogit.PlainInitOptions{
+		InitOptions: gogit.InitOptions{
+			DefaultBranch: plumbing.NewBranchReferenceName("main"),
+		},
+		Bare: true,
+	})
 	return err
 }
 
@@ -83,12 +92,14 @@ func repoServer(repoPath string) (transport.Transport, *transport.Endpoint, erro
 		return nil, nil, err
 	}
 
-	root := filepath.Dir(abs)
-	name := filepath.Base(abs)
-	loader := server.NewFilesystemLoader(osfs.New(root))
+	// Mirror advertiseRefs: load against the root filesystem with the
+	// repository's absolute path as the endpoint. Building the loader from the
+	// parent dir with a relative endpoint made go-git fail with "repository not
+	// found", breaking git push (receive-pack) and fetch (upload-pack).
+	loader := server.NewFilesystemLoader(osfs.New("/"))
 	svr := server.NewServer(loader)
 
-	ep, err := transport.NewEndpoint(name)
+	ep, err := transport.NewEndpoint(abs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("transport endpoint: %w", err)
 	}

@@ -47,13 +47,14 @@ func (m *mockRepositoryRepo) Create(_ context.Context, repo *entity.Repository) 
 }
 
 func (m *mockRepositoryRepo) GetByOwnerAndName(_ context.Context, ownerID uuid.UUID, name string) (*entity.Repository, error) {
+	// Mirror the real sqlx implementation: not-found is (nil, nil), not an error.
 	if m.byOwnerAndName == nil {
-		return nil, errors.New("not found")
+		return nil, nil
 	}
 	if repo, ok := m.byOwnerAndName[repoKey(ownerID, name)]; ok {
 		return repo, nil
 	}
-	return nil, errors.New("not found")
+	return nil, nil
 }
 
 func (m *mockRepositoryRepo) GetByOwnerLoginAndName(context.Context, string, string) (*entity.Repository, error) {
@@ -102,10 +103,13 @@ func (m *mockRepositoryRepo) Delete(_ context.Context, id uuid.UUID) error {
 }
 
 type mockGitInitService struct {
-	called   bool
-	lastPath string
-	lastOpts gitinfra.AutoInitOpts
-	err      error
+	called       bool
+	lastPath     string
+	lastOpts     gitinfra.AutoInitOpts
+	err          error
+	bareCalled   bool
+	bareLastPath string
+	bareErr      error
 }
 
 func (m *mockGitInitService) AutoInitRepository(bareRepoPath string, opts gitinfra.AutoInitOpts) error {
@@ -113,6 +117,12 @@ func (m *mockGitInitService) AutoInitRepository(bareRepoPath string, opts gitinf
 	m.lastPath = bareRepoPath
 	m.lastOpts = opts
 	return m.err
+}
+
+func (m *mockGitInitService) InitBare(path string) error {
+	m.bareCalled = true
+	m.bareLastPath = path
+	return m.bareErr
 }
 
 func TestDuplicateName(t *testing.T) {
@@ -178,8 +188,10 @@ func TestAutoInitRequiresOwnerLogin(t *testing.T) {
 	if gitInit.called {
 		t.Fatal("expected git init service not to be called")
 	}
-	if len(repos.deletedIDs) != 1 {
-		t.Fatalf("expected repository to be deleted on owner login error, got %d deletes", len(repos.deletedIDs))
+	// Owner login is now resolved before the row is created, so we fail fast
+	// without ever persisting (and therefore needing to delete) a repository.
+	if len(repos.created) != 0 {
+		t.Fatalf("expected no repository to be created, got %d", len(repos.created))
 	}
 }
 
@@ -211,7 +223,8 @@ func TestAutoInitFailureDeletesRepository(t *testing.T) {
 
 func TestValidCreate(t *testing.T) {
 	repos := &mockRepositoryRepo{byOwnerAndName: map[string]*entity.Repository{}}
-	uc := repository.NewCreateRepositoryUsecase(repos, repository.WithGitDataRoot("/data/git"))
+	gitInit := &mockGitInitService{}
+	uc := repository.NewCreateRepositoryUsecase(repos, repository.WithGitDataRoot("/data/git"), repository.WithGitInitService(gitInit))
 
 	repo, err := uc.Execute(context.Background(), repository.CreateRepositoryInput{
 		OwnerID:        testOwnerID,
@@ -219,6 +232,7 @@ func TestValidCreate(t *testing.T) {
 		Name:           "my-repo",
 		Private:        true,
 		Description:    "test repo",
+		OwnerLogin:     testOwnerLogin,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -237,6 +251,20 @@ func TestValidCreate(t *testing.T) {
 	}
 	if repo.OrganizationID != testOrgID {
 		t.Fatalf("expected organization id %s, got %s", testOrgID, repo.OrganizationID)
+	}
+	// A non-auto-init repo must still get an owner login, a git path, and an
+	// empty bare repository on disk so it can accept its first push.
+	if repo.OwnerLogin != testOwnerLogin {
+		t.Fatalf("expected owner login %s, got %q", testOwnerLogin, repo.OwnerLogin)
+	}
+	if repo.GitPath != "/data/git/testuser/my-repo.git" {
+		t.Fatalf("expected git path /data/git/testuser/my-repo.git, got %q", repo.GitPath)
+	}
+	if !gitInit.bareCalled {
+		t.Fatal("expected bare repository to be initialized")
+	}
+	if gitInit.called {
+		t.Fatal("auto-init must not run when AutoInit is false")
 	}
 	if len(repos.created) != 1 {
 		t.Fatal("expected repository to be created")
@@ -295,10 +323,15 @@ func TestAutoInitFalseDoesNotCallGitInitService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	// AutoInit must not run, but the repo still gets a git path and an empty
+	// bare repository on disk so it can accept its first push.
 	if gitInit.called {
-		t.Fatal("expected git init service not to be called")
+		t.Fatal("expected auto-init not to be called")
 	}
-	if repo.GitPath != "" {
-		t.Fatalf("expected empty git path, got %q", repo.GitPath)
+	if !gitInit.bareCalled {
+		t.Fatal("expected an empty bare repository to be initialized")
+	}
+	if repo.GitPath != "/data/git/testuser/my-repo.git" {
+		t.Fatalf("expected git path /data/git/testuser/my-repo.git, got %q", repo.GitPath)
 	}
 }

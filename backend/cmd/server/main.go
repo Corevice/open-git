@@ -85,11 +85,17 @@ func validateRequiredEnv(vars []string) error {
 }
 
 func main() {
-	if err := validateRequiredEnv([]string{"JWT_SECRET", "DB_DSN"}); err != nil {
+	if err := validateRequiredEnv([]string{"JWT_SECRET"}); err != nil {
 		log.Fatalf("%v", err)
 	}
 
 	cfg := config.Load()
+	// DB_DSN is only required for postgres; sqlite falls back to a default file
+	// path (see config.Validate and the database package), so requiring it
+	// unconditionally here made the documented sqlite default impossible to run.
+	if cfg.DBType == "postgres" && os.Getenv("DB_DSN") == "" {
+		log.Fatalf("missing required environment variable: DB_DSN")
+	}
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("invalid config: %v", err)
 	}
@@ -792,9 +798,11 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	oauthHandler.RegisterRoutes(api, authMiddleware)
 	api.GET("/rate_limit", rateLimitHandler.Get)
 	api.GET("/", rootHandler.Get)
-	e.GET("/:owner/:repo.git/info/refs", gitHTTPHandler.InfoRefs, realOptionalGitAuth)
-	e.POST("/:owner/:repo.git/git-upload-pack", gitHTTPHandler.UploadPack, realOptionalGitAuth)
-	e.POST("/:owner/:repo.git/git-receive-pack", gitHTTPHandler.ReceivePack, realGitBasicAuth)
+	// Capture the whole final segment as :repo and strip ".git" in the handler
+	// (Echo cannot mix a param with a literal ".git" in one segment).
+	e.GET("/:owner/:repo/info/refs", gitHTTPHandler.InfoRefs, realOptionalGitAuth)
+	e.POST("/:owner/:repo/git-upload-pack", gitHTTPHandler.UploadPack, realOptionalGitAuth)
+	e.POST("/:owner/:repo/git-receive-pack", gitHTTPHandler.ReceivePack, realGitBasicAuth)
 
 	v3 := e.Group("/api/v3")
 	v3.Use(middleware.GitHubCompatHeaders())

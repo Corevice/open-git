@@ -23,9 +23,21 @@ func NewUserRepository(db *sqlx.DB) *sqlxUserRepository {
 
 const userSelectColumns = `id, login, email, password_hash, name, bio, avatar_url, created_at, updated_at`
 
+// newInt64CompatibleUUID returns a UUID whose upper 64 bits are zero, so it
+// survives the int64<->UUID bridge used by JWT subjects
+// (middleware.UUIDToInt64 / Int64ToUUID). A plain uuid.New() has random upper
+// bits, so UUIDToInt64 then Int64ToUUID would not reconstruct it and the user
+// would be unreachable by ID-based lookups (GET /user, repo owner resolution).
+func newInt64CompatibleUUID() uuid.UUID {
+	random := uuid.New() // random lower 64 bits
+	var id uuid.UUID
+	copy(id[8:], random[8:])
+	return id
+}
+
 func (r *sqlxUserRepository) Create(ctx context.Context, user *entity.User) error {
 	if user.ID == uuid.Nil {
-		user.ID = uuid.New()
+		user.ID = newInt64CompatibleUUID()
 	}
 	if user.CreatedAt.IsZero() {
 		user.CreatedAt = time.Now().UTC()

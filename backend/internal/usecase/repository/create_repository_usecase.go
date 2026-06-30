@@ -27,12 +27,19 @@ var repoNameRegex = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
 
 type GitInitService interface {
 	AutoInitRepository(bareRepoPath string, opts gitinfra.AutoInitOpts) error
+	// InitBare creates an empty bare repository so a freshly-created
+	// (non-auto-init) repo can accept its first push.
+	InitBare(path string) error
 }
 
-type gitInitFunc func(bareRepoPath string, opts gitinfra.AutoInitOpts) error
+type defaultGitInitService struct{}
 
-func (f gitInitFunc) AutoInitRepository(bareRepoPath string, opts gitinfra.AutoInitOpts) error {
-	return f(bareRepoPath, opts)
+func (defaultGitInitService) AutoInitRepository(bareRepoPath string, opts gitinfra.AutoInitOpts) error {
+	return gitinfra.AutoInitRepository(bareRepoPath, opts)
+}
+
+func (defaultGitInitService) InitBare(path string) error {
+	return gitinfra.InitBare(path)
 }
 
 type CreateRepositoryInput struct {
@@ -92,7 +99,7 @@ func NewCreateRepositoryUsecase(repos repo.IRepositoryRepository, opts ...Create
 	}
 	gitInit := cfg.gitInit
 	if gitInit == nil {
-		gitInit = gitInitFunc(gitinfra.AutoInitRepository)
+		gitInit = defaultGitInitService{}
 	}
 	return &CreateRepositoryUsecase{
 		repos:       repos,
@@ -137,8 +144,42 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 		return nil, ErrInvalidName
 	}
 
-	if _, err := u.repos.GetByOwnerAndName(ctx, input.OwnerID, input.Name); err == nil {
+	// GetByOwnerAndName returns (nil, nil) when no repository exists (the
+	// contract the sqlx implementation and other callers rely on). Only treat
+	// it as a duplicate when an existing repository is actually returned;
+	// checking err == nil alone made every create fail with ErrDuplicateName.
+	if existing, err := u.repos.GetByOwnerAndName(ctx, input.OwnerID, input.Name); err == nil && existing != nil {
 		return nil, ErrDuplicateName
+	}
+
+	gitDataRoot := u.gitDataRoot
+	if gitDataRoot == "" {
+		return nil, ErrGitDataRootNotConfig
+	}
+
+	// Resolve the owner login for EVERY repository, not just auto-init ones.
+	// It is needed to compute the on-disk git path, to render full_name and
+	// clone URLs, and because git push/clone resolve repositories by owner
+	// login. Previously this only happened in the AutoInit branch, so plain
+	// repos were stored with an empty owner_login/git_path and were unreachable
+	// over git (every push 404'd).
+	ownerLogin := input.OwnerLogin
+	if ownerLogin == "" && u.users != nil {
+		user, err := u.users.GetByID(ctx, input.OwnerID)
+		if err != nil {
+			return nil, err
+		}
+		if user != nil {
+			ownerLogin = user.Login
+		}
+	}
+	if ownerLogin == "" {
+		return nil, ErrOwnerLoginRequired
+	}
+
+	gitPath, err := resolveGitPath(gitDataRoot, ownerLogin, input.Name)
+	if err != nil {
+		return nil, err
 	}
 
 	visibility := entity.VisibilityPublic
@@ -151,7 +192,8 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 		OwnerID:        input.OwnerID,
 		Name:           input.Name,
 		Description:    input.Description,
-		OwnerLogin:     input.OwnerLogin,
+		OwnerLogin:     ownerLogin,
+		GitPath:        gitPath,
 		Visibility:     visibility,
 		DefaultBranch:  "main",
 		CreatedAt:      time.Now().UTC(),
@@ -162,34 +204,6 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 	}
 
 	if input.AutoInit {
-		gitDataRoot := u.gitDataRoot
-		if gitDataRoot == "" {
-			_ = u.repos.Delete(ctx, repository.ID)
-			return nil, ErrGitDataRootNotConfig
-		}
-
-		ownerLogin := input.OwnerLogin
-		if ownerLogin == "" && u.users != nil {
-			user, err := u.users.GetByID(ctx, input.OwnerID)
-			if err != nil {
-				_ = u.repos.Delete(ctx, repository.ID)
-				return nil, err
-			}
-			if user != nil {
-				ownerLogin = user.Login
-			}
-		}
-		if ownerLogin == "" {
-			_ = u.repos.Delete(ctx, repository.ID)
-			return nil, ErrOwnerLoginRequired
-		}
-
-		gitPath, err := resolveGitPath(gitDataRoot, ownerLogin, input.Name)
-		if err != nil {
-			_ = u.repos.Delete(ctx, repository.ID)
-			return nil, err
-		}
-
 		if err := u.gitInit.AutoInitRepository(gitPath, gitinfra.AutoInitOpts{
 			Readme:            input.Name,
 			GitIgnoreTemplate: input.GitIgnoreTemplate,
@@ -199,9 +213,13 @@ func (u *CreateRepositoryUsecase) Execute(ctx context.Context, input CreateRepos
 			_ = os.RemoveAll(gitPath)
 			return nil, fmt.Errorf("auto init repository: %w", err)
 		}
-		repository.GitPath = gitPath
-		if repository.OwnerLogin == "" {
-			repository.OwnerLogin = ownerLogin
+	} else {
+		// Create an empty bare repository so the new repo can accept its first
+		// push immediately (matching GitHub's "empty repository" behaviour).
+		if err := u.gitInit.InitBare(gitPath); err != nil {
+			_ = u.repos.Delete(ctx, repository.ID)
+			_ = os.RemoveAll(gitPath)
+			return nil, fmt.Errorf("init bare repository: %w", err)
 		}
 	}
 
