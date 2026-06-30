@@ -83,12 +83,16 @@ func NewGitHTTPHandler(
 }
 
 func (h *GitHTTPHandler) RegisterRoutes(e *echo.Echo) {
-	e.GET("/:owner/:repo.git/info/refs", h.InfoRefs)
-	e.POST("/:owner/:repo.git/git-upload-pack", h.UploadPack)
+	// NOTE: Echo cannot mix a param and a literal in one path segment
+	// (":repo.git" would name the param "repo.git" and leave c.Param("repo")
+	// empty). Capture the whole segment as :repo and strip the .git suffix in
+	// the handler instead.
+	e.GET("/:owner/:repo/info/refs", h.InfoRefs)
+	e.POST("/:owner/:repo/git-upload-pack", h.UploadPack)
 	if h.authRequired != nil {
-		e.POST("/:owner/:repo.git/git-receive-pack", h.ReceivePack, h.authRequired)
+		e.POST("/:owner/:repo/git-receive-pack", h.ReceivePack, h.authRequired)
 	} else {
-		e.POST("/:owner/:repo.git/git-receive-pack", h.ReceivePack)
+		e.POST("/:owner/:repo/git-receive-pack", h.ReceivePack)
 	}
 }
 
@@ -97,18 +101,22 @@ func (h *GitHTTPHandler) repoPath(owner, repo string) string {
 }
 
 func (h *GitHTTPHandler) resolveRepo(c echo.Context) (*ResolvedGitRepository, error) {
+	owner := c.Param("owner")
+	// The route param captures the full last segment (e.g. "demo.git"); strip
+	// the .git suffix once and use the cleaned name everywhere.
+	repoName := strings.TrimSuffix(c.Param("repo"), ".git")
 	if h.resolver != nil {
-		repo, err := h.resolver.Resolve(c.Request().Context(), c.Param("owner"), strings.TrimSuffix(c.Param("repo"), ".git"))
+		repo, err := h.resolver.Resolve(c.Request().Context(), owner, repoName)
 		if err != nil {
 			return nil, echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
 		}
 		if repo.DiskPath == "" {
-			repo.DiskPath = h.repoPath(c.Param("owner"), c.Param("repo"))
+			repo.DiskPath = h.repoPath(owner, repoName)
 		}
 		return repo, nil
 	}
 
-	path := h.repoPath(c.Param("owner"), c.Param("repo"))
+	path := h.repoPath(owner, repoName)
 	if _, err := os.Stat(path); err != nil {
 		return nil, echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
 	}
@@ -127,9 +135,13 @@ func (h *GitHTTPHandler) InfoRefs(c echo.Context) error {
 		return err
 	}
 	if service == transport.ReceivePackServiceName {
-		userID, err := middleware.GetUserID(c)
-		if err != nil {
-			return err
+		// info/refs uses optional auth, so an unauthenticated push probe lands
+		// here with no user. Return a Basic-auth challenge (not a bare 401) so
+		// git retries with credentials instead of failing immediately.
+		userID := middleware.UserIDFromContext(c)
+		if userID == 0 {
+			c.Response().Header().Set("WWW-Authenticate", gitWWWAuthenticateHeader)
+			return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
 		}
 		if err := h.ensureWriteAccess(c.Request().Context(), userID, repo); err != nil {
 			return err
