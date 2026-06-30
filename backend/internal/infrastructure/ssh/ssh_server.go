@@ -2,9 +2,9 @@ package ssh
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	cryptossh "golang.org/x/crypto/ssh"
 
-	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/repository"
 )
 
@@ -37,29 +36,6 @@ type gitSSHCommand struct {
 	repoName   string
 }
 
-type sshResponseWriter struct {
-	session gossh.Session
-	header  http.Header
-	status  int
-}
-
-func (w *sshResponseWriter) Header() http.Header {
-	if w.header == nil {
-		w.header = make(http.Header)
-	}
-	return w.header
-}
-
-func (w *sshResponseWriter) Write(b []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	return w.session.Write(b)
-}
-
-func (w *sshResponseWriter) WriteHeader(statusCode int) {
-	w.status = statusCode
-}
 
 func NewSSHServer(
 	gitRoot string,
@@ -109,12 +85,18 @@ func (h *SSHServer) Close() error {
 	return h.server.Close()
 }
 
+// authUserIDContextKey holds the uuid.UUID of the user that owns the
+// authenticated SSH key, so the session handler can enforce authorization.
+const authUserIDContextKey = "auth_user_id"
+
 func (h *SSHServer) authenticateKey(ctx gossh.Context, key gossh.PublicKey) bool {
 	fingerprint := cryptossh.FingerprintSHA256(key)
 	stored, err := h.keyStore.FindByFingerprint(ctx, fingerprint)
 	if err != nil || stored == nil {
 		return false
 	}
+	// Remember which user this key belongs to for per-repo authorization.
+	ctx.SetValue(authUserIDContextKey, stored.UserID)
 	return true
 }
 
@@ -128,7 +110,7 @@ func (h *SSHServer) handleSession(s gossh.Session) {
 		return
 	}
 
-	diskPath, _, err := h.resolver.Resolve(ctx, parsed.ownerLogin, parsed.repoName)
+	diskPath, ownerID, err := h.resolver.Resolve(ctx, parsed.ownerLogin, parsed.repoName)
 	if err != nil {
 		_, _ = fmt.Fprintf(s, "ERR %v\n", err)
 		s.Exit(1)
@@ -138,24 +120,42 @@ func (h *SSHServer) handleSession(s gossh.Session) {
 		diskPath = filepath.Join(h.gitRoot, parsed.ownerLogin, parsed.repoName+".git")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "/"+parsed.packType, io.NopCloser(s))
-	if err != nil {
-		_, _ = fmt.Fprintf(s, "ERR %v\n", err)
+	// Authorization: pushing (receive-pack) requires the authenticated key to
+	// belong to the repository owner. Without this, any user with a registered
+	// key could write to any repository. (Org/collaborator push over SSH is not
+	// yet supported and must use HTTPS.)
+	if parsed.packType == "receive-pack" {
+		authUserID, _ := ctx.Value(authUserIDContextKey).(uuid.UUID)
+		if authUserID == uuid.Nil || ownerID == uuid.Nil || authUserID != ownerID {
+			_, _ = fmt.Fprintf(s.Stderr(), "ERR write access denied\n")
+			s.Exit(1)
+			return
+		}
+	}
+
+	// Serve git over SSH by running the real git pack programs wired to the
+	// session's streams. This is the standard approach used by git servers and
+	// implements the interactive SSH protocol correctly (go-git's pure-Go
+	// server side does not fully support receive-pack from modern clients).
+	if parsed.packType != "upload-pack" && parsed.packType != "receive-pack" {
+		_, _ = fmt.Fprintf(s.Stderr(), "ERR unsupported pack type %q\n", parsed.packType)
 		s.Exit(1)
 		return
 	}
 
-	rw := &sshResponseWriter{session: s}
-	switch parsed.packType {
-	case "upload-pack":
-		err = infragit.ServeUploadPack(rw, req, diskPath)
-	case "receive-pack":
-		err = infragit.ServeReceivePack(rw, req, diskPath)
-	default:
-		err = fmt.Errorf("unsupported pack type %q", parsed.packType)
-	}
-	if err != nil {
-		_, _ = fmt.Fprintf(s, "ERR %v\n", err)
+	cmd := exec.CommandContext(ctx, "git", parsed.packType, diskPath)
+	cmd.Stdin = s
+	cmd.Stdout = s
+	cmd.Stderr = s.Stderr()
+	if err := cmd.Run(); err != nil {
+		_, _ = fmt.Fprintf(s.Stderr(), "ERR %v\n", err)
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			s.Exit(exitErr.ExitCode())
+			return
+		}
 		s.Exit(1)
+		return
 	}
+	s.Exit(0)
 }

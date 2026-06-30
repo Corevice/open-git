@@ -9,6 +9,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/open-git/backend/internal/domain/entity"
+	"github.com/open-git/backend/internal/middleware"
 	"github.com/open-git/backend/internal/repository"
 )
 
@@ -105,13 +106,13 @@ func toSSHKeyResponse(key *entity.SSHKey) sshKeyResponse {
 }
 
 func getUserUUID(c echo.Context) (uuid.UUID, error) {
-	v := c.Get("user_id")
-	if v == nil {
-		return uuid.Nil, echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
+	// The auth middleware stores user_id as an int64; convert it the same way
+	// the rest of the app does. The previous implementation asserted a
+	// uuid.UUID directly, so it always failed (401) and SSH key registration
+	// was impossible.
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		return uuid.Nil, err
 	}
-	userID, ok := v.(uuid.UUID)
-	if !ok {
-		return uuid.Nil, echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
-	}
-	return userID, nil
+	return middleware.Int64ToUUID(userID), nil
 }

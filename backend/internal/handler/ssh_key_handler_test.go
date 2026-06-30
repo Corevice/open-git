@@ -49,7 +49,7 @@ func (s *stubSSHKeyStore) Delete(_ context.Context, _, _ uuid.UUID) error {
 
 const validSSHPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOzRANdrmNo46uGr2ky5ETd7ObwPSeqqxgc/K27LwS1P test@example.com"
 
-func newSSHKeyEcho(t *testing.T, store *stubSSHKeyStore, userID uuid.UUID) *echo.Echo {
+func newSSHKeyEcho(t *testing.T, store *stubSSHKeyStore, userID int64) *echo.Echo {
 	t.Helper()
 
 	e := echo.New()
@@ -70,7 +70,7 @@ func newSSHKeyEcho(t *testing.T, store *stubSSHKeyStore, userID uuid.UUID) *echo
 
 func TestAddSSHKey_InvalidKeyFormat(t *testing.T) {
 	store := &stubSSHKeyStore{}
-	e := newSSHKeyEcho(t, store, uuid.New())
+	e := newSSHKeyEcho(t, store, int64(7))
 
 	body := `{"title":"bad","key":"not-a-valid-key"}`
 	req := httptest.NewRequest(http.MethodPost, "/user/keys", strings.NewReader(body))
@@ -85,8 +85,7 @@ func TestAddSSHKey_InvalidKeyFormat(t *testing.T) {
 
 func TestAddSSHKey_Valid(t *testing.T) {
 	store := &stubSSHKeyStore{}
-	userID := uuid.New()
-	e := newSSHKeyEcho(t, store, userID)
+	e := newSSHKeyEcho(t, store, int64(7))
 
 	payload, err := json.Marshal(map[string]string{
 		"title": "laptop",
@@ -119,7 +118,7 @@ func TestAddSSHKey_Valid(t *testing.T) {
 
 func TestListSSHKeys_Empty(t *testing.T) {
 	store := &stubSSHKeyStore{keys: []*entity.SSHKey{}}
-	e := newSSHKeyEcho(t, store, uuid.New())
+	e := newSSHKeyEcho(t, store, int64(7))
 
 	req := httptest.NewRequest(http.MethodGet, "/user/keys", nil)
 	rec := httptest.NewRecorder()
