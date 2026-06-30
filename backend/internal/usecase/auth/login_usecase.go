@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt"
+	jwt "github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/open-git/backend/internal/domain"
@@ -35,7 +35,7 @@ func NewLoginUsecase(users repository.IUserRepository, jwtSecret string) *LoginU
 
 type jwtClaims struct {
 	UserID int64 `json:"sub"`
-	jwt.StandardClaims
+	jwt.RegisteredClaims
 }
 
 func (u *LoginUsecase) Execute(ctx context.Context, input LoginInput) (*LoginOutput, error) {
@@ -60,9 +60,9 @@ func (u *LoginUsecase) Execute(ctx context.Context, input LoginInput) (*LoginOut
 	now := time.Now().UTC()
 	claims := jwtClaims{
 		UserID: user.ID,
-		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: now.Add(24 * time.Hour).Unix(),
-			IssuedAt:  now.Unix(),
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(now),
 		},
 	}
 

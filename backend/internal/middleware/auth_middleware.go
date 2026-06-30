@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt"
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
@@ -31,7 +31,7 @@ type Actor struct {
 
 type jwtClaims struct {
 	UserID int64 `json:"sub"`
-	jwt.StandardClaims
+	jwt.RegisteredClaims
 }
 
 type githubAuthError struct {
@@ -230,7 +230,7 @@ func parseJWTAuth(raw string) (int64, []string, bool) {
 
 	token, err := jwt.ParseWithClaims(raw, &jwtClaims{}, func(_ *jwt.Token) (any, error) {
 		return []byte(secret), nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil || !token.Valid {
 		return 0, nil, false
 	}

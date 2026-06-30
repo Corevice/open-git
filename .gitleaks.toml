@@ -1,0 +1,16 @@
+# gitleaks configuration for open-git
+# Extends gitleaks' default ruleset and allowlists known-fake test fixtures.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow fake/sample secrets used only in test fixtures"
+# base64("test-publicKey") — a placeholder MCP verification key in unit tests,
+# not a real credential.
+regexes = [
+  '''dGVzdC1wdWJsaWNLZXk=''',
+]
+# Scope: the MCP secret handler test that defines the placeholder above.
+paths = [
+  '''backend/internal/handler/secret_handler_test\.go''',
+]
