@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache gcc musl-dev
 
@@ -16,6 +16,10 @@ RUN CGO_ENABLED=1 GOOS=linux go build -o server ./cmd/server
 
 FROM alpine:3.20
 
+# git is required to serve git-over-SSH (the SSH server execs git-upload-pack /
+# git-receive-pack). HTTP git hosting is pure-Go and does not need it.
+RUN apk add --no-cache git
+
 RUN addgroup -g 1001 -S opengit && adduser -u 1001 -S opengit -G opengit
 
 WORKDIR /app
@@ -31,7 +35,7 @@ LABEL org.opencontainers.image.source="https://github.com/open-git/open-git"
 
 USER opengit
 
-EXPOSE 8080
+EXPOSE 8080 2222
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:8080/healthz || exit 1

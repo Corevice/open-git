@@ -160,6 +160,7 @@ func ServeReceivePack(w http.ResponseWriter, r *http.Request, repoPath string) e
 	return report.Encode(w)
 }
 
+
 func openRepository(repoPath string) (*gogit.Repository, error) {
 	return gogit.PlainOpen(repoPath)
 }
