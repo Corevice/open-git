@@ -836,6 +836,11 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	api := e.Group("")
 	e.POST("/register", authHandler.Register, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
 	e.POST("/login", authHandler.Login, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
+	// The web frontend posts to /api/v1/auth/{login,register}; register the same
+	// handlers there so UI sign-in/sign-up work (the top-level routes above are
+	// kept for API clients and backward compatibility).
+	e.POST("/api/v1/auth/register", authHandler.Register, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
+	e.POST("/api/v1/auth/login", authHandler.Login, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
 
 	tokens := api.Group("/user/tokens", authMiddleware)
 	tokens.GET("", tokenHandler.List)
