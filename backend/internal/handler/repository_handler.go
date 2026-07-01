@@ -424,12 +424,18 @@ func (h *RepositoryHandler) GetAuditLog(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to get repository"})
 	}
 
-	role, err := h.orgs.GetMemberRole(ctx, middleware.UUIDToInt64(repository.OrganizationID), userID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to check membership"})
-	}
-	if role != "admin" && role != "owner" {
-		return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "Forbidden"})
+	// Personal repositories use the owner's user id as the organization id and
+	// have no membership row, so the owner would otherwise be denied. When the
+	// organization id equals the requesting user, this is their personal repo
+	// and they are authorized; otherwise require an admin/owner org role.
+	if repository.OrganizationID != userUUID {
+		role, err := h.orgs.GetMemberRole(ctx, middleware.UUIDToInt64(repository.OrganizationID), userID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to check membership"})
+		}
+		if role != "admin" && role != "owner" {
+			return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "Forbidden"})
+		}
 	}
 
 	page, perPage, err := middleware.ParsePaginationParams(c)
