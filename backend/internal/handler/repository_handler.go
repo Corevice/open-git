@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/middleware"
@@ -22,6 +23,7 @@ type RepositoryHandler struct {
 	listRepos     *repoUC.ListRepositoriesUsecase
 	repos         repo.IRepositoryRepository
 	orgs          repo.IOrganizationRepository
+	users         repo.IUserRepository
 	auditLog      repo.IAuditLogRepository
 	listAuditLogs *repoUC.ListAuditLogsUsecase
 }
@@ -32,6 +34,7 @@ func NewRepositoryHandler(
 	listRepos *repoUC.ListRepositoriesUsecase,
 	repos repo.IRepositoryRepository,
 	orgs repo.IOrganizationRepository,
+	users repo.IUserRepository,
 	auditLog repo.IAuditLogRepository,
 	listAuditLogs *repoUC.ListAuditLogsUsecase,
 ) *RepositoryHandler {
@@ -41,6 +44,7 @@ func NewRepositoryHandler(
 		listRepos:     listRepos,
 		repos:         repos,
 		orgs:          orgs,
+		users:         users,
 		auditLog:      auditLog,
 		listAuditLogs: listAuditLogs,
 	}
@@ -49,6 +53,7 @@ func NewRepositoryHandler(
 func (h *RepositoryHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.MiddlewareFunc) {
 	repoScope := middleware.RequireScope("repo")
 	g.GET("/user/repos", h.List, authMiddleware)
+	g.GET("/users/:username/repos", h.ListUserRepos, middleware.OptionalAuth())
 	g.POST("/user/repos", h.CreateRepository, authMiddleware, repoScope)
 	g.GET("/orgs/:org/repos", h.ListOrg, authMiddleware)
 	g.POST("/orgs/:org/repos", h.CreateForOrg, authMiddleware, repoScope)
@@ -122,6 +127,55 @@ func (h *RepositoryHandler) List(c echo.Context) error {
 
 	if link := middleware.BuildAbsoluteLinkHeader(c, page, perPage, total); link != "" {
 		c.Response().Header().Set("Link", link)
+	}
+
+	resp := make([]repositoryResponse, 0, len(repositories))
+	for _, r := range repositories {
+		resp = append(resp, toRepositoryResponse(r, c.Request().Host))
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+// ListUserRepos serves GET /users/:username/repos — the repositories owned by a
+// given user, filtered to what the requester may see (public repos always;
+// private repos only with read access). Used by the owner profile page.
+func (h *RepositoryHandler) ListUserRepos(c echo.Context) error {
+	username := c.Param("username")
+	ctx := c.Request().Context()
+
+	user, err := h.users.GetByLogin(ctx, username)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to look up user"})
+	}
+	if user == nil {
+		return echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+	}
+
+	ownerUUID := middleware.Int64ToUUID(user.ID)
+	requestUserID := middleware.UserUUIDFromContext(c)
+
+	page, perPage, err := middleware.ParsePaginationParams(c)
+	if err != nil {
+		return err
+	}
+
+	repositories, err := h.listRepos.Execute(ctx, repoUC.ListRepositoriesInput{
+		OwnerID:       ownerUUID,
+		RequestUserID: requestUserID,
+		Page:          page,
+		PerPage:       perPage,
+	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to list repositories"})
+	}
+
+	if total, err := h.repos.CountByOwner(ctx, ownerUUID); err == nil {
+		if link := middleware.BuildAbsoluteLinkHeader(c, page, perPage, total); link != "" {
+			c.Response().Header().Set("Link", link)
+		}
 	}
 
 	resp := make([]repositoryResponse, 0, len(repositories))

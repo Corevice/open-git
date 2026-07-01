@@ -113,7 +113,7 @@ func newRenameTestEcho(t *testing.T, repos *renameMockRepositoryRepo, userID int
 	get := repoUC.NewGetRepositoryUsecase(repos, nil, memberships)
 	listAuditLogs := repoUC.NewListAuditLogsUsecase(&mockListAuditLogsUsecase{})
 
-	h := handler.NewRepositoryHandler(create, get, listRepos, repos, &listMockOrgRepo{}, &listMockAuditLogRepo{}, listAuditLogs)
+	h := handler.NewRepositoryHandler(create, get, listRepos, repos, &listMockOrgRepo{}, nil, &listMockAuditLogRepo{}, listAuditLogs)
 
 	e := echo.New()
 	g := e.Group("")
