@@ -465,7 +465,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	auditListRepo := infrarepo.NewAuditLogRepository(sqlxDB)
 	listAuditLogsUC := repoUC.NewListAuditLogsUsecase(auditListRepo)
 	searchAuditLogsUC := securityUC.NewSearchAuditLogsUsecase(auditListRepo)
-	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, listReposUC, repoRepo, orgRepo, auditLogRepo, listAuditLogsUC)
+	repositoryHandler := handler.NewRepositoryHandler(createRepoUC, getRepoUC, listReposUC, repoRepo, orgRepo, userRepo, auditLogRepo, listAuditLogsUC)
 
 	getCurrentUserUC := userUC.NewGetCurrentUserUsecase(userRepo)
 	getUserByLoginUC := userUC.NewGetUserByLoginUsecase(userRepo)

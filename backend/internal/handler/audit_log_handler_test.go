@@ -73,7 +73,7 @@ func newAuditLogHandlerEcho(
 	get := repoUC.NewGetRepositoryUsecase(repos, nil, memberships)
 	listAuditLogs := repoUC.NewListAuditLogsUsecase(auditRepo)
 
-	h := handler.NewRepositoryHandler(create, get, listRepos, repos, orgs, &listMockAuditLogRepo{}, listAuditLogs)
+	h := handler.NewRepositoryHandler(create, get, listRepos, repos, orgs, nil, &listMockAuditLogRepo{}, listAuditLogs)
 
 	e := echo.New()
 	g := e.Group("")
