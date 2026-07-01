@@ -56,7 +56,7 @@ func TestGetByLoginFound(t *testing.T) {
 		`SELECT id, login, name, created_at FROM organizations WHERE login = $1`,
 	)).WithArgs("acme").WillReturnRows(sqlmock.NewRows([]string{
 		"id", "login", "name", "created_at",
-	}).AddRow(int64(1), "acme", "Acme Corp", now))
+	}).AddRow("00000000-0000-0000-0000-000000000001", "acme", "Acme Corp", now))
 
 	org, err := repo.GetByLogin(context.Background(), "acme")
 	if err != nil {
@@ -84,7 +84,7 @@ func TestListByUserIDEmpty(t *testing.T) {
 		FROM organizations o
 		JOIN memberships m ON o.id = m.organization_id
 		WHERE m.user_id = $1
-	`)).WithArgs(int64(99)).
+	`)).WithArgs("00000000-0000-0000-0000-000000000063").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "login", "name", "created_at"}))
 
 	orgs, err := repo.ListByUserID(context.Background(), 99)
@@ -111,10 +111,10 @@ func TestListByUserIDFound(t *testing.T) {
 		FROM organizations o
 		JOIN memberships m ON o.id = m.organization_id
 		WHERE m.user_id = $1
-	`)).WithArgs(int64(7)).
+	`)).WithArgs("00000000-0000-0000-0000-000000000007").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "login", "name", "created_at"}).
-			AddRow(int64(1), "acme", "Acme Corp", now).
-			AddRow(int64(2), "beta", "Beta Inc", now))
+			AddRow("00000000-0000-0000-0000-000000000001", "acme", "Acme Corp", now).
+			AddRow("00000000-0000-0000-0000-000000000002", "beta", "Beta Inc", now))
 
 	orgs, err := repo.ListByUserID(context.Background(), 7)
 	if err != nil {
@@ -139,7 +139,7 @@ func TestGetMemberRoleNonMember(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`SELECT role FROM memberships WHERE organization_id = $1 AND user_id = $2`,
-	)).WithArgs(int64(1), int64(2)).WillReturnRows(sqlmock.NewRows([]string{"role"}))
+	)).WithArgs("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002").WillReturnRows(sqlmock.NewRows([]string{"role"}))
 
 	role, err := repo.GetMemberRole(context.Background(), 1, 2)
 	if err != nil {
@@ -161,7 +161,7 @@ func TestGetMemberRoleAdmin(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`SELECT role FROM memberships WHERE organization_id = $1 AND user_id = $2`,
-	)).WithArgs(int64(1), int64(2)).WillReturnRows(sqlmock.NewRows([]string{"role"}).AddRow("admin"))
+	)).WithArgs("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002").WillReturnRows(sqlmock.NewRows([]string{"role"}).AddRow("admin"))
 
 	role, err := repo.GetMemberRole(context.Background(), 1, 2)
 	if err != nil {

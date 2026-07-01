@@ -23,7 +23,9 @@ func NewOrganizationRepository(db *sqlx.DB) *sqlxOrganizationRepository {
 
 func (r *sqlxOrganizationRepository) Create(ctx context.Context, org *entity.Organization) error {
 	if org.ID == uuid.Nil {
-		org.ID = uuid.New()
+		// Use an int64-compatible UUID (zero upper 64 bits) so it round-trips
+		// through the int64<->UUID bridge the domain/API layer uses for org ids.
+		org.ID = newInt64CompatibleUUID()
 	}
 	if org.CreatedAt.IsZero() {
 		org.CreatedAt = time.Now().UTC()
