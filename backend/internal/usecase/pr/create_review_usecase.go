@@ -112,6 +112,11 @@ func (uc *CreateReviewUsecase) Execute(ctx context.Context, input CreateReviewIn
 }
 
 func (uc *CreateReviewUsecase) checkActorAccess(ctx context.Context, organizationID, actorID uuid.UUID) error {
+	// Personal repositories use the owner's user id as the organization id and
+	// have no membership row, so the owner is authorized directly.
+	if organizationID != uuid.Nil && organizationID == actorID {
+		return nil
+	}
 	_, err := uc.membershipRepo.GetRole(ctx, organizationID, actorID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.ErrForbidden

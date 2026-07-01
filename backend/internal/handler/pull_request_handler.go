@@ -222,7 +222,7 @@ func (h *PullRequestHandler) CreatePullRequest(c echo.Context) error {
 	}
 
 	pr, err := h.createPRUC.Execute(c.Request().Context(), prusecase.CreatePRInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		GitPath:        repo.GitPath,
 		ActorID:        actor.UserID,
@@ -328,7 +328,7 @@ func (h *PullRequestHandler) MergePullRequest(c echo.Context) error {
 	}
 
 	_, err = h.mergePRUC.Execute(c.Request().Context(), prusecase.MergePRInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		GitPath:        repo.GitPath,
 		ActorID:        actor.UserID,

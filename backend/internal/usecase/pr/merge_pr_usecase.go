@@ -181,6 +181,11 @@ func allRequiredChecksPassed(required []string, runs []*entity.WorkflowRun) bool
 }
 
 func (uc *MergePRUsecase) checkActorWriteAccess(ctx context.Context, organizationID, actorID uuid.UUID) error {
+	// Personal repositories use the owner's user id as the organization id and
+	// have no membership row, so the owner has write access directly.
+	if organizationID != uuid.Nil && organizationID == actorID {
+		return nil
+	}
 	role, err := uc.membershipRepo.GetRole(ctx, organizationID, actorID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.ErrForbidden
