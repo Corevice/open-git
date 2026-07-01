@@ -1,17 +1,17 @@
-"use client";
+'use client';
 
-import { Suspense, useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { ApiClient, ApiError } from "@/lib/api";
-import type { OAuthApp } from "@/lib/api-types";
-import { useAuth } from "@/lib/auth";
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { ApiClient, ApiError } from '@/lib/api';
+import type { OAuthApp } from '@/lib/api-types';
+import { useAuth } from '@/lib/auth';
 
 const SCOPE_LABELS: Record<string, string> = {
-  repo: "リポジトリへの読み書きアクセス",
-  "read:user": "プロフィール情報の読み取り",
-  "user:email": "メールアドレスの読み取り",
-  "admin:org": "Organization の管理",
-  workflow: "GitHub Actions Workflow の管理",
+  repo: 'リポジトリへの読み書きアクセス',
+  'read:user': 'プロフィール情報の読み取り',
+  'user:email': 'メールアドレスの読み取り',
+  'admin:org': 'Organization の管理',
+  workflow: 'GitHub Actions Workflow の管理',
 };
 
 function getHostname(uri: string): string {
@@ -20,6 +20,14 @@ function getHostname(uri: string): string {
   } catch {
     return uri;
   }
+}
+
+function apiBaseURL(): string {
+  return (
+    process.env.NEXT_PUBLIC_API_BASE_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    'http://localhost:8080'
+  );
 }
 
 function ErrorCard({ message }: { message: string }) {
@@ -37,25 +45,74 @@ function OAuthAuthorizePageContent() {
   const router = useRouter();
   const { token } = useAuth();
 
-  const clientId = searchParams.get("client_id") ?? "";
-  const redirectUri = searchParams.get("redirect_uri") ?? "";
-  const scope = searchParams.get("scope") ?? "";
-  const state = searchParams.get("state") ?? "";
-  const responseType = searchParams.get("response_type") ?? "";
+  const clientId = searchParams.get('client_id') ?? '';
+  const redirectUri = searchParams.get('redirect_uri') ?? '';
+  const scope = searchParams.get('scope') ?? '';
+  const state = searchParams.get('state') ?? '';
+  const responseType = searchParams.get('response_type') ?? '';
 
   const returnTo = useMemo(() => {
     const params = new URLSearchParams();
-    if (clientId) params.set("client_id", clientId);
-    if (redirectUri) params.set("redirect_uri", redirectUri);
-    if (scope) params.set("scope", scope);
-    if (state) params.set("state", state);
-    if (responseType) params.set("response_type", responseType);
+    if (clientId) params.set('client_id', clientId);
+    if (redirectUri) params.set('redirect_uri', redirectUri);
+    if (scope) params.set('scope', scope);
+    if (state) params.set('state', state);
+    if (responseType) params.set('response_type', responseType);
     return `/login/oauth/authorize?${params.toString()}`;
   }, [clientId, redirectUri, scope, state, responseType]);
 
   const [app, setApp] = useState<OAuthApp | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // A plain form POST cannot carry the Bearer token, so approval calls the
+  // backend authorize endpoint via fetch (Accept: application/json makes it
+  // return the redirect target instead of a 302) and then navigates there.
+  const handleApprove = async () => {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        scope,
+        state,
+      });
+      const res = await fetch(`${apiBaseURL()}/login/oauth/authorize?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+        },
+      });
+      if (!res.ok) {
+        setSubmitError('認可に失敗しました。時間をおいて再度お試しください。');
+        return;
+      }
+      const body = (await res.json()) as { redirect_url?: string };
+      if (!body.redirect_url) {
+        setSubmitError('認可に失敗しました。時間をおいて再度お試しください。');
+        return;
+      }
+      window.location.assign(body.redirect_url);
+    } catch {
+      setSubmitError('認可に失敗しました。時間をおいて再度お試しください。');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeny = () => {
+    try {
+      const target = new URL(redirectUri);
+      target.searchParams.set('error', 'access_denied');
+      if (state) target.searchParams.set('state', state);
+      window.location.assign(target.toString());
+    } catch {
+      router.push('/dashboard');
+    }
+  };
 
   useEffect(() => {
     if (!token) {
@@ -64,7 +121,7 @@ function OAuthAuthorizePageContent() {
   }, [token, router, returnTo]);
 
   useEffect(() => {
-    if (!token || !clientId || responseType !== "code") {
+    if (!token || !clientId || responseType !== 'code') {
       setLoading(false);
       return;
     }
@@ -72,7 +129,7 @@ function OAuthAuthorizePageContent() {
     const baseURL =
       process.env.NEXT_PUBLIC_API_BASE_URL ??
       process.env.NEXT_PUBLIC_API_URL ??
-      "http://localhost:8080";
+      'http://localhost:8080';
     const client = new ApiClient(baseURL);
     client.setToken(token);
 
@@ -108,7 +165,7 @@ function OAuthAuthorizePageContent() {
     return null;
   }
 
-  if (responseType !== "code") {
+  if (responseType !== 'code') {
     return (
       <div className="min-h-screen bg-[#0d1117] text-[#c9d1d9] font-sans -m-6 w-[calc(100%+3rem)] max-w-none">
         <div className="max-w-[480px] mx-auto px-5 py-10">
@@ -154,9 +211,7 @@ function OAuthAuthorizePageContent() {
     <div className="min-h-screen bg-[#0d1117] text-[#c9d1d9] font-sans -m-6 w-[calc(100%+3rem)] max-w-none">
       <div className="max-w-[480px] mx-auto px-5 py-10">
         <div className="bg-[#161b22] border border-[#30363d] rounded-md p-4">
-          <h1 className="text-xl font-semibold mb-2 text-[#c9d1d9]">
-            {app.name}
-          </h1>
+          <h1 className="text-xl font-semibold mb-2 text-[#c9d1d9]">{app.name}</h1>
 
           {app.homepage_url ? (
             <p className="mb-4 text-sm">
@@ -171,9 +226,7 @@ function OAuthAuthorizePageContent() {
             </p>
           ) : null}
 
-          <p className="text-sm text-[#8b949e] mb-4">
-            このアプリは以下の権限を要求しています:
-          </p>
+          <p className="text-sm text-[#8b949e] mb-4">このアプリは以下の権限を要求しています:</p>
 
           <ul className="mb-4 space-y-2 text-sm">
             {scopes.map((s) => (
@@ -188,34 +241,30 @@ function OAuthAuthorizePageContent() {
             認可後、{getHostname(redirectUri)} へリダイレクトされます
           </p>
 
-          <div className="flex gap-3">
-            <form action="/login/oauth/authorize" method="post" className="flex-1">
-              <input type="hidden" name="client_id" value={clientId} />
-              <input type="hidden" name="redirect_uri" value={redirectUri} />
-              <input type="hidden" name="scope" value={scope} />
-              <input type="hidden" name="state" value={state} />
-              <input type="hidden" name="authorized" value="true" />
-              <button
-                type="submit"
-                className="w-full bg-[#238636] hover:bg-[#2ea043] text-white border border-white/10 px-4 py-2 rounded-md text-sm font-semibold cursor-pointer"
-              >
-                許可
-              </button>
-            </form>
+          {submitError ? (
+            <p className="text-[#f85149] text-sm mb-4" role="alert">
+              {submitError}
+            </p>
+          ) : null}
 
-            <form action="/login/oauth/authorize" method="post" className="flex-1">
-              <input type="hidden" name="client_id" value={clientId} />
-              <input type="hidden" name="redirect_uri" value={redirectUri} />
-              <input type="hidden" name="scope" value={scope} />
-              <input type="hidden" name="state" value={state} />
-              <input type="hidden" name="authorized" value="false" />
-              <button
-                type="submit"
-                className="w-full bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] border border-[#30363d] px-4 py-2 rounded-md text-sm font-semibold cursor-pointer"
-              >
-                拒否
-              </button>
-            </form>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={handleApprove}
+              disabled={submitting}
+              className="flex-1 bg-[#238636] hover:bg-[#2ea043] disabled:opacity-60 text-white border border-white/10 px-4 py-2 rounded-md text-sm font-semibold cursor-pointer"
+            >
+              {submitting ? '処理中...' : '許可'}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDeny}
+              disabled={submitting}
+              className="flex-1 bg-[#21262d] hover:bg-[#30363d] disabled:opacity-60 text-[#c9d1d9] border border-[#30363d] px-4 py-2 rounded-md text-sm font-semibold cursor-pointer"
+            >
+              拒否
+            </button>
           </div>
         </div>
       </div>

@@ -12,10 +12,14 @@ import (
 )
 
 type IssuePATInput struct {
-	UserID    int64
-	Note      string
-	Scopes    []string
-	ExpiresAt *time.Time
+	UserID int64
+	Note   string
+	// OAuthAppID marks tokens issued via the OAuth authorization flow so they
+	// can be revoked together when the user revokes that app. Empty for
+	// regular personal access tokens.
+	OAuthAppID string
+	Scopes     []string
+	ExpiresAt  *time.Time
 }
 
 type IssuePATOutput struct {
@@ -44,12 +48,13 @@ func (u *IssuePATUsecase) Execute(ctx context.Context, input IssuePATInput) (*Is
 	raw := hex.EncodeToString(buf)
 
 	token := &domain.AccessToken{
-		UserID:    input.UserID,
-		Note:      input.Note,
-		TokenHash: hashToken(raw),
-		Scopes:    input.Scopes,
-		ExpiresAt: input.ExpiresAt,
-		CreatedAt: time.Now().UTC(),
+		UserID:     input.UserID,
+		Note:       input.Note,
+		OAuthAppID: input.OAuthAppID,
+		TokenHash:  hashToken(raw),
+		Scopes:     input.Scopes,
+		ExpiresAt:  input.ExpiresAt,
+		CreatedAt:  time.Now().UTC(),
 	}
 
 	if err := u.tokens.Create(ctx, token); err != nil {

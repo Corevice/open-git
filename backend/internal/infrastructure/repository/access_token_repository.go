@@ -47,22 +47,44 @@ func (r *sqlxAccessTokenRepository) Create(ctx context.Context, token *domain.Ac
 		return err
 	}
 
+	oauthAppID := sql.NullString{}
+	if token.OAuthAppID != "" {
+		oauthAppID = sql.NullString{String: token.OAuthAppID, Valid: true}
+	}
+
 	const query = `
-		INSERT INTO access_tokens (id, user_id, note, token_hash, scopes, expires_at, last_used_at, revoked_at, created_at)
-		VALUES (:id, :user_id, :note, :token_hash, :scopes, :expires_at, :last_used_at, :revoked_at, :created_at)
+		INSERT INTO access_tokens (id, user_id, note, token_hash, scopes, expires_at, last_used_at, revoked_at, created_at, oauth_application_id)
+		VALUES (:id, :user_id, :note, :token_hash, :scopes, :expires_at, :last_used_at, :revoked_at, :created_at, :oauth_application_id)
 	`
 
 	_, err = r.DB.NamedExecContext(ctx, query, map[string]any{
-		"id":           formatTokenID(token.ID),
-		"user_id":      formatTokenID(token.UserID),
-		"note":         token.Note,
-		"token_hash":   token.TokenHash,
-		"scopes":       scopes,
-		"expires_at":   token.ExpiresAt,
-		"last_used_at": token.LastUsedAt,
-		"revoked_at":   token.RevokedAt,
-		"created_at":   token.CreatedAt,
+		"id":                   formatTokenID(token.ID),
+		"user_id":              formatTokenID(token.UserID),
+		"note":                 token.Note,
+		"token_hash":           token.TokenHash,
+		"scopes":               scopes,
+		"expires_at":           token.ExpiresAt,
+		"last_used_at":         token.LastUsedAt,
+		"revoked_at":           token.RevokedAt,
+		"created_at":           token.CreatedAt,
+		"oauth_application_id": oauthAppID,
 	})
+	return dbErrors.MapDBError(err)
+}
+
+// RevokeAllByOAuthApp revokes every live token a user obtained through the
+// given OAuth application. Used when the user revokes that application's
+// authorization, so the app cannot keep acting with previously issued tokens.
+func (r *sqlxAccessTokenRepository) RevokeAllByOAuthApp(ctx context.Context, userID int64, oauthAppID string) error {
+	now := time.Now().UTC()
+	query := `
+		UPDATE access_tokens
+		SET revoked_at = ?
+		WHERE user_id = ? AND oauth_application_id = ? AND revoked_at IS NULL
+	`
+	query = r.DB.Rebind(query)
+
+	_, err := r.DB.ExecContext(ctx, query, now, formatTokenID(userID), oauthAppID)
 	return dbErrors.MapDBError(err)
 }
 
