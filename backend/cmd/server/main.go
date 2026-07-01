@@ -307,6 +307,66 @@ func (r *gitSSHInfraResolver) Resolve(ctx context.Context, ownerLogin, repoName 
 	return resolved.DiskPath, middleware.Int64ToUUID(resolved.OwnerID), nil
 }
 
+// sshRepoAuthorizer enforces the same read/write permissions for git-over-SSH
+// as the HTTP git handler (owner, org membership, and collaborator).
+type sshCollaboratorLookup interface {
+	GetPermission(ctx context.Context, repoID, userID uuid.UUID) (string, error)
+}
+
+type sshRepoAuthorizer struct {
+	resolver      handler.GitRepositoryResolver
+	memberships   *gitMembershipAdapter
+	collaborators sshCollaboratorLookup
+}
+
+func (a *sshRepoAuthorizer) CanRead(ctx context.Context, userID uuid.UUID, ownerLogin, repoName string) (bool, error) {
+	repo, err := a.resolver.Resolve(ctx, ownerLogin, repoName)
+	if err != nil {
+		return false, err
+	}
+	if repo.Visibility != entity.VisibilityPrivate {
+		return true, nil
+	}
+	uid := middleware.UUIDToInt64(userID)
+	if repo.OwnerID != 0 && repo.OwnerID == uid {
+		return true, nil
+	}
+	if a.memberships != nil {
+		if ok, err := a.memberships.HasReadAccess(ctx, uid, repo.OrganizationID); err == nil && ok {
+			return true, nil
+		}
+	}
+	if a.collaborators != nil {
+		if perm, err := a.collaborators.GetPermission(ctx, repo.ID, userID); err == nil && perm != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (a *sshRepoAuthorizer) CanWrite(ctx context.Context, userID uuid.UUID, ownerLogin, repoName string) (bool, error) {
+	repo, err := a.resolver.Resolve(ctx, ownerLogin, repoName)
+	if err != nil {
+		return false, err
+	}
+	uid := middleware.UUIDToInt64(userID)
+	if repo.OwnerID != 0 && repo.OwnerID == uid {
+		return true, nil
+	}
+	if a.memberships != nil {
+		if ok, err := a.memberships.HasWriteAccess(ctx, uid, repo.OrganizationID); err == nil && ok {
+			return true, nil
+		}
+	}
+	if a.collaborators != nil {
+		if perm, err := a.collaborators.GetPermission(ctx, repo.ID, userID); err == nil &&
+			(perm == entity.CollaboratorPermWrite || perm == entity.CollaboratorPermAdmin) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func entityUserToDomain(user *entity.User) *domain.User {
 	if user == nil {
 		return nil
@@ -942,6 +1002,11 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 			cfg.GitDataRoot,
 			sshKeyRepo,
 			&gitSSHInfraResolver{resolver: repoGitResolver},
+			&sshRepoAuthorizer{
+				resolver:      repoGitResolver,
+				memberships:   membershipAdapter,
+				collaborators: collaboratorRepo,
+			},
 			hostKey,
 		)
 		go func() {

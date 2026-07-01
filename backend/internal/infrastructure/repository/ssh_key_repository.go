@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"golang.org/x/crypto/ssh"
 
+	dbErrors "github.com/open-git/backend/internal/infrastructure/database"
 	"github.com/open-git/backend/internal/domain/entity"
 )
 
@@ -48,7 +49,7 @@ func (r *sqlxSSHKeyRepository) Create(ctx context.Context, key *entity.SSHKey) e
 		"public_key":  key.PublicKey,
 		"created_at":  key.CreatedAt,
 	})
-	return err
+	return dbErrors.MapDBError(err)
 }
 
 func (r *sqlxSSHKeyRepository) FindByFingerprint(ctx context.Context, fingerprint string) (*entity.SSHKey, error) {
