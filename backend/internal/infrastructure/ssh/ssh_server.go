@@ -22,12 +22,21 @@ type GitSSHResolver interface {
 	Resolve(ctx context.Context, ownerLogin, repoName string) (diskPath string, ownerID uuid.UUID, err error)
 }
 
+// RepoAuthorizer decides whether the authenticated SSH user may read (clone/fetch)
+// or write (push) a repository. It mirrors the HTTP git handler's access checks
+// so org members and collaborators — not just the owner — are handled.
+type RepoAuthorizer interface {
+	CanRead(ctx context.Context, userID uuid.UUID, ownerLogin, repoName string) (bool, error)
+	CanWrite(ctx context.Context, userID uuid.UUID, ownerLogin, repoName string) (bool, error)
+}
+
 type SSHServer struct {
-	gitRoot  string
-	keyStore repository.ISSHKeyStore
-	resolver GitSSHResolver
-	hostKey  gossh.Signer
-	server   *gossh.Server
+	gitRoot    string
+	keyStore   repository.ISSHKeyStore
+	resolver   GitSSHResolver
+	authorizer RepoAuthorizer
+	hostKey    gossh.Signer
+	server     *gossh.Server
 }
 
 type gitSSHCommand struct {
@@ -41,13 +50,15 @@ func NewSSHServer(
 	gitRoot string,
 	keyStore repository.ISSHKeyStore,
 	resolver GitSSHResolver,
+	authorizer RepoAuthorizer,
 	hostKey gossh.Signer,
 ) *SSHServer {
 	return &SSHServer{
-		gitRoot:  gitRoot,
-		keyStore: keyStore,
-		resolver: resolver,
-		hostKey:  hostKey,
+		gitRoot:    gitRoot,
+		keyStore:   keyStore,
+		resolver:   resolver,
+		authorizer: authorizer,
+		hostKey:    hostKey,
 	}
 }
 
@@ -120,12 +131,26 @@ func (h *SSHServer) handleSession(s gossh.Session) {
 		diskPath = filepath.Join(h.gitRoot, parsed.ownerLogin, parsed.repoName+".git")
 	}
 
-	// Authorization: pushing (receive-pack) requires the authenticated key to
-	// belong to the repository owner. Without this, any user with a registered
-	// key could write to any repository. (Org/collaborator push over SSH is not
-	// yet supported and must use HTTPS.)
-	if parsed.packType == "receive-pack" {
-		authUserID, _ := ctx.Value(authUserIDContextKey).(uuid.UUID)
+	// Authorization: check the authenticated key's user against the repository.
+	// receive-pack (push) requires write access; upload-pack (clone/fetch)
+	// requires read access. When an authorizer is configured it handles owner,
+	// org-member and collaborator permissions (parity with HTTP); otherwise we
+	// fall back to an owner-only write check.
+	authUserID, _ := ctx.Value(authUserIDContextKey).(uuid.UUID)
+	if h.authorizer != nil {
+		var allowed bool
+		var aerr error
+		if parsed.packType == "receive-pack" {
+			allowed, aerr = h.authorizer.CanWrite(ctx, authUserID, parsed.ownerLogin, parsed.repoName)
+		} else {
+			allowed, aerr = h.authorizer.CanRead(ctx, authUserID, parsed.ownerLogin, parsed.repoName)
+		}
+		if aerr != nil || !allowed {
+			_, _ = fmt.Fprintf(s.Stderr(), "ERR access denied\n")
+			s.Exit(1)
+			return
+		}
+	} else if parsed.packType == "receive-pack" {
 		if authUserID == uuid.Nil || ownerID == uuid.Nil || authUserID != ownerID {
 			_, _ = fmt.Fprintf(s.Stderr(), "ERR write access denied\n")
 			s.Exit(1)

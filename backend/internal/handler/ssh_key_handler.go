@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/middleware"
 	"github.com/open-git/backend/internal/repository"
@@ -72,6 +74,9 @@ func (h *SSHKeyHandler) Add(c echo.Context) error {
 		PublicKey: req.Key,
 	}
 	if err := h.keys.Create(c.Request().Context(), key); err != nil {
+		if errors.Is(err, domain.ErrConflict) {
+			return echo.NewHTTPError(http.StatusConflict, map[string]string{"message": "a key with this fingerprint already exists"})
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": "failed to add key"})
 	}
 
