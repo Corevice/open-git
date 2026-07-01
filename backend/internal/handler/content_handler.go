@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -27,6 +28,9 @@ func NewContentHandler(resolver GitRepositoryResolver) *ContentHandler {
 
 func (h *ContentHandler) RegisterRoutes(g *echo.Group) {
 	g.GET("/repos/:owner/:repo/contents", h.GetContents, middleware.OptionalAuth())
+	// GitHub-compatible form with the path in the URL: /contents/{path}. The web
+	// UI uses this; without it every file/folder request 404'd.
+	g.GET("/repos/:owner/:repo/contents/*", h.GetContents, middleware.OptionalAuth())
 	g.GET("/repos/:owner/:repo/git/blobs/:sha", h.GetGitBlob, middleware.OptionalAuth())
 	g.GET("/repos/:owner/:repo/commits", h.GetCommits, middleware.OptionalAuth())
 }
@@ -77,6 +81,16 @@ func (h *ContentHandler) GetContents(c echo.Context) error {
 	}
 
 	path := c.QueryParam("path")
+	if path == "" {
+		// Fall back to the GitHub-compatible URL form: /contents/{path}
+		if wildcard := c.Param("*"); wildcard != "" {
+			if decoded, derr := url.PathUnescape(wildcard); derr == nil {
+				path = decoded
+			} else {
+				path = wildcard
+			}
+		}
+	}
 	if strings.Contains(path, "../") {
 		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "Invalid path"})
 	}
