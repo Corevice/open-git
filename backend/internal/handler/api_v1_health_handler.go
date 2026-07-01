@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"reflect"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
@@ -25,10 +26,31 @@ type APIV1HealthHandler struct {
 }
 
 func NewAPIV1HealthHandler(db *sqlx.DB, minioClient minioHealthClient, redisClient redisHealthClient) *APIV1HealthHandler {
-	return &APIV1HealthHandler{
-		db:          db,
-		minioClient: minioClient,
-		redisClient: redisClient,
+	h := &APIV1HealthHandler{db: db}
+	// Guard against the typed-nil interface gotcha: callers pass concrete
+	// *minio.Client / *redis.Client that may be nil when those dependencies are
+	// not configured. Assigned directly, the interface would be non-nil (it
+	// carries a type), so the `!= nil` checks in Handle would pass and then
+	// panic dereferencing the nil pointer. Normalize typed-nil to a real nil.
+	if !isNilValue(minioClient) {
+		h.minioClient = minioClient
+	}
+	if !isNilValue(redisClient) {
+		h.redisClient = redisClient
+	}
+	return h
+}
+
+func isNilValue(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
+		return rv.IsNil()
+	default:
+		return false
 	}
 }
 
