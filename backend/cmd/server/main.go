@@ -43,6 +43,7 @@ import (
 	"github.com/open-git/backend/internal/infrastructure/crypto"
 	infraDB "github.com/open-git/backend/internal/infrastructure/database"
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
+	"github.com/open-git/backend/internal/infrastructure/kvstore"
 	"github.com/open-git/backend/internal/infrastructure/queue"
 	infrarepo "github.com/open-git/backend/internal/infrastructure/repository"
 	sshinfra "github.com/open-git/backend/internal/infrastructure/ssh"
@@ -807,7 +808,23 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		resolveRepo,
 	)
 
-	oauthHandler := handler.NewOAuthHandler(nil, nil)
+	// OAuth application management + the GitHub-compatible authorize/token
+	// server flow. Authorization codes live in Redis when configured, else in
+	// a process-local TTL store (fine for single-process deployments; codes
+	// are short-lived and consumed once).
+	oauthAppRepo := infrarepo.NewOAuthAppRepository(sqlxDB)
+	oauthAccessTokenRepo := infrarepo.NewOAuthAccessTokenRepository(sqlxDB)
+	oauthAuthorizationRepo := infrarepo.NewOAuthAuthorizationRepository(sqlxDB)
+	var oauthCodeStore authUC.OAuthCodeStore
+	if cfg.RedisAddr != "" {
+		oauthCodeStore = kvstore.NewRedisTTLStore(redis.NewClient(&redis.Options{Addr: cfg.RedisAddr}))
+	} else {
+		oauthCodeStore = kvstore.NewInMemoryTTLStore()
+	}
+	oauthAuthorizeUC := authUC.NewOAuthAuthorizeUsecase(oauthAppRepo, oauthCodeStore)
+	oauthTokenUC := authUC.NewOAuthTokenUsecase(oauthCodeStore, issuePATUC, oauthAppRepo, oauthAuthorizationRepo)
+	oauthHandler := handler.NewOAuthHandler(oauthAuthorizeUC, oauthTokenUC)
+	oauthAppHandler := handler.NewOAuthAppHandler(oauthAppRepo, oauthAccessTokenRepo, oauthAuthorizationRepo, tokenRepo)
 	rateLimitHandler := handler.NewRateLimitHandler()
 	rootHandler := handler.NewRootHandler()
 
@@ -893,6 +910,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	webhookHandler.RegisterRoutes(v3, authMiddleware)
 	secretHandler.RegisterRoutes(v3, authMiddleware)
 	artifactHandler.RegisterRoutes(v3, authMiddleware)
+	oauthAppHandler.RegisterRoutes(v3, authMiddleware)
 	v3.GET("/rate_limit", rateLimitHandler.Get)
 	v3.GET("", rootHandler.Get)
 

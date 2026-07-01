@@ -19,9 +19,13 @@ type User struct {
 }
 
 type AccessToken struct {
-	ID         int64
-	UserID     int64
-	Note       string
+	ID     int64
+	UserID int64
+	Note   string
+	// OAuthAppID links tokens issued through the OAuth authorization flow to
+	// the granting application, so revoking that app's access also revokes
+	// its tokens. Empty for regular personal access tokens.
+	OAuthAppID string
 	TokenHash  string
 	Scopes     []string
 	ExpiresAt  *time.Time
