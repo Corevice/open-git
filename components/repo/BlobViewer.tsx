@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo } from "react";
 import Prism from "prismjs";
+// Language order matters: Prism language add-ons mutate Prism.languages at
+// import time and some extend others. prism-tsx does
+// `extend('jsx', clone(typescript))`, so prism-jsx and prism-typescript MUST be
+// imported before it — otherwise it extends `undefined` and throws
+// "Cannot set properties of undefined (setting 'comment')" (which crashed SSR).
 import "prismjs/components/prism-bash";
 import "prismjs/components/prism-css";
 import "prismjs/components/prism-go";
@@ -10,9 +15,10 @@ import "prismjs/components/prism-json";
 import "prismjs/components/prism-markdown";
 import "prismjs/components/prism-python";
 import "prismjs/components/prism-sql";
-import "prismjs/components/prism-tsx";
-import "prismjs/components/prism-typescript";
 import "prismjs/components/prism-yaml";
+import "prismjs/components/prism-jsx";
+import "prismjs/components/prism-typescript";
+import "prismjs/components/prism-tsx";
 import "prismjs/themes/prism.css";
 
 interface BlobViewerProps {
