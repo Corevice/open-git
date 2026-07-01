@@ -460,7 +460,10 @@ func (h *SecretHandler) decryptEncryptedValue(encryptedValue string) (string, er
 
 	plaintext, err := h.enc.DecryptSealedBox(ciphertext)
 	if err != nil {
-		return "", err
+		// A ciphertext that cannot be opened with the server's key is malformed
+		// client input (e.g. not sealed against the repo public key), not a
+		// server fault, so surface it as a 422 rather than a 500.
+		return "", fmt.Errorf("%w: encrypted_value could not be decrypted", apperror.ErrValidation)
 	}
 
 	return string(plaintext), nil

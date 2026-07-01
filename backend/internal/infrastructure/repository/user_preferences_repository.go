@@ -23,7 +23,7 @@ func NewUserPreferencesRepository(db *sqlx.DB) domainrepo.IUserPreferencesReposi
 }
 
 func (r *sqlxUserPreferencesRepository) GetByUserID(ctx context.Context, userID int64) (*entity.UserPreferences, error) {
-	const query = `SELECT user_id, theme, updated_at FROM user_preferences WHERE user_id = $1`
+	query := r.DB.Rebind(`SELECT user_id, theme, updated_at FROM user_preferences WHERE user_id = ?`)
 
 	row := r.DB.QueryRowxContext(ctx, query, userID)
 
@@ -43,11 +43,11 @@ func (r *sqlxUserPreferencesRepository) GetByUserID(ctx context.Context, userID 
 }
 
 func (r *sqlxUserPreferencesRepository) Upsert(ctx context.Context, prefs *entity.UserPreferences) error {
-	const query = `
+	query := r.DB.Rebind(`
 		INSERT INTO user_preferences (user_id, theme, updated_at)
-		VALUES ($1, $2, NOW())
-		ON CONFLICT (user_id) DO UPDATE SET theme = EXCLUDED.theme, updated_at = NOW()
-	`
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT (user_id) DO UPDATE SET theme = excluded.theme, updated_at = CURRENT_TIMESTAMP
+	`)
 
 	_, err := r.DB.ExecContext(ctx, query, prefs.UserID, prefs.Theme)
 	if err != nil {
