@@ -33,7 +33,7 @@ func setupActionSecretTables(t *testing.T, db *sqlx.DB) {
 			updated_at DATETIME NOT NULL
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_action_secrets_org_repo_name
-			ON action_secrets (organization_id, IFNULL(repository_id, ''), name);
+			ON action_secrets (organization_id, COALESCE(repository_id, ''), name);
 		CREATE TABLE IF NOT EXISTS action_secret_repositories (
 			secret_id TEXT NOT NULL,
 			repository_id TEXT NOT NULL,

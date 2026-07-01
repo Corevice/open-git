@@ -2,14 +2,18 @@ package repository
 
 import (
 	"context"
-	"errors"
 
 	"github.com/google/uuid"
+	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/domain/entity"
 	repo "github.com/open-git/backend/internal/repository"
 )
 
-var ErrNotFound = errors.New("not found")
+// ErrNotFound aliases apperror.ErrNotFound so that repositories not found here
+// are translated to a 404 by the central HTTP error handler (which recognizes
+// apperror sentinels) instead of falling through to a generic 500. Existing
+// errors.Is(err, ErrNotFound) checks keep working since it is the same sentinel.
+var ErrNotFound = apperror.ErrNotFound
 
 type GetRepositoryInput struct {
 	RequestUserID uuid.UUID

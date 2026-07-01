@@ -83,7 +83,7 @@ func (r *sqlxActionSecretRepository) Upsert(ctx context.Context, secret *entity.
 			) VALUES (
 				?, ?, ?, ?, ?, ?, ?, ?, ?
 			)
-			ON CONFLICT(organization_id, IFNULL(repository_id, ''), name) DO UPDATE SET
+			ON CONFLICT(organization_id, COALESCE(repository_id, ''), name) DO UPDATE SET
 				encrypted_value = excluded.encrypted_value,
 				key_id = excluded.key_id,
 				visibility = excluded.visibility,
