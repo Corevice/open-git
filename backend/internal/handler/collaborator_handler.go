@@ -15,11 +15,14 @@ import (
 )
 
 type CollaboratorHandler struct {
+	access       *RepoAccess
 	resolver     GitRepositoryResolver
 	repos        repo.IRepositoryRepository
 	collaborators repo.IRepositoryCollaboratorRepository
 	users        domainrepo.IUserRepository
 }
+
+func (h *CollaboratorHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func NewCollaboratorHandler(
 	resolver GitRepositoryResolver,
@@ -161,6 +164,9 @@ func (h *CollaboratorHandler) Remove(c echo.Context) error {
 func (h *CollaboratorHandler) GetPermission(c echo.Context) error {
 	repository, err := h.getRepository(c)
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureRead(c, repository); err != nil {
 		return err
 	}
 
