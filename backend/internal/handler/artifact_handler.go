@@ -21,6 +21,7 @@ type ArtifactHandler struct {
 	getDownloadURLUC   *artifactusecase.GetArtifactDownloadURLUsecase
 	deleteArtifactUC   *artifactusecase.DeleteArtifactUsecase
 	resolveRepo        func(c echo.Context, owner, repo string) (*entity.Repository, error)
+	access             *RepoAccess
 }
 
 func NewArtifactHandler(
@@ -40,6 +41,8 @@ func NewArtifactHandler(
 		resolveRepo:        resolveRepo,
 	}
 }
+
+func (h *ArtifactHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func (h *ArtifactHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	readScope := middleware.RequireScope("read")
@@ -87,6 +90,9 @@ func (h *ArtifactHandler) CreateArtifact(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
+		return err
+	}
 
 	runID, err := uuid.Parse(c.Param("run_id"))
 	if err != nil {
@@ -123,6 +129,14 @@ func (h *ArtifactHandler) CreateArtifact(c echo.Context) error {
 }
 
 func (h *ArtifactHandler) CompleteArtifact(c echo.Context) error {
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
+	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
+		return err
+	}
+
 	artifactID, err := parseArtifactID(c.Param("artifact_id"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid artifact_id"})
@@ -143,6 +157,9 @@ func (h *ArtifactHandler) CompleteArtifact(c echo.Context) error {
 func (h *ArtifactHandler) ListArtifacts(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureRead(c, repo); err != nil {
 		return err
 	}
 
@@ -168,10 +185,14 @@ func (h *ArtifactHandler) ListArtifacts(c echo.Context) error {
 }
 
 func (h *ArtifactHandler) DownloadArtifact(c echo.Context) error {
-	orgID, err := h.resolveOrgID(c)
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureRead(c, repo); err != nil {
+		return err
+	}
+	orgID := repo.OrganizationID
 
 	artifactID, err := parseArtifactID(c.Param("artifact_id"))
 	if err != nil {
@@ -190,10 +211,14 @@ func (h *ArtifactHandler) DownloadArtifact(c echo.Context) error {
 }
 
 func (h *ArtifactHandler) DeleteArtifact(c echo.Context) error {
-	orgID, err := h.resolveOrgID(c)
+	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
+		return err
+	}
+	orgID := repo.OrganizationID
 
 	artifactID, err := parseArtifactID(c.Param("artifact_id"))
 	if err != nil {

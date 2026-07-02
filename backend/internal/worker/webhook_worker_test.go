@@ -114,6 +114,12 @@ func usePublicDNSLookup(t *testing.T) {
 		return []string{"8.8.8.8"}, nil
 	}
 	t.Cleanup(func() { lookupHost = original })
+
+	// Tests deliver to httptest servers on loopback; relax the SSRF guard so the
+	// real connection is allowed (production keeps the default isPrivateIP).
+	originalBlocked := addrBlocked
+	addrBlocked = func(net.IP) bool { return false }
+	t.Cleanup(func() { addrBlocked = originalBlocked })
 }
 
 func newTestWorker(serverURL string, secret []byte, deliveryRepo *mockWebhookDeliveryRepo) *WebhookWorker {

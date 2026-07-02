@@ -26,6 +26,7 @@ const (
 )
 
 type ActionsLogHandler struct {
+	access  *RepoAccess
 	logRepo domainrepo.IJobLogRepository
 	jobRepo domainrepo.IWorkflowJobRepository
 	logSub  *queue.JobLogSubscriber
@@ -45,6 +46,8 @@ func NewActionsLogHandler(
 		repos:   repos,
 	}
 }
+
+func (h *ActionsLogHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func (h *ActionsLogHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.MiddlewareFunc) {
 	readScope := middleware.RequireScope("read")
@@ -241,6 +244,9 @@ func (h *ActionsLogHandler) resolveJob(c echo.Context) (*entity.Repository, *ent
 	}
 	if repository == nil {
 		return nil, nil, echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+	}
+	if err := h.access.EnsureRead(c, repository); err != nil {
+		return nil, nil, err
 	}
 
 	runID, ok := parseActionsID(runIDParam)

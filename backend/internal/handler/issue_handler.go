@@ -22,6 +22,7 @@ type IssueHandler struct {
 	updateIssueUC   *issueusecase.UpdateIssueUsecase
 	createCommentUC *issueusecase.CreateCommentUsecase
 	resolveRepo     func(c echo.Context, owner, repo string) (*entity.Repository, error)
+	access *RepoAccess
 }
 
 func NewIssueHandler(
@@ -41,6 +42,8 @@ func NewIssueHandler(
 		resolveRepo:     resolveRepo,
 	}
 }
+
+func (h *IssueHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func (h *IssueHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	repoScope := middleware.RequireScope("repo")
@@ -163,6 +166,9 @@ func (h *IssueHandler) GetIssue(c echo.Context) error {
 func (h *IssueHandler) UpdateIssue(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
 		return err
 	}
 

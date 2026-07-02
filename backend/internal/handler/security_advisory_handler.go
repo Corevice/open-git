@@ -31,6 +31,7 @@ type UpdateAdvisoryStateExecutor interface {
 }
 
 type SecurityAdvisoryHandler struct {
+	access        *RepoAccess
 	getOrg        *orgUC.GetOrgUsecase
 	memberships   domainrepo.IMembershipRepository
 	listUC        ListAdvisoriesExecutor
@@ -56,6 +57,8 @@ func NewSecurityAdvisoryHandler(
 		resolveRepo: resolveRepo,
 	}
 }
+
+func (h *SecurityAdvisoryHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func (h *SecurityAdvisoryHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.MiddlewareFunc) {
 	g.GET("/orgs/:org/security-advisories", h.ListOrgAdvisories, authMiddleware)
@@ -111,6 +114,9 @@ func (h *SecurityAdvisoryHandler) ListOrgAdvisories(c echo.Context) error {
 	}
 
 	orgUUID := middleware.Int64ToUUID(org.ID)
+	if err := h.access.EnsureOrgMember(c, orgUUID); err != nil {
+		return err
+	}
 	output, err := h.listUC.Execute(c.Request().Context(), securityusecase.ListAdvisoriesInput{
 		OrganizationID: orgUUID,
 		State:          c.QueryParam("state"),

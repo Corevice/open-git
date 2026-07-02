@@ -18,6 +18,7 @@ import (
 )
 
 type MCPVerificationHandler struct {
+	access *RepoAccess
 	runUC         *mcpusecase.RunVerificationUsecase
 	getLatestUC   *mcpusecase.GetLatestVerificationUsecase
 	listHistoryUC *mcpusecase.ListVerificationHistoryUsecase
@@ -40,6 +41,8 @@ func NewMCPVerificationHandler(
 		deleteUC:      deleteUC,
 	}
 }
+
+func (h *MCPVerificationHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func (h *MCPVerificationHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	adminScope := middleware.RequireScope("admin")
@@ -239,6 +242,11 @@ func (h *MCPVerificationHandler) resolveOrgID(c echo.Context) (uuid.UUID, error)
 		orgID, err := uuid.Parse(raw)
 		if err != nil {
 			return uuid.Nil, echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid organization_id"})
+		}
+		// A client-supplied organization_id must be one the caller belongs to,
+		// otherwise it is a cross-tenant IDOR.
+		if err := h.access.EnsureOrgMember(c, orgID); err != nil {
+			return uuid.Nil, err
 		}
 		return orgID, nil
 	}

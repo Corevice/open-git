@@ -29,6 +29,7 @@ type PullRequestHandler struct {
 	reviewCommentRepo repository.IReviewCommentRepository
 	gitSvc            service.GitService
 	resolveRepo       func(c echo.Context, owner, repo string) (*entity.Repository, error)
+	access *RepoAccess
 }
 
 func NewPullRequestHandler(
@@ -54,6 +55,8 @@ func NewPullRequestHandler(
 		resolveRepo:       resolveRepo,
 	}
 }
+
+func (h *PullRequestHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func (h *PullRequestHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	repoScope := middleware.RequireScope("repo")
@@ -263,6 +266,9 @@ func (h *PullRequestHandler) GetPullRequest(c echo.Context) error {
 func (h *PullRequestHandler) UpdatePullRequest(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
 		return err
 	}
 

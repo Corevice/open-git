@@ -8,7 +8,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/open-git/backend/internal/domain/entity"
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
@@ -16,6 +15,7 @@ import (
 
 // BranchHandler serves branch listing and ref management endpoints.
 type BranchHandler struct {
+	access      *RepoAccess
 	resolver    GitRepositoryResolver
 	repos       repo.IRepositoryRepository
 	memberships GitMembershipAccess
@@ -28,6 +28,8 @@ func NewBranchHandler(resolver GitRepositoryResolver, repos repo.IRepositoryRepo
 		memberships: memberships,
 	}
 }
+
+func (h *BranchHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func (h *BranchHandler) RegisterRoutes(g *echo.Group, authMiddleware echo.MiddlewareFunc) {
 	g.GET("/repos/:owner/:repo/branches", h.ListBranches, middleware.OptionalAuth())
@@ -73,8 +75,8 @@ func (h *BranchHandler) fetchBranches(c echo.Context) ([]map[string]any, error) 
 		return nil, err
 	}
 
-	if resolved.Visibility == entity.VisibilityPrivate && middleware.UserIDFromContext(c) == 0 {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, map[string]string{"message": "unauthorized"})
+	if err := h.access.EnsureReadGit(c, resolved); err != nil {
+		return nil, err
 	}
 
 	raw, err := infragit.GetBranches(resolved.DiskPath)

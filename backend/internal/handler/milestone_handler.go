@@ -21,6 +21,7 @@ type MilestoneHandler struct {
 	updateMilestoneUC *milestoneusecase.UpdateMilestoneUsecase
 	deleteMilestoneUC *milestoneusecase.DeleteMilestoneUsecase
 	resolveRepo       func(c echo.Context, owner, repo string) (*entity.Repository, error)
+	access *RepoAccess
 }
 
 func NewMilestoneHandler(
@@ -38,6 +39,8 @@ func NewMilestoneHandler(
 		resolveRepo:       resolveRepo,
 	}
 }
+
+func (h *MilestoneHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func (h *MilestoneHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	repoScope := middleware.RequireScope("repo")
@@ -108,6 +111,9 @@ func (h *MilestoneHandler) CreateMilestone(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
+		return err
+	}
 
 	actorID, err := middleware.GetUserUUID(c)
 	if err != nil {
@@ -145,6 +151,9 @@ func (h *MilestoneHandler) CreateMilestone(c echo.Context) error {
 func (h *MilestoneHandler) UpdateMilestone(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
 		return err
 	}
 
@@ -187,6 +196,9 @@ func (h *MilestoneHandler) UpdateMilestone(c echo.Context) error {
 func (h *MilestoneHandler) DeleteMilestone(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
 		return err
 	}
 

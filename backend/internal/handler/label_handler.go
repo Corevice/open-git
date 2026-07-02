@@ -22,6 +22,7 @@ type LabelHandler struct {
 	addIssueLabelUC    *labelusecase.AddIssueLabelsUsecase
 	removeIssueLabelUC *labelusecase.RemoveIssueLabelUsecase
 	resolveRepo        func(c echo.Context, owner, repo string) (*entity.Repository, error)
+	access *RepoAccess
 }
 
 func NewLabelHandler(
@@ -43,6 +44,8 @@ func NewLabelHandler(
 		resolveRepo:        resolveRepo,
 	}
 }
+
+func (h *LabelHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func (h *LabelHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	repoScope := middleware.RequireScope("repo")
@@ -106,6 +109,9 @@ func (h *LabelHandler) CreateLabel(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
+		return err
+	}
 
 	var req createLabelRequest
 	if err := c.Bind(&req); err != nil {
@@ -132,6 +138,9 @@ func (h *LabelHandler) CreateLabel(c echo.Context) error {
 func (h *LabelHandler) UpdateLabel(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
 		return err
 	}
 
@@ -165,6 +174,9 @@ func (h *LabelHandler) DeleteLabel(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
+		return err
+	}
 
 	actorID, err := middleware.GetUserUUID(c)
 	if err != nil {
@@ -190,6 +202,9 @@ func (h *LabelHandler) DeleteLabel(c echo.Context) error {
 func (h *LabelHandler) AddIssueLabels(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
 		return err
 	}
 
@@ -241,6 +256,9 @@ func (h *LabelHandler) AddIssueLabels(c echo.Context) error {
 func (h *LabelHandler) RemoveIssueLabel(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
 		return err
 	}
 

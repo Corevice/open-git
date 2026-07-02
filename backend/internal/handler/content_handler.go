@@ -20,11 +20,15 @@ const maxContentBytes = 1 << 20 // 1MB
 // ContentHandler serves repository content browsing endpoints.
 type ContentHandler struct {
 	resolver GitRepositoryResolver
+	access   *RepoAccess
 }
 
 func NewContentHandler(resolver GitRepositoryResolver) *ContentHandler {
 	return &ContentHandler{resolver: resolver}
 }
+
+// SetAccess wires repository authorization (read checks for private repos).
+func (h *ContentHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func (h *ContentHandler) RegisterRoutes(g *echo.Group) {
 	g.GET("/repos/:owner/:repo/contents", h.GetContents, middleware.OptionalAuth())
@@ -99,6 +103,9 @@ func (h *ContentHandler) GetContents(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureReadGit(c, resolved); err != nil {
+		return err
+	}
 
 	ref := c.QueryParam("ref")
 	if ref == "" {
@@ -167,6 +174,9 @@ func (h *ContentHandler) GetGitBlob(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureReadGit(c, resolved); err != nil {
+		return err
+	}
 
 	sha := c.Param("sha")
 	data, size, err := infragit.GetBlobBySHA(resolved.DiskPath, sha)
@@ -202,6 +212,9 @@ func (h *ContentHandler) GetCommits(c echo.Context) error {
 
 	resolved, err := h.resolver.Resolve(c.Request().Context(), owner, repo)
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureReadGit(c, resolved); err != nil {
 		return err
 	}
 

@@ -60,7 +60,11 @@ type SecretHandler struct {
 	enc               actionSecretCryptor
 	resolveRepo       func(c echo.Context, owner, repo string) (*entity.Repository, error)
 	resolveOrg        func(c echo.Context, orgLogin string) (uuid.UUID, error)
+	access            *RepoAccess
 }
+
+// SetAccess wires repository/organization authorization for secret management.
+func (h *SecretHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func NewSecretHandler(
 	listRepoSecretsUC listRepoSecretsUseCase,
@@ -157,7 +161,7 @@ func (h *SecretHandler) ListRepoSecrets(c echo.Context) error {
 	if err != nil {
 		return mapSecretErr(c, err)
 	}
-	if err := h.checkOrgAccess(c, repo.OrganizationID); err != nil {
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
 		return mapSecretErr(c, err)
 	}
 
@@ -174,7 +178,7 @@ func (h *SecretHandler) ListOrgSecrets(c echo.Context) error {
 	if err != nil {
 		return mapSecretErr(c, err)
 	}
-	if err := h.checkOrgAccess(c, orgID); err != nil {
+	if err := h.access.EnsureOrgAdmin(c, orgID); err != nil {
 		return mapSecretErr(c, err)
 	}
 
@@ -191,7 +195,7 @@ func (h *SecretHandler) GetRepoSecret(c echo.Context) error {
 	if err != nil {
 		return mapSecretErr(c, err)
 	}
-	if err := h.checkOrgAccess(c, repo.OrganizationID); err != nil {
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
 		return mapSecretErr(c, err)
 	}
 
@@ -213,7 +217,7 @@ func (h *SecretHandler) GetOrgSecret(c echo.Context) error {
 	if err != nil {
 		return mapSecretErr(c, err)
 	}
-	if err := h.checkOrgAccess(c, orgID); err != nil {
+	if err := h.access.EnsureOrgAdmin(c, orgID); err != nil {
 		return mapSecretErr(c, err)
 	}
 
@@ -230,7 +234,7 @@ func (h *SecretHandler) GetRepoPublicKey(c echo.Context) error {
 	if err != nil {
 		return mapSecretErr(c, err)
 	}
-	if err := h.checkOrgAccess(c, repo.OrganizationID); err != nil {
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
 		return mapSecretErr(c, err)
 	}
 
@@ -243,7 +247,7 @@ func (h *SecretHandler) GetOrgPublicKey(c echo.Context) error {
 	if err != nil {
 		return mapSecretErr(c, err)
 	}
-	if err := h.checkOrgAccess(c, orgID); err != nil {
+	if err := h.access.EnsureOrgAdmin(c, orgID); err != nil {
 		return mapSecretErr(c, err)
 	}
 
@@ -256,7 +260,7 @@ func (h *SecretHandler) UpsertRepoSecret(c echo.Context) error {
 	if err != nil {
 		return mapSecretErr(c, err)
 	}
-	if err := h.checkOrgAccess(c, repo.OrganizationID); err != nil {
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
 		return mapSecretErr(c, err)
 	}
 
@@ -295,7 +299,7 @@ func (h *SecretHandler) UpsertOrgSecret(c echo.Context) error {
 	if err != nil {
 		return mapSecretErr(c, err)
 	}
-	if err := h.checkOrgAccess(c, orgID); err != nil {
+	if err := h.access.EnsureOrgAdmin(c, orgID); err != nil {
 		return mapSecretErr(c, err)
 	}
 
@@ -346,7 +350,7 @@ func (h *SecretHandler) DeleteRepoSecret(c echo.Context) error {
 	if err != nil {
 		return mapSecretErr(c, err)
 	}
-	if err := h.checkOrgAccess(c, repo.OrganizationID); err != nil {
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
 		return mapSecretErr(c, err)
 	}
 
@@ -369,7 +373,7 @@ func (h *SecretHandler) DeleteOrgSecret(c echo.Context) error {
 	if err != nil {
 		return mapSecretErr(c, err)
 	}
-	if err := h.checkOrgAccess(c, orgID); err != nil {
+	if err := h.access.EnsureOrgAdmin(c, orgID); err != nil {
 		return mapSecretErr(c, err)
 	}
 
@@ -392,7 +396,7 @@ func (h *SecretHandler) GetOrgSecretRepos(c echo.Context) error {
 	if err != nil {
 		return mapSecretErr(c, err)
 	}
-	if err := h.checkOrgAccess(c, orgID); err != nil {
+	if err := h.access.EnsureOrgAdmin(c, orgID); err != nil {
 		return mapSecretErr(c, err)
 	}
 
@@ -422,7 +426,7 @@ func (h *SecretHandler) SetOrgSecretRepos(c echo.Context) error {
 	if err != nil {
 		return mapSecretErr(c, err)
 	}
-	if err := h.checkOrgAccess(c, orgID); err != nil {
+	if err := h.access.EnsureOrgAdmin(c, orgID); err != nil {
 		return mapSecretErr(c, err)
 	}
 
@@ -469,21 +473,6 @@ func (h *SecretHandler) decryptEncryptedValue(encryptedValue string) (string, er
 	return string(plaintext), nil
 }
 
-func (h *SecretHandler) checkOrgAccess(c echo.Context, orgID uuid.UUID) error {
-	if raw, ok := c.Get("org_id").(uuid.UUID); ok && raw != uuid.Nil && raw != orgID {
-		return apperror.ErrNotFound
-	}
-	if raw, ok := c.Get("org_id").(string); ok && raw != "" {
-		ctxOrgID, err := uuid.Parse(raw)
-		if err != nil {
-			return apperror.ErrNotFound
-		}
-		if ctxOrgID != orgID {
-			return apperror.ErrNotFound
-		}
-	}
-	return nil
-}
 
 func (h *SecretHandler) toOrgSecretRepoSummaries(ctx context.Context, orgID uuid.UUID, repoIDs []uuid.UUID) ([]orgSecretRepoSummary, error) {
 	nameByID := make(map[uuid.UUID]string, len(repoIDs))

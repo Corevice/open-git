@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -39,6 +40,11 @@ const (
 
 var lookupHost = net.LookupHost
 
+// addrBlocked reports whether an IP must not be reached by webhook delivery.
+// It is a package variable so tests (which deliver to httptest servers on
+// loopback) can relax it; production uses isPrivateIP.
+var addrBlocked = isPrivateIP
+
 // WebhookDeliveryPayload is the legacy enqueue payload shape used by callers
 // that build webhook:deliver tasks directly. New code should use
 // queue.WebhookDeliveryPayload instead.
@@ -64,10 +70,47 @@ func NewWebhookWorker(
 	webhookRepo repository.IWebhookRepository,
 ) *WebhookWorker {
 	return &WebhookWorker{
-		httpClient:    &http.Client{Timeout: httpDeliveryTimeout},
+		httpClient:    newSSRFSafeHTTPClient(),
 		deliveryRepo:  deliveryRepo,
 		webhookRepo:   webhookRepo,
 		decryptSecret: identityWebhookSecretDecrypter,
+	}
+}
+
+// newSSRFSafeHTTPClient builds a client that rejects connections to private,
+// loopback, link-local and unspecified addresses at every dial — which is what
+// actually protects against DNS rebinding (the pre-flight lookup and the real
+// connection resolve DNS independently) — and re-validates the host on every
+// redirect hop.
+func newSSRFSafeHTTPClient() *http.Client {
+	dialer := &net.Dialer{Timeout: httpDeliveryTimeout}
+	safeControl := func(_, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
+		}
+		if addrBlocked(net.ParseIP(host)) {
+			return fmt.Errorf("blocked connection to non-public address %s", host)
+		}
+		return nil
+	}
+	dialer.Control = safeControl
+	transport := &http.Transport{
+		DialContext:           dialer.DialContext,
+		TLSHandshakeTimeout:   httpDeliveryTimeout,
+		ResponseHeaderTimeout: httpDeliveryTimeout,
+	}
+	return &http.Client{
+		Timeout:   httpDeliveryTimeout,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			if host := req.URL.Hostname(); host != "" {
+				if ip := net.ParseIP(host); ip != nil && addrBlocked(ip) {
+					return fmt.Errorf("blocked redirect to non-public address %s", host)
+				}
+			}
+			return nil
+		},
 	}
 }
 
@@ -118,7 +161,7 @@ func (w *WebhookWorker) HandleWebhookDeliver(ctx context.Context, task *asynq.Ta
 		return nil
 	}
 	for _, addr := range addrs {
-		if isPrivateIP(net.ParseIP(addr)) {
+		if addrBlocked(net.ParseIP(addr)) {
 			if recordErr := w.recordBlockedDelivery(ctx, deliveryID, hookID, orgID, payload, deliveryStatusSSRFBlocked, nil, nil); recordErr != nil {
 				// Best-effort audit; SSRF blocks must not retry.
 			}
@@ -268,31 +311,20 @@ func resolveContentType(contentType string) string {
 	}
 }
 
+// isPrivateIP reports whether ip is one a webhook must never reach: private,
+// loopback, link-local, unique-local, unspecified (0.0.0.0/::), or carrier-grade
+// NAT space. Covers both IPv4 and IPv6.
 func isPrivateIP(ip net.IP) bool {
 	if ip == nil {
-		return false
+		return true // unparseable → treat as unsafe
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		return true
 	}
 	if ip4 := ip.To4(); ip4 != nil {
-		switch {
-		case ip4[0] == 127:
-			return true
-		case ip4[0] == 10:
-			return true
-		case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
-			return true
-		case ip4[0] == 192 && ip4[1] == 168:
-			return true
-		case ip4[0] == 169 && ip4[1] == 254:
-			return true
-		default:
-			return false
-		}
-	}
-	if len(ip) == net.IPv6len && ip.To4() == nil {
-		if ip.IsLoopback() {
-			return true
-		}
-		if ip[0]&0xfe == 0xfc {
+		// Carrier-grade NAT (100.64.0.0/10) is not covered by IsPrivate.
+		if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
 			return true
 		}
 	}
