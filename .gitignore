@@ -16,3 +16,6 @@ backend/coverage.out
 .cache/
 backend/dist/
 *.local
+
+# TypeScript incremental build cache (build artifact)
+*.tsbuildinfo
