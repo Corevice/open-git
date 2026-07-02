@@ -138,8 +138,8 @@ func TestTokenCreate_RecordsAudit(t *testing.T) {
 	if auditRepo.logs[0].Action != "token.create" {
 		t.Fatalf("action = %q, want token.create", auditRepo.logs[0].Action)
 	}
-	if auditRepo.logs[0].OrganizationID != uuid.Nil {
-		t.Fatalf("organizationID = %v, want uuid.Nil", auditRepo.logs[0].OrganizationID)
+	if auditRepo.logs[0].OrganizationID != middleware.Int64ToUUID(userID) {
+		t.Fatalf("organizationID = %v, want personal org %v", auditRepo.logs[0].OrganizationID, middleware.Int64ToUUID(userID))
 	}
 	if auditRepo.logs[0].TargetType != "token" {
 		t.Fatalf("targetType = %q, want token", auditRepo.logs[0].TargetType)
@@ -212,8 +212,8 @@ func TestTokenRevoke_RecordsAudit(t *testing.T) {
 	if auditRepo.logs[0].Action != "token.revoke" {
 		t.Fatalf("action = %q, want token.revoke", auditRepo.logs[0].Action)
 	}
-	if auditRepo.logs[0].OrganizationID != uuid.Nil {
-		t.Fatalf("organizationID = %v, want uuid.Nil", auditRepo.logs[0].OrganizationID)
+	if auditRepo.logs[0].OrganizationID != middleware.Int64ToUUID(userID) {
+		t.Fatalf("organizationID = %v, want personal org %v", auditRepo.logs[0].OrganizationID, middleware.Int64ToUUID(userID))
 	}
 	if auditRepo.logs[0].TargetID != "1" {
 		t.Fatalf("targetID = %q, want 1", auditRepo.logs[0].TargetID)

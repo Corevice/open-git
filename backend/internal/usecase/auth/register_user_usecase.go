@@ -20,12 +20,22 @@ type RegisterUserInput struct {
 	Password string
 }
 
-type RegisterUserUsecase struct {
-	users repository.IUserRepository
+// PersonalOrgCreator provisions the personal organization that backs a user's
+// own namespace. Personal repositories use the owner's id as their
+// organization id, and many tables carry a foreign key to organizations(id),
+// so every user needs a matching organizations row (id == user id) for those
+// references to resolve.
+type PersonalOrgCreator interface {
+	EnsurePersonalOrg(ctx context.Context, userID int64, login string) error
 }
 
-func NewRegisterUserUsecase(users repository.IUserRepository) *RegisterUserUsecase {
-	return &RegisterUserUsecase{users: users}
+type RegisterUserUsecase struct {
+	users       repository.IUserRepository
+	personalOrg PersonalOrgCreator
+}
+
+func NewRegisterUserUsecase(users repository.IUserRepository, personalOrg PersonalOrgCreator) *RegisterUserUsecase {
+	return &RegisterUserUsecase{users: users, personalOrg: personalOrg}
 }
 
 func (u *RegisterUserUsecase) Execute(ctx context.Context, input RegisterUserInput) (*domain.User, error) {
@@ -54,6 +64,14 @@ func (u *RegisterUserUsecase) Execute(ctx context.Context, input RegisterUserInp
 
 	if err := u.users.Create(ctx, user); err != nil {
 		return nil, err
+	}
+
+	// Provision the user's personal organization so org-scoped foreign keys
+	// resolve for their personal repositories. Idempotent in the creator.
+	if u.personalOrg != nil {
+		if err := u.personalOrg.EnsurePersonalOrg(ctx, user.ID, user.Login); err != nil {
+			return nil, err
+		}
 	}
 
 	return user, nil

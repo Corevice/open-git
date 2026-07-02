@@ -75,18 +75,13 @@ func (h *IssueHandler) ListIssues(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
-	if err != nil {
-		return err
-	}
-
 	page, perPage, err := middleware.ParsePaginationParams(c)
 	if err != nil {
 		return err
 	}
 
 	output, err := h.listIssuesUC.Execute(c.Request().Context(), issueusecase.ListIssuesInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		State:          c.QueryParam("state"),
 		Labels:         splitLabels(c.QueryParam("labels")),
@@ -123,7 +118,7 @@ func (h *IssueHandler) CreateIssue(c echo.Context) error {
 	}
 
 	issue, err := h.createIssueUC.Execute(c.Request().Context(), issueusecase.CreateIssueInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		ActorID:        actor.UserID,
 		Title:          req.Title,
@@ -145,18 +140,13 @@ func (h *IssueHandler) GetIssue(c echo.Context) error {
 		return err
 	}
 
-	actor, err := middleware.GetActor(c)
-	if err != nil {
-		return err
-	}
-
 	number, err := strconv.Atoi(c.Param("number"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid issue number")
 	}
 
 	issue, err := h.getIssueUC.Execute(c.Request().Context(), issueusecase.GetIssueInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		IssueNumber:    number,
 	})
@@ -196,7 +186,7 @@ func (h *IssueHandler) UpdateIssue(c echo.Context) error {
 	}
 
 	issue, err := h.updateIssueUC.Execute(c.Request().Context(), issueusecase.UpdateIssueInput{
-		OrganizationID:  actor.OrganizationID,
+		OrganizationID:  repo.OrganizationID,
 		RepositoryID:    repo.ID,
 		ActorID:         actor.UserID,
 		IssueNumber:     number,
@@ -242,7 +232,7 @@ func (h *IssueHandler) CreateComment(c echo.Context) error {
 	}
 
 	comment, err := h.createCommentUC.Execute(c.Request().Context(), issueusecase.CreateCommentInput{
-		OrganizationID: actor.OrganizationID,
+		OrganizationID: repo.OrganizationID,
 		RepositoryID:   repo.ID,
 		IssueNumber:    number,
 		ActorID:        actor.UserID,

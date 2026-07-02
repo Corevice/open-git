@@ -59,7 +59,7 @@ func (r *sqlxAccessTokenRepository) Create(ctx context.Context, token *domain.Ac
 
 	_, err = r.DB.NamedExecContext(ctx, query, map[string]any{
 		"id":                   formatTokenID(token.ID),
-		"user_id":              formatTokenID(token.UserID),
+		"user_id":              formatEntityID(token.UserID),
 		"note":                 token.Note,
 		"token_hash":           token.TokenHash,
 		"scopes":               scopes,
@@ -84,7 +84,7 @@ func (r *sqlxAccessTokenRepository) RevokeAllByOAuthApp(ctx context.Context, use
 	`
 	query = r.DB.Rebind(query)
 
-	_, err := r.DB.ExecContext(ctx, query, now, formatTokenID(userID), oauthAppID)
+	_, err := r.DB.ExecContext(ctx, query, now, formatEntityID(userID), oauthAppID)
 	return dbErrors.MapDBError(err)
 }
 
@@ -97,7 +97,7 @@ func (r *sqlxAccessTokenRepository) ListByUserID(ctx context.Context, userID int
 	`
 	query = r.DB.Rebind(query)
 
-	rows, err := r.DB.QueryxContext(ctx, query, formatTokenID(userID))
+	rows, err := r.DB.QueryxContext(ctx, query, formatEntityID(userID))
 	if err != nil {
 		return nil, dbErrors.MapDBError(err)
 	}
@@ -126,7 +126,7 @@ func (r *sqlxAccessTokenRepository) Revoke(ctx context.Context, tokenID, userID 
 	`
 	query = r.DB.Rebind(query)
 
-	result, err := r.DB.ExecContext(ctx, query, now, formatTokenID(tokenID), formatTokenID(userID))
+	result, err := r.DB.ExecContext(ctx, query, now, formatTokenID(tokenID), formatEntityID(userID))
 	if err != nil {
 		return dbErrors.MapDBError(err)
 	}
@@ -221,12 +221,14 @@ func scanAccessToken(row accessTokenRow, driver string) (*domain.AccessToken, er
 	return token, nil
 }
 
-func marshalScopes(driver string, scopes []string) (any, error) {
+func marshalScopes(_ string, scopes []string) (any, error) {
+	// These values live in TEXT columns as JSON arrays on both SQLite and
+	// Postgres (some with a CHECK enforcing the leading '['/trailing ']'), so
+	// always JSON-encode. Using pq.Array here would emit Postgres array-literal
+	// syntax ({a,b}) into a TEXT column, which both fails to round-trip through
+	// unmarshalScopes and violates those CHECK constraints.
 	if scopes == nil {
 		scopes = []string{}
-	}
-	if driver == "postgres" {
-		return pq.Array(scopes), nil
 	}
 	data, err := json.Marshal(scopes)
 	if err != nil {
