@@ -94,7 +94,7 @@ jobs:
         run: echo $API_TOKEN
 `)
 
-	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, env []string, _ string) ([]byte, error) {
+	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, env []string, _ string) ([]byte, error) {
 		for _, kv := range env {
 			if strings.HasPrefix(kv, "API_TOKEN=") {
 				return []byte(strings.TrimPrefix(kv, "API_TOKEN=") + "\n"), nil
@@ -162,7 +162,7 @@ jobs:
         run: echo hello
 `)
 
-	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ []string, _ string) ([]byte, error) {
+	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, _ []string, _ string) ([]byte, error) {
 		return []byte("hello\n"), nil
 	})
 
@@ -226,7 +226,7 @@ jobs:
       - name: build
         run: echo ok
 `)
-	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ []string, _ string) ([]byte, error) {
+	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, _ []string, _ string) ([]byte, error) {
 		return []byte("ok\n"), nil
 	})
 
@@ -303,7 +303,7 @@ jobs:
 	logRepo := &ciFakeJobLogRepo{}
 	worker := NewCIWorker(db).
 		WithLogRepository(logRepo).
-		WithStreamingCommandRunner(func(_ context.Context, _ []string, _ string, _ int, sink func(stream, line string)) error {
+		WithStreamingCommandRunner(func(_ context.Context, _ string, _ []string, _ string, _ int, sink func(stream, line string)) error {
 			sink(entity.LogStreamStdout, "hello")
 			return nil
 		})

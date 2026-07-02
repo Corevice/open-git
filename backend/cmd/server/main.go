@@ -1032,7 +1032,8 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	ciWorker := worker.NewCIWorker(db).
 		WithDecrypter(ciDecrypter).
 		WithLogRepository(jobLogRepo).
-		WithJobRepository(workflowJobRepo)
+		WithJobRepository(workflowJobRepo).
+		WithSandbox(cfg.CISandboxMode, cfg.CISandboxImage)
 	if jobLogPublisher != nil {
 		ciWorker = ciWorker.WithLogPublisher(jobLogPublisher)
 	}

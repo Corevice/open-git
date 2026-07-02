@@ -30,6 +30,11 @@ type Config struct {
 	SSHEnabled        bool
 	SSHListenAddr     string
 	SSHHostKeyPath    string
+	// CISandboxMode controls how CI workflow steps are executed:
+	//   "none"   – run directly on the server host (trusted instances only)
+	//   "docker" – run each job in an ephemeral, network-isolated container
+	CISandboxMode  string
+	CISandboxImage string
 	APIBaseURL        string
 	WebBaseURL        string
 	DocsBaseURL        string
@@ -104,6 +109,8 @@ func Load() Config {
 		LicenseName:                 getenv("LICENSE_NAME", "Apache-2.0"),
 		SourceURL:                   getenv("SOURCE_URL", ""),
 		LicensesFilePath:            getenv("LICENSES_FILE_PATH", "./licenses.json"),
+		CISandboxMode:               getenv("CI_SANDBOX_MODE", "none"),
+		CISandboxImage:              getenv("CI_SANDBOX_IMAGE", "alpine:3"),
 	}
 }
 

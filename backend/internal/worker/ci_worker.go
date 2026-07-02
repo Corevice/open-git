@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -83,12 +83,13 @@ type CIRunPayload struct {
 // tests where secrets are stored in plaintext for assertion purposes.
 type SecretDecrypter func(ctx context.Context, encrypted string) (string, error)
 
-// CommandRunner executes a shell command and returns the combined stdout/stderr.
-// Exposed for testability.
-type CommandRunner func(ctx context.Context, env []string, script string) ([]byte, error)
+// CommandRunner executes a shell command in workdir and returns the combined
+// stdout/stderr. Exposed for testability.
+type CommandRunner func(ctx context.Context, workdir string, env []string, script string) ([]byte, error)
 
-// StreamingCommandRunner executes a shell command and invokes sink for each output line.
-type StreamingCommandRunner func(ctx context.Context, env []string, script string, step int, sink func(stream, line string)) error
+// StreamingCommandRunner executes a shell command in workdir and invokes sink
+// for each output line.
+type StreamingCommandRunner func(ctx context.Context, workdir string, env []string, script string, step int, sink func(stream, line string)) error
 
 type CIWorker struct {
 	db            *sql.DB
@@ -99,16 +100,26 @@ type CIWorker struct {
 	logRepo       domainrepo.IJobLogRepository
 	jobRepo       domainrepo.IWorkflowJobRepository
 	logPublisher  *queue.JobLogPublisher
+	sandbox       sandbox
 }
 
 func NewCIWorker(db *sql.DB) *CIWorker {
-	return &CIWorker{
-		db:            db,
-		decrypt:       identityDecrypter,
-		runStep:       defaultCommandRunner,
-		runStepStream: defaultStreamingCommandRunner,
-		stepWait:      ciStepTimeout,
+	w := &CIWorker{
+		db:       db,
+		decrypt:  identityDecrypter,
+		stepWait: ciStepTimeout,
+		sandbox:  newSandbox(SandboxModeNone, ""),
 	}
+	w.runStep = w.defaultCommandRunner
+	w.runStepStream = w.defaultStreamingCommandRunner
+	return w
+}
+
+// WithSandbox selects how steps are isolated: SandboxModeNone (direct on host,
+// trusted instances) or SandboxModeDocker (ephemeral container per job).
+func (w *CIWorker) WithSandbox(mode, image string) *CIWorker {
+	w.sandbox = newSandbox(mode, image)
+	return w
 }
 
 func (w *CIWorker) WithDecrypter(d SecretDecrypter) *CIWorker {
@@ -179,10 +190,19 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 		return fmt.Errorf("load secrets: %w", err)
 	}
 
+	// Ephemeral working directory for this run: steps execute here (or with it
+	// bind-mounted, in docker mode), never in the server's own working
+	// directory, and it is removed when the run finishes.
+	workdir, err := os.MkdirTemp("", "og-ci-run-*")
+	if err != nil {
+		return fmt.Errorf("create ci workdir: %w", err)
+	}
+	defer os.RemoveAll(workdir)
+
 	useStreaming := w.logRepo != nil
 	streamRunner := w.runStepStream
 	if useStreaming && streamRunner == nil {
-		streamRunner = defaultStreamingCommandRunner
+		streamRunner = w.defaultStreamingCommandRunner
 	}
 
 	logBuf := &strings.Builder{}
@@ -240,7 +260,7 @@ runLoop:
 				if jobIDStr == "" {
 					jobIDStr = jobName
 				}
-				runErr := streamRunner(stepCtx, secretEnv, step.Run, i, func(stream, line string) {
+				runErr := streamRunner(stepCtx, workdir, secretEnv, step.Run, i, func(stream, line string) {
 					jobLineCounts[jobName]++
 					lineNum := jobLineCounts[jobName]
 					masked := maskSecrets(line, secretValues)
@@ -273,7 +293,7 @@ runLoop:
 					break
 				}
 			} else {
-				out, runErr := w.runStep(stepCtx, secretEnv, step.Run)
+				out, runErr := w.runStep(stepCtx, workdir, secretEnv, step.Run)
 				cancel()
 
 				masked := maskSecrets(string(out), secretValues)
@@ -466,15 +486,13 @@ func identityDecrypter(_ context.Context, encrypted string) (string, error) {
 	return encrypted, nil
 }
 
-func defaultCommandRunner(ctx context.Context, env []string, script string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "sh", "-c", script)
-	cmd.Env = append(cmd.Env, env...)
+func (w *CIWorker) defaultCommandRunner(ctx context.Context, workdir string, env []string, script string) ([]byte, error) {
+	cmd := w.sandbox.buildCommand(ctx, workdir, env, script)
 	return cmd.CombinedOutput()
 }
 
-func defaultStreamingCommandRunner(ctx context.Context, env []string, script string, _ int, sink func(stream, line string)) error {
-	cmd := exec.CommandContext(ctx, "sh", "-c", script)
-	cmd.Env = append(cmd.Env, env...)
+func (w *CIWorker) defaultStreamingCommandRunner(ctx context.Context, workdir string, env []string, script string, _ int, sink func(stream, line string)) error {
+	cmd := w.sandbox.buildCommand(ctx, workdir, env, script)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
