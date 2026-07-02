@@ -158,8 +158,8 @@ func (h *WorkflowRunHandler) GetRun(c echo.Context) error {
 		return err
 	}
 
-	runID, err := uuid.Parse(c.Param("run_id"))
-	if err != nil {
+	runID, ok := parseActionsID(c.Param("run_id"))
+	if !ok {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid run_id")
 	}
 
@@ -192,8 +192,8 @@ func (h *WorkflowRunHandler) CancelRun(c echo.Context) error {
 		return err
 	}
 
-	runID, err := uuid.Parse(c.Param("run_id"))
-	if err != nil {
+	runID, ok := parseActionsID(c.Param("run_id"))
+	if !ok {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid run_id")
 	}
 
@@ -227,8 +227,8 @@ func (h *WorkflowRunHandler) RerunRun(c echo.Context) error {
 		return err
 	}
 
-	runID, err := uuid.Parse(c.Param("run_id"))
-	if err != nil {
+	runID, ok := parseActionsID(c.Param("run_id"))
+	if !ok {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid run_id")
 	}
 
@@ -254,8 +254,8 @@ func (h *WorkflowRunHandler) ListJobs(c echo.Context) error {
 		return err
 	}
 
-	runID, err := uuid.Parse(c.Param("run_id"))
-	if err != nil {
+	runID, ok := parseActionsID(c.Param("run_id"))
+	if !ok {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid run_id")
 	}
 
@@ -317,8 +317,8 @@ func (h *WorkflowRunHandler) StreamJobLogs(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "log streaming not configured")
 	}
 
-	jobID, err := uuid.Parse(c.Param("job_id"))
-	if err != nil {
+	jobID, ok := parseActionsID(c.Param("job_id"))
+	if !ok {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid job_id")
 	}
 

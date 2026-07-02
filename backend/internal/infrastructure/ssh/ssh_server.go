@@ -37,6 +37,32 @@ type SSHServer struct {
 	authorizer RepoAuthorizer
 	hostKey    gossh.Signer
 	server     *gossh.Server
+	// onPush, when set, is invoked once per branch updated by a successful
+	// receive-pack (CI trigger). Must never fail the push.
+	onPush func(ctx context.Context, ownerLogin, repoName, branch, newSHA string)
+}
+
+// SetPushListener installs the post-receive callback (e.g. the CI trigger).
+func (h *SSHServer) SetPushListener(fn func(ctx context.Context, ownerLogin, repoName, branch, newSHA string)) {
+	h.onPush = fn
+}
+
+// snapshotBranchHeads returns branch name -> head SHA for the bare repo. Used
+// to diff refs around receive-pack, since the SSH path streams the protocol
+// straight through git and never sees the ref update commands itself.
+func snapshotBranchHeads(ctx context.Context, diskPath string) map[string]string {
+	out, err := exec.CommandContext(ctx, "git", "--git-dir", diskPath, "for-each-ref", "refs/heads", "--format=%(objectname) %(refname:short)").Output()
+	if err != nil {
+		return nil
+	}
+	heads := make(map[string]string)
+	for _, line := range strings.Split(string(out), "\n") {
+		parts := strings.SplitN(strings.TrimSpace(line), " ", 2)
+		if len(parts) == 2 {
+			heads[parts[1]] = parts[0]
+		}
+	}
+	return heads
 }
 
 type gitSSHCommand struct {
@@ -168,6 +194,11 @@ func (h *SSHServer) handleSession(s gossh.Session) {
 		return
 	}
 
+	var beforeHeads map[string]string
+	if parsed.packType == "receive-pack" && h.onPush != nil {
+		beforeHeads = snapshotBranchHeads(ctx, diskPath)
+	}
+
 	cmd := exec.CommandContext(ctx, "git", parsed.packType, diskPath)
 	cmd.Stdin = s
 	cmd.Stdout = s
@@ -181,6 +212,15 @@ func (h *SSHServer) handleSession(s gossh.Session) {
 		}
 		s.Exit(1)
 		return
+	}
+
+	if parsed.packType == "receive-pack" && h.onPush != nil {
+		after := snapshotBranchHeads(context.Background(), diskPath)
+		for branch, sha := range after {
+			if beforeHeads[branch] != sha {
+				h.onPush(context.Background(), parsed.ownerLogin, parsed.repoName, branch, sha)
+			}
+		}
 	}
 	s.Exit(0)
 }
