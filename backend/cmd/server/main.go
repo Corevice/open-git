@@ -1141,9 +1141,11 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 			if orgID == middleware.UserUUIDFromContext(c) {
 				return entity.RoleAdmin, nil
 			}
+			// Non-members get an empty role (no access), not a default member
+			// role — so runner listing/management is gated to real members.
 			role, err := membershipRepo.GetRole(c.Request().Context(), orgID, middleware.UserUUIDFromContext(c))
 			if err != nil {
-				return entity.RoleMember, nil
+				return "", nil
 			}
 			return role, nil
 		},

@@ -185,6 +185,9 @@ func (h *RunnerHandler) listRunners(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if h.actorRole(c, orgID) == "" {
+		return echo.NewHTTPError(http.StatusForbidden, map[string]string{"message": "Forbidden"})
+	}
 
 	runners, err := h.listRunnersUC.Execute(c.Request().Context(), orgID)
 	if err != nil {
