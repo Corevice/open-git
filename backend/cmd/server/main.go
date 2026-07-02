@@ -42,6 +42,7 @@ import (
 	"github.com/open-git/backend/internal/handler"
 	"github.com/open-git/backend/internal/infrastructure/crypto"
 	infraDB "github.com/open-git/backend/internal/infrastructure/database"
+	"github.com/open-git/backend/internal/infrastructure/ci"
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/infrastructure/kvstore"
 	"github.com/open-git/backend/internal/infrastructure/queue"
@@ -50,6 +51,7 @@ import (
 	"github.com/open-git/backend/internal/logger"
 	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
+	actionsusecase "github.com/open-git/backend/internal/usecase/actions"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
 	docsuc "github.com/open-git/backend/internal/usecase/docs"
@@ -65,6 +67,7 @@ import (
 	userUC "github.com/open-git/backend/internal/usecase/user"
 	userpreferencesUC "github.com/open-git/backend/internal/usecase/user_preferences"
 	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
+	workflowusecase "github.com/open-git/backend/internal/usecase/workflow"
 	"github.com/open-git/backend/internal/worker"
 	artifactusecase "github.com/open-git/backend/internal/usecase/artifact"
 	secretusecase "github.com/open-git/backend/internal/usecase/secret"
@@ -998,16 +1001,135 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	e.GET("/api/graphql", gqlHandler)
 
 	workflowJobRepo := infrarepo.NewWorkflowJobRepository(sqlxDB)
-	var jobLogRepo domainrepo.IJobLogRepository
+	// Job logs are persisted in job_log_lines / job_logs_meta so the actions
+	// log read + SSE endpoints return real CI output.
+	jobLogRepo := infrarepo.NewJobLogRepository(sqlxDB)
 	var jobLogSub *queue.JobLogSubscriber
+	var jobLogPublisher *queue.JobLogPublisher
 	if cfg.RedisAddr != "" {
 		jobLogSub = queue.NewJobLogSubscriber(cfg.RedisAddr)
+		jobLogPublisher = queue.NewJobLogPublisher(cfg.RedisAddr)
 	}
 	actionsLogHandler := handler.NewActionsLogHandler(jobLogRepo, workflowJobRepo, jobLogSub, repoRepo)
 	actionsLogHandler.RegisterRoutes(v1, authMiddleware)
 
 	apiActions := e.Group("/api")
 	actionsLogHandler.RegisterRoutes(apiActions, authMiddleware)
+
+	// ---- Actions / CI runtime ------------------------------------------------
+	// The CI worker executes workflow YAML (jobs + steps), streaming masked
+	// logs to job_log_lines. The dispatcher runs it via asynq when Redis is
+	// configured, else in-process. The trigger creates workflow_runs from git
+	// pushes and manual dispatches; the workflow-run + runner HTTP handlers
+	// expose them to the UI and self-hosted runners.
+	ciDecrypter := func(_ context.Context, encrypted string) (string, error) {
+		plain, err := actionSecretEnc.SecretEncryptor.Decrypt([]byte(encrypted))
+		if err != nil {
+			return "", err
+		}
+		return string(plain), nil
+	}
+	ciWorker := worker.NewCIWorker(db).
+		WithDecrypter(ciDecrypter).
+		WithLogRepository(jobLogRepo).
+		WithJobRepository(workflowJobRepo)
+	if jobLogPublisher != nil {
+		ciWorker = ciWorker.WithLogPublisher(jobLogPublisher)
+	}
+	// CI executes in-process (a detached goroutine per run). This is the
+	// single-node execution model; distributing runs to a separate worker
+	// fleet over asynq is a future enhancement. Runs are persisted either way,
+	// so the UI reflects real state.
+	ciDispatcher := ci.NewDispatcher(nil, ciWorker)
+	ciTrigger := ci.NewTrigger(wfRepo, ciDispatcher)
+
+	// Re-dispatch execution when a run is re-run from the UI.
+	wfRepo.SetRerunDispatcher(func(_ context.Context, orgID uuid.UUID, run *entity.WorkflowRun) {
+		bg := context.Background()
+		repo, rerr := repoRepo.GetByID(bg, run.RepositoryID, orgID)
+		if rerr != nil || repo == nil {
+			return
+		}
+		_ = ciTrigger.Redispatch(bg, orgID, repo.GitPath, run)
+	})
+
+	// Fire CI on push (HTTP + SSH).
+	gitHTTPHandler.SetPushListener(func(ctx context.Context, repo *handler.ResolvedGitRepository, branch, newSHA string, userID int64) {
+		_ = ciTrigger.OnPush(context.Background(), repo.OrganizationID, repo.ID, repo.DiskPath, branch, newSHA, loginForUserID(context.Background(), userRepo, userID))
+	})
+
+	// Workflow run read/cancel/rerun/jobs endpoints (the Actions UI).
+	workflowRunHandler := handler.NewWorkflowRunHandler(
+		workflowusecase.NewListRunsUsecase(wfRepo),
+		workflowusecase.NewGetRunUsecase(wfRepo),
+		workflowusecase.NewCancelRunUsecase(wfRepo),
+		workflowusecase.NewRerunRunUsecase(wfRepo),
+		workflowusecase.NewListJobsUsecase(infrarepo.NewWorkflowJobListingAdapter(workflowJobRepo)),
+		resolveRepo,
+		nil,
+		nil,
+	)
+	workflowRunHandler.RegisterRoutes(v3, authMiddleware)
+
+	// Manual workflow dispatch.
+	actionsDispatchHandler := handler.NewActionsDispatchHandler(
+		resolveRepo,
+		func(c echo.Context, repo *entity.Repository) bool {
+			if repo.OrganizationID == middleware.UserUUIDFromContext(c) {
+				return true
+			}
+			ok, err := membershipAdapter.HasWriteAccess(c.Request().Context(), middleware.UserIDFromContext(c), repo.OrganizationID)
+			if err == nil && ok {
+				return true
+			}
+			perm, perr := collaboratorRepo.GetPermission(c.Request().Context(), repo.ID, middleware.UserUUIDFromContext(c))
+			return perr == nil && (perm == entity.CollaboratorPermWrite || perm == entity.CollaboratorPermAdmin)
+		},
+		func(ctx context.Context, diskPath, ref string) (string, error) {
+			return gitSvc.ResolveRef(ctx, diskPath, ref)
+		},
+		func(c echo.Context) string { return loginForUserID(c.Request().Context(), userRepo, middleware.UserIDFromContext(c)) },
+		func(ctx context.Context, repo *entity.Repository, workflowFile, branch, sha, actor string) (*entity.WorkflowRun, error) {
+			return ciTrigger.DispatchWorkflow(ctx, repo.OrganizationID, repo.ID, repo.GitPath, workflowFile, branch, sha, actor)
+		},
+	)
+	actionsDispatchHandler.RegisterRoutes(v3, authMiddleware)
+
+	// Self-hosted runner registration/heartbeat API.
+	runnerRepo := infrarepo.NewRunnerRepository(sqlxDB)
+	runnerTokenRepo := infrarepo.NewRunnerRegistrationTokenRepository(sqlxDB)
+	runnerAuditRepo := infrarepo.NewAuditLogRepository(sqlxDB)
+	runnerHandler := handler.NewRunnerHandlerWithDeps(
+		actionsusecase.NewCreateRegistrationTokenUsecase(runnerTokenRepo),
+		actionsusecase.NewRegisterRunnerUsecase(runnerRepo, runnerTokenRepo, runnerAuditRepo),
+		actionsusecase.NewListRunnersUsecase(runnerRepo),
+		actionsusecase.NewDeleteRunnerUsecase(runnerRepo, runnerAuditRepo),
+		actionsusecase.NewHeartbeatRunnerUsecase(runnerRepo),
+		func(c echo.Context) (uuid.UUID, error) {
+			org := c.Param("org")
+			if o, oerr := orgRepo.GetByLogin(c.Request().Context(), org); oerr == nil && o != nil {
+				return middleware.Int64ToUUID(o.ID), nil
+			}
+			// Fall back to a personal namespace: the owner's user id.
+			if u, uerr := entityUserRepo.GetByLogin(c.Request().Context(), org); uerr == nil && u != nil {
+				return u.ID, nil
+			}
+			return uuid.Nil, echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
+		},
+		func(c echo.Context, orgID uuid.UUID) (string, error) {
+			// Owner of a personal namespace, or an org admin/owner.
+			if orgID == middleware.UserUUIDFromContext(c) {
+				return entity.RoleAdmin, nil
+			}
+			role, err := membershipRepo.GetRole(c.Request().Context(), orgID, middleware.UserUUIDFromContext(c))
+			if err != nil {
+				return entity.RoleMember, nil
+			}
+			return role, nil
+		},
+	)
+	// Frontend calls /api/v1/:org/actions/runners*, so mount under that prefix.
+	runnerHandler.RegisterRoutes(v1.Group("/:org/actions", authMiddleware))
 
 	var sshServer *sshinfra.SSHServer
 	if cfg.SSHEnabled {
@@ -1182,6 +1304,18 @@ func requestContextMiddleware() echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+// loginForUserID resolves a user id to its login for CI run attribution,
+// returning "" when the user cannot be found (attribution is best-effort).
+func loginForUserID(ctx context.Context, users repo.IUserRepository, userID int64) string {
+	if userID == 0 {
+		return ""
+	}
+	if u, err := users.GetByID(ctx, userID); err == nil && u != nil {
+		return u.Login
+	}
+	return ""
 }
 
 func newHTTPErrorHandler() echo.HTTPErrorHandler {

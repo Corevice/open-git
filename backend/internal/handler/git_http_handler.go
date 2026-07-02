@@ -62,6 +62,14 @@ type GitHTTPHandler struct {
 	protections   GitBranchProtectionStore
 	collaborators repo.IRepositoryCollaboratorRepository
 	authRequired  echo.MiddlewareFunc
+	// onPush, when set, is invoked once per branch updated by a successful
+	// receive-pack (CI trigger). It must not block or fail the push.
+	onPush func(ctx context.Context, repo *ResolvedGitRepository, branch, newSHA string, userID int64)
+}
+
+// SetPushListener installs the post-receive callback (e.g. the CI trigger).
+func (h *GitHTTPHandler) SetPushListener(fn func(ctx context.Context, repo *ResolvedGitRepository, branch, newSHA string, userID int64)) {
+	h.onPush = fn
 }
 
 func NewGitHTTPHandler(
@@ -266,7 +274,32 @@ func (h *GitHTTPHandler) ReceivePack(c echo.Context) error {
 		result = "error"
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": err.Error()})
 	}
+
+	h.notifyPush(repo, body, userID)
 	return nil
+}
+
+// notifyPush reports each branch updated by the receive-pack request to the
+// push listener. Deletions (new hash = zero) are skipped. Failures here must
+// never fail the push, so this is best-effort by construction.
+func (h *GitHTTPHandler) notifyPush(repo *ResolvedGitRepository, body []byte, userID int64) {
+	if h.onPush == nil {
+		return
+	}
+	req := packp.NewReferenceUpdateRequest()
+	if err := req.Decode(bytes.NewReader(body)); err != nil {
+		return
+	}
+	for _, cmd := range req.Commands {
+		if cmd.New == plumbing.ZeroHash {
+			continue
+		}
+		branch, ok := branchFromRef(cmd.Name.String())
+		if !ok {
+			continue
+		}
+		h.onPush(context.Background(), repo, branch, cmd.New.String(), userID)
+	}
 }
 
 const gitWWWAuthenticateHeader = `Basic realm="OpenGit"`

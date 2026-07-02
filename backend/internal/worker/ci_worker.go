@@ -3,7 +3,9 @@ package worker
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,11 +18,27 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/domain/entity"
+	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/infrastructure/queue"
 	"github.com/open-git/backend/internal/infrastructure/workflow"
+	"github.com/open-git/backend/internal/middleware"
 )
+
+// int64CompatibleUUID returns a UUID whose upper 64 bits are zero, so it
+// survives the int64<->UUID bridge the Actions API uses to expose numeric job
+// ids. Mirrors the repository helper of the same purpose.
+func int64CompatibleUUID() uuid.UUID {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return uuid.New()
+	}
+	id := int64(binary.BigEndian.Uint64(buf[:]) & 0x7fffffffffffffff)
+	if id == 0 {
+		id = 1
+	}
+	return middleware.Int64ToUUID(id)
+}
 
 const (
 	TypeCIRun = "ci:run"
@@ -177,7 +195,7 @@ runLoop:
 	for jobName, job := range wf.Jobs {
 		var jobUUID uuid.UUID
 		if w.jobRepo != nil {
-			jobUUID = uuid.New()
+			jobUUID = int64CompatibleUUID()
 			jobIDs[jobName] = jobUUID.String()
 			now := time.Now().UTC()
 			runID, parseErr := uuid.Parse(payload.WorkflowRunID)
@@ -252,7 +270,7 @@ runLoop:
 					conclusion = ciConclusionFailure
 					jobLogStatus[jobName] = jobLogStatusFailure
 					fmt.Fprintf(logBuf, "[job=%s step=%d] error: %s\n", jobName, i, maskSecrets(runErr.Error(), secretValues))
-					break runLoop
+					break
 				}
 			} else {
 				out, runErr := w.runStep(stepCtx, secretEnv, step.Run)
@@ -265,9 +283,25 @@ runLoop:
 					conclusion = ciConclusionFailure
 					jobLogStatus[jobName] = jobLogStatusFailure
 					fmt.Fprintf(logBuf, "[job=%s step=%d] error: %s\n", jobName, i, maskSecrets(runErr.Error(), secretValues))
-					break runLoop
+					break
 				}
 			}
+		}
+
+		// Record the job's terminal state so run detail pages show per-job
+		// results rather than jobs stuck in_progress forever.
+		if w.jobRepo != nil && jobUUID != uuid.Nil {
+			jobConclusion := entity.WorkflowJobConclusionSuccess
+			if jobLogStatus[jobName] == jobLogStatusFailure {
+				jobConclusion = entity.WorkflowJobConclusionFailure
+			}
+			_ = w.jobRepo.Complete(ctx, jobUUID, jobConclusion, time.Now().UTC())
+		}
+
+		// Fail fast: a failed job stops the remaining jobs, like the old
+		// labelled break did.
+		if jobLogStatus[jobName] == jobLogStatusFailure {
+			break runLoop
 		}
 	}
 
@@ -308,7 +342,9 @@ func (w *CIWorker) loadPlanTier(ctx context.Context, orgID string) (string, erro
 	).Scan(&tier)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", fmt.Errorf("organization %s not found", orgID)
+			// Personal repositories use the owner's user id as the organization
+			// id and have no organizations row; treat them as the free tier.
+			return planTierFree, nil
 		}
 		return "", err
 	}
@@ -336,9 +372,12 @@ func (w *CIWorker) loadSecrets(ctx context.Context, repoID string) ([]string, []
 	if w.db == nil {
 		return nil, nil, nil
 	}
+	// action_secrets is the table the /actions/secrets API writes; encrypted
+	// values are bytes sealed by the configured ActionSecretEncryptor, which
+	// the injected decrypter reverses.
 	rows, err := w.db.QueryContext(
 		ctx,
-		`SELECT name, encrypted_value FROM secrets WHERE repository_id = $1`,
+		`SELECT name, encrypted_value FROM action_secrets WHERE repository_id = $1`,
 		repoID,
 	)
 	if err != nil {
@@ -349,11 +388,12 @@ func (w *CIWorker) loadSecrets(ctx context.Context, repoID string) ([]string, []
 	var env []string
 	var values []string
 	for rows.Next() {
-		var name, encrypted string
+		var name string
+		var encrypted []byte
 		if err := rows.Scan(&name, &encrypted); err != nil {
 			return nil, nil, err
 		}
-		plain, err := w.decrypt(ctx, encrypted)
+		plain, err := w.decrypt(ctx, string(encrypted))
 		if err != nil {
 			return nil, nil, fmt.Errorf("decrypt secret %s: %w", name, err)
 		}
@@ -370,9 +410,11 @@ func (w *CIWorker) setStatus(ctx context.Context, runID, status string) error {
 	if w.db == nil || runID == "" {
 		return nil
 	}
+	// Never resurrect a run the user cancelled while it was queued/starting.
 	_, err := w.db.ExecContext(
 		ctx,
-		`UPDATE workflow_runs SET status = $1 WHERE id = $2`,
+		`UPDATE workflow_runs SET status = $1
+		 WHERE id = $2 AND (conclusion IS NULL OR conclusion <> 'cancelled')`,
 		status, runID,
 	)
 	return err
@@ -383,12 +425,18 @@ func (w *CIWorker) markRun(ctx context.Context, runID, status, conclusion, logs 
 		return
 	}
 	conclusionField := conclusion
-	if logs != "" {
+	// Legacy fallback: with no log repository wired, step output is stashed in
+	// the conclusion column so it isn't lost entirely. With a log repository
+	// the lines live in job_log_lines and conclusion stays a clean enum value.
+	if logs != "" && w.logRepo == nil {
 		conclusionField = conclusion + "\n" + logs
 	}
+	// The cancel guard keeps a completed executor from overwriting a run the
+	// user cancelled mid-flight.
 	_, _ = w.db.ExecContext(
 		ctx,
-		`UPDATE workflow_runs SET status = $1, conclusion = $2, completed_at = $3 WHERE id = $4`,
+		`UPDATE workflow_runs SET status = $1, conclusion = $2, completed_at = $3, updated_at = $3
+		 WHERE id = $4 AND (conclusion IS NULL OR conclusion <> 'cancelled')`,
 		status, conclusionField, time.Now().UTC(), runID,
 	)
 }

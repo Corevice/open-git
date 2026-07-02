@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/apperror"
@@ -244,12 +243,12 @@ func (h *ActionsLogHandler) resolveJob(c echo.Context) (*entity.Repository, *ent
 		return nil, nil, echo.NewHTTPError(http.StatusNotFound, map[string]string{"message": "Not Found"})
 	}
 
-	runID, err := uuid.Parse(runIDParam)
-	if err != nil {
+	runID, ok := parseActionsID(runIDParam)
+	if !ok {
 		return nil, nil, echo.NewHTTPError(http.StatusBadRequest, "invalid runId")
 	}
-	jobID, err := uuid.Parse(jobIDParam)
-	if err != nil {
+	jobID, ok := parseActionsID(jobIDParam)
+	if !ok {
 		return nil, nil, echo.NewHTTPError(http.StatusBadRequest, "invalid jobId")
 	}
 

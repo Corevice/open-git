@@ -29,13 +29,16 @@ CREATE TABLE repositories (
     organization_id TEXT NOT NULL,
     name TEXT NOT NULL
 );
-CREATE TABLE secrets (
+CREATE TABLE action_secrets (
     id TEXT PRIMARY KEY,
     organization_id TEXT NOT NULL,
-    repository_id TEXT NOT NULL,
+    repository_id TEXT,
     name TEXT NOT NULL,
-    encrypted_value TEXT NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    encrypted_value BYTEA NOT NULL,
+    key_id TEXT NOT NULL DEFAULT '',
+    visibility TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE workflow_runs (
     id TEXT PRIMARY KEY,
@@ -45,7 +48,8 @@ CREATE TABLE workflow_runs (
     status TEXT NOT NULL,
     conclusion TEXT,
     started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP
+    completed_at TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `
 
@@ -76,7 +80,7 @@ func TestSecretsAreMasked(t *testing.T) {
 		orgID, "acme", "Acme", planTierPro)
 	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`,
 		repoID, orgID, "widgets")
-	mustExec(t, db, `INSERT INTO secrets (id, organization_id, repository_id, name, encrypted_value) VALUES (?, ?, ?, ?, ?)`,
+	mustExec(t, db, `INSERT INTO action_secrets (id, organization_id, repository_id, name, encrypted_value) VALUES (?, ?, ?, ?, ?)`,
 		"sec-1", orgID, repoID, "API_TOKEN", secretValue)
 	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`,
 		runID, orgID, repoID, "ci.yml", ciStatusQueued)
