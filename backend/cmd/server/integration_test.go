@@ -122,6 +122,45 @@ func TestIntegration_CoreFlows(t *testing.T) {
 		"name": "T", "homepage_url": "https://e.com", "callback_urls": []string{"http://localhost:9/cb"}, "owner_type": "user",
 	}, http.StatusCreated)
 	srv.do("POST", "/api/v1/alice/actions/runners/registration-token", pat, nil, http.StatusCreated)
+
+	// ---- Authorization: another user must not reach alice's resources -------
+	// A private repo owned by alice, plus a hook and an issue on the public one.
+	srv.do("POST", "/user/repos", pat, map[string]any{"name": "secret", "private": true}, http.StatusCreated)
+
+	srv.do("POST", "/register", "", map[string]any{
+		"login": "mallory", "email": "mallory@example.com", "password": "password12345",
+	}, http.StatusCreated)
+	var mLogin struct {
+		Token string `json:"token"`
+	}
+	srv.doJSON("POST", "/login", "", map[string]any{"login": "mallory", "password": "password12345"}, http.StatusOK, &mLogin)
+	var mTok struct {
+		Token string `json:"token"`
+	}
+	srv.doJSON("POST", "/user/tokens", mLogin.Token, map[string]any{
+		"note": "m", "scopes": []string{"repo", "admin:org", "read", "write", "admin", "user"},
+	}, http.StatusCreated, &mTok)
+	mpat := mTok.Token
+
+	// Private-repo reads must 404 for a non-member and for anonymous callers.
+	srv.expectStatus("GET", "/api/v3/repos/alice/secret/contents/", mpat, nil, http.StatusNotFound)
+	srv.expectStatus("GET", "/api/v3/repos/alice/secret/contents/", "", nil, http.StatusNotFound)
+	srv.expectStatus("GET", "/api/v3/repos/alice/secret/branches", mpat, nil, http.StatusNotFound)
+
+	// Repo/org administration must be forbidden for a non-owner.
+	srv.expectStatus("GET", "/api/v3/repos/alice/proj/actions/secrets", mpat, nil, http.StatusForbidden)
+	srv.expectStatus("PUT", "/api/v3/repos/alice/proj/actions/secrets/X", mpat,
+		map[string]any{"encrypted_value": "eA==", "key_id": "k"}, http.StatusForbidden)
+	srv.expectStatus("POST", "/api/v3/repos/alice/proj/hooks", mpat, map[string]any{
+		"config": map[string]any{"url": "http://evil.example.com/h", "content_type": "json"},
+		"events": []string{"push"}, "active": true,
+	}, http.StatusForbidden)
+
+	// Writes to alice's public repo must be forbidden for a non-collaborator.
+	srv.expectStatus("POST", "/api/v3/repos/alice/proj/labels", mpat,
+		map[string]any{"name": "x", "color": "00ff00"}, http.StatusForbidden)
+	srv.expectStatus("PATCH", "/api/v3/repos/alice/proj/issues/1", mpat,
+		map[string]any{"state": "closed"}, http.StatusForbidden)
 }
 
 type intServer struct {
@@ -157,6 +196,16 @@ func (s *intServer) do(method, path, token string, body any, want int) {
 	if rec.Code >= 500 {
 		s.t.Fatalf("%s %s: server error %d: %s", method, path, rec.Code, rec.Body.String())
 	}
+	if rec.Code != want {
+		s.t.Fatalf("%s %s: status = %d, want %d: %s", method, path, rec.Code, want, rec.Body.String())
+	}
+}
+
+// expectStatus asserts an exact status (used for authorization denials, where
+// a 5xx or a wrong-but-successful code both indicate a broken check).
+func (s *intServer) expectStatus(method, path, token string, body any, want int) {
+	s.t.Helper()
+	rec := s.request(method, path, token, body)
 	if rec.Code != want {
 		s.t.Fatalf("%s %s: status = %d, want %d: %s", method, path, rec.Code, want, rec.Body.String())
 	}

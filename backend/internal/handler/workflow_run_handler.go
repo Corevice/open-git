@@ -41,6 +41,7 @@ type WorkflowRunHandler struct {
 	logRepo     IJobLogRepository
 	jobRepo     domainrepo.IWorkflowJobRepository
 	resolveRepo func(c echo.Context, owner, repo string) (*entity.Repository, error)
+	access *RepoAccess
 }
 
 func NewWorkflowRunHandler(
@@ -64,6 +65,8 @@ func NewWorkflowRunHandler(
 		resolveRepo: resolveRepo,
 	}
 }
+
+func (h *WorkflowRunHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func (h *WorkflowRunHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	readScope := middleware.RequireScope("read")
@@ -186,6 +189,9 @@ func (h *WorkflowRunHandler) CancelRun(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
+		return err
+	}
 
 	actorID, err := middleware.GetUserUUID(c)
 	if err != nil {
@@ -219,6 +225,9 @@ func (h *WorkflowRunHandler) CancelRun(c echo.Context) error {
 func (h *WorkflowRunHandler) RerunRun(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureWrite(c, repo); err != nil {
 		return err
 	}
 

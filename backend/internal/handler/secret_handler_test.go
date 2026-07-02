@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/open-git/backend/internal/apperror"
+	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	"github.com/open-git/backend/internal/handler"
 	"github.com/open-git/backend/internal/middleware"
@@ -130,6 +131,22 @@ func secretHandlerTestRepo() *entity.Repository {
 	}
 }
 
+// secretTestAccess, when set, is wired into the handler so a test can exercise
+// authorization; nil leaves it permissive for happy-path tests.
+var secretTestAccess *handler.RepoAccess
+
+type denySecretMembership struct{}
+
+func (denySecretMembership) GetRole(context.Context, uuid.UUID, uuid.UUID) (string, error) {
+	return "", domain.ErrNotFound
+}
+
+type denySecretCollab struct{}
+
+func (denySecretCollab) GetPermission(context.Context, uuid.UUID, uuid.UUID) (string, error) {
+	return "", nil
+}
+
 func newSecretHandlerEcho(
 	t *testing.T,
 	listUC *mockListRepoSecretsUC,
@@ -178,6 +195,7 @@ func newSecretHandlerEcho(
 			return secretHandlerOrgID, nil
 		},
 	)
+	h.SetAccess(secretTestAccess)
 
 	e := echo.New()
 	g := e.Group("")
@@ -302,6 +320,8 @@ func TestSecretHandler_GetRepoPublicKey_ReturnsKeyIDAndKey(t *testing.T) {
 }
 
 func TestSecretHandler_CrossOrgRequest_Returns404(t *testing.T) {
+	secretTestAccess = handler.NewRepoAccess(denySecretMembership{}, denySecretCollab{})
+	t.Cleanup(func() { secretTestAccess = nil })
 	e := newSecretHandlerEcho(
 		t,
 		&mockListRepoSecretsUC{},

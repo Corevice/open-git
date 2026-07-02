@@ -437,6 +437,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	repoRepo := infrarepo.NewRepositoryRepository(sqlxDB)
 	collaboratorRepo := infrarepo.NewRepositoryCollaboratorRepository(sqlxDB)
 	membershipRepo := infrarepo.NewMembershipRepository(sqlxDB)
+	// Shared repository/organization authorization used by all handlers to
+	// enforce read/write/admin on the target (not just authentication).
+	repoAccess := handler.NewRepoAccess(membershipRepo, collaboratorRepo)
 	legacyMembershipRepo := &legacyMembershipRepoAdapter{inner: membershipRepo}
 	orgRepo := infraDB.NewOrganizationRepository(db)
 	auditLogRepo := infraDB.NewAuditLogRepository(db)
@@ -901,6 +904,19 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	orgAuditLogHandler.RegisterRoutes(v3, authMiddleware)
 	securityAdvisoryHandler.RegisterRoutes(v3, authMiddleware)
 	dependabotAlertHandler.RegisterRoutes(v3, authMiddleware)
+	// Wire authorization into every handler that must enforce it.
+	contentHandler.SetAccess(repoAccess)
+	branchHandler.SetAccess(repoAccess)
+	labelHandler.SetAccess(repoAccess)
+	milestoneHandler.SetAccess(repoAccess)
+	issueHandler.SetAccess(repoAccess)
+	webhookHandler.SetAccess(repoAccess)
+	secretHandler.SetAccess(repoAccess)
+	artifactHandler.SetAccess(repoAccess)
+	pullRequestHandler.SetAccess(repoAccess)
+	mcpVerificationHandler.SetAccess(repoAccess)
+	securityAdvisoryHandler.SetAccess(repoAccess)
+
 	repositoryHandler.RegisterRoutes(v3, authMiddleware)
 	branchHandler.RegisterRoutes(v3, authMiddleware)
 	collaboratorHandler.RegisterRoutes(v3, authMiddleware)
@@ -1011,6 +1027,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		jobLogPublisher = queue.NewJobLogPublisher(cfg.RedisAddr)
 	}
 	actionsLogHandler := handler.NewActionsLogHandler(jobLogRepo, workflowJobRepo, jobLogSub, repoRepo)
+	actionsLogHandler.SetAccess(repoAccess)
 	actionsLogHandler.RegisterRoutes(v1, authMiddleware)
 
 	apiActions := e.Group("/api")
@@ -1070,6 +1087,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		nil,
 		nil,
 	)
+	workflowRunHandler.SetAccess(repoAccess)
 	workflowRunHandler.RegisterRoutes(v3, authMiddleware)
 
 	// Manual workflow dispatch.

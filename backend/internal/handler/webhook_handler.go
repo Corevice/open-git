@@ -26,6 +26,7 @@ type WebhookHandler struct {
 	redeliverUC      *webhookusecase.RedeliverWebhookUsecase
 	pingWebhookUC    *webhookusecase.PingWebhookUsecase
 	resolveRepo      func(c echo.Context, owner, repo string) (*entity.Repository, error)
+	access           *RepoAccess
 }
 
 func NewWebhookHandler(
@@ -71,6 +72,9 @@ func NewWebhookHandlerWithDeliveries(
 		resolveRepo:      resolveRepo,
 	}
 }
+
+// SetAccess wires repository authorization (webhook management requires admin).
+func (h *WebhookHandler) SetAccess(a *RepoAccess) { h.access = a }
 
 func (h *WebhookHandler) RegisterRoutes(g *echo.Group, auth echo.MiddlewareFunc) {
 	writeScope := middleware.RequireScope("write")
@@ -154,6 +158,9 @@ func (h *WebhookHandler) ListHooks(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
+		return err
+	}
 
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	perPage, _ := strconv.Atoi(c.QueryParam("per_page"))
@@ -179,6 +186,9 @@ func (h *WebhookHandler) ListHooks(c echo.Context) error {
 func (h *WebhookHandler) CreateHook(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
 		return err
 	}
 
@@ -219,6 +229,9 @@ func (h *WebhookHandler) GetHook(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
+		return err
+	}
 
 	hookID, err := uuid.Parse(c.Param("hook_id"))
 	if err != nil {
@@ -239,6 +252,9 @@ func (h *WebhookHandler) GetHook(c echo.Context) error {
 func (h *WebhookHandler) UpdateHook(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
 		return err
 	}
 
@@ -295,6 +311,9 @@ func (h *WebhookHandler) DeleteHook(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
+		return err
+	}
 
 	hookID, err := uuid.Parse(c.Param("hook_id"))
 	if err != nil {
@@ -322,6 +341,9 @@ func (h *WebhookHandler) DeleteHook(c echo.Context) error {
 func (h *WebhookHandler) ListDeliveries(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
 		return err
 	}
 
@@ -370,6 +392,9 @@ func (h *WebhookHandler) GetDelivery(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
+		return err
+	}
 
 	hookID, err := uuid.Parse(c.Param("hook_id"))
 	if err != nil {
@@ -402,6 +427,9 @@ func (h *WebhookHandler) RedeliverDelivery(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
+		return err
+	}
 
 	hookID, err := uuid.Parse(c.Param("hook_id"))
 	if err != nil {
@@ -432,6 +460,9 @@ func (h *WebhookHandler) RedeliverDelivery(c echo.Context) error {
 func (h *WebhookHandler) PingHook(c echo.Context) error {
 	repo, err := h.resolveRepo(c, c.Param("owner"), c.Param("repo"))
 	if err != nil {
+		return err
+	}
+	if err := h.access.EnsureAdmin(c, repo); err != nil {
 		return err
 	}
 
