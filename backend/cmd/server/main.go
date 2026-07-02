@@ -455,7 +455,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	repoGitResolver := &gitResolver{repos: repoRepo, gitRoot: cfg.GitDataRoot}
 	membershipAdapter := &gitMembershipAdapter{memberships: membershipRepo}
 
-	registerUC := authUC.NewRegisterUserUsecase(userRepo)
+	registerUC := authUC.NewRegisterUserUsecase(userRepo, &personalOrgCreator{orgs: infrarepo.NewOrganizationRepository(sqlxDB)})
 	loginUC := authUC.NewLoginUsecase(userRepo, cfg.JWTSecret)
 	authHandler := handler.NewAuthHandler(registerUC, loginUC)
 
@@ -1316,6 +1316,37 @@ func loginForUserID(ctx context.Context, users repo.IUserRepository, userID int6
 		return u.Login
 	}
 	return ""
+}
+
+// personalOrgStore is the slice of the entity organization repository the
+// personal-org creator needs.
+type personalOrgStore interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*entity.Organization, error)
+	Create(ctx context.Context, org *entity.Organization) error
+}
+
+// personalOrgCreator provisions a user's personal organization (id == user id)
+// so org-scoped foreign keys resolve for personal repositories. Idempotent:
+// an existing row (e.g. from the backfill migration) is treated as success.
+type personalOrgCreator struct {
+	orgs personalOrgStore
+}
+
+func (p *personalOrgCreator) EnsurePersonalOrg(ctx context.Context, userID int64, login string) error {
+	orgID := middleware.Int64ToUUID(userID)
+	if existing, err := p.orgs.GetByID(ctx, orgID); err == nil && existing != nil {
+		return nil
+	}
+	err := p.orgs.Create(ctx, &entity.Organization{
+		ID:       orgID,
+		Login:    login,
+		Name:     login,
+		PlanTier: entity.PlanFree,
+	})
+	if errors.Is(err, domain.ErrConflict) {
+		return nil
+	}
+	return err
 }
 
 func newHTTPErrorHandler() echo.HTTPErrorHandler {

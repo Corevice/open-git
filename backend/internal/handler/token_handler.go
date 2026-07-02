@@ -160,7 +160,10 @@ func (h *TokenHandler) recordAudit(ctx context.Context, actorID uuid.UUID, token
 	}
 
 	entry := entity.AuditLog{
-		OrganizationID: uuid.Nil,
+		// Token actions are user-scoped; attribute them to the actor's personal
+		// organization (org id == user id) so the audit_logs.organization_id
+		// foreign key resolves.
+		OrganizationID: actorID,
 		ActorID:        actorID,
 		Action:         action,
 		TargetType:     "token",

@@ -53,7 +53,7 @@ func TestRegisterDuplicateLogin(t *testing.T) {
 			"existing": {Login: "existing"},
 		},
 	}
-	uc := auth.NewRegisterUserUsecase(repo)
+	uc := auth.NewRegisterUserUsecase(repo, nil)
 
 	_, err := uc.Execute(context.Background(), auth.RegisterUserInput{
 		Login:    "existing",
@@ -67,7 +67,7 @@ func TestRegisterDuplicateLogin(t *testing.T) {
 
 func TestRegisterHashesPassword(t *testing.T) {
 	repo := &mockUserRepo{byLogin: map[string]*domain.User{}}
-	uc := auth.NewRegisterUserUsecase(repo)
+	uc := auth.NewRegisterUserUsecase(repo, nil)
 
 	password := "password123"
 	_, err := uc.Execute(context.Background(), auth.RegisterUserInput{

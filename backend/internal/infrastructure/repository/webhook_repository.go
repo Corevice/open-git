@@ -67,7 +67,7 @@ func (r *sqlxWebhookRepository) Create(ctx context.Context, webhook *entity.Webh
 		"content_type":     webhook.ContentType,
 		"secret_encrypted": secretEncrypted,
 		"events":           events,
-		"active":           webhook.Active,
+		"active":           boolToInt(webhook.Active),
 		"created_at":       webhook.CreatedAt,
 		"updated_at":       webhook.UpdatedAt,
 	})
@@ -210,7 +210,7 @@ func (r *sqlxWebhookRepository) Update(ctx context.Context, webhook *entity.Webh
 		"content_type":     webhook.ContentType,
 		"secret_encrypted": secretEncrypted,
 		"events":           events,
-		"active":           webhook.Active,
+		"active":           boolToInt(webhook.Active),
 		"updated_at":       webhook.UpdatedAt,
 	})
 	if err != nil {
@@ -249,42 +249,20 @@ func (r *sqlxWebhookRepository) Delete(ctx context.Context, id uuid.UUID, orgID 
 }
 
 func (r *sqlxWebhookRepository) ListActiveByRepoAndEvent(ctx context.Context, orgID, repoID uuid.UUID, event string) ([]*entity.Webhook, error) {
-	var (
-		query string
-		args  []any
-	)
-
-	if r.DriverName() == "postgres" {
-		query = `
-			SELECT ` + webhookSelectColumns + `
-			FROM webhooks
-			WHERE active = true
-				AND organization_id = $1
-				AND repository_id = $2
-				AND (events @> $3::jsonb OR events @> $4::jsonb)
-			ORDER BY created_at ASC
-		`
-		wildcard, err := json.Marshal([]string{"*"})
-		if err != nil {
-			return nil, err
-		}
-		specific, err := json.Marshal([]string{event})
-		if err != nil {
-			return nil, err
-		}
-		args = []any{orgID, repoID, string(wildcard), string(specific)}
-	} else {
-		query = `
-			SELECT ` + webhookSelectColumns + `
-			FROM webhooks
-			WHERE active = 1
-				AND organization_id = ?
-				AND repository_id = ?
-				AND (events LIKE ? OR events LIKE ?)
-			ORDER BY created_at ASC
-		`
-		args = []any{orgID, repoID, `%"*"%`, fmt.Sprintf(`%%"%s"%%`, event)}
-	}
+	// events is a TEXT column holding a JSON array on both SQLite and Postgres,
+	// and active is an INTEGER (0/1), so match with portable LIKE + `active = 1`
+	// rather than Postgres jsonb operators (which don't apply to a TEXT column)
+	// or a boolean literal (which the integer column rejects).
+	query := `
+		SELECT ` + webhookSelectColumns + `
+		FROM webhooks
+		WHERE active = 1
+			AND organization_id = ?
+			AND repository_id = ?
+			AND (events LIKE ? OR events LIKE ?)
+		ORDER BY created_at ASC
+	`
+	args := []any{orgID, repoID, `%"*"%`, fmt.Sprintf(`%%"%s"%%`, event)}
 
 	query = r.DB.Rebind(query)
 	rows, err := r.DB.QueryxContext(ctx, query, args...)
@@ -305,11 +283,12 @@ func (r *sqlxWebhookRepository) encryptSecret(plaintext []byte) ([]byte, error) 
 
 func (r *sqlxWebhookRepository) scanWebhook(row *sqlx.Row) (*entity.Webhook, error) {
 	var (
-		webhook           entity.Webhook
-		repositoryID      sql.NullString
-		secretEncrypted   []byte
-		eventsRaw         any
-		updatedAt         nullTime
+		webhook         entity.Webhook
+		repositoryID    sql.NullString
+		secretEncrypted []byte
+		eventsRaw       any
+		activeInt       int
+		updatedAt       nullTime
 	)
 
 	err := row.Scan(
@@ -320,13 +299,14 @@ func (r *sqlxWebhookRepository) scanWebhook(row *sqlx.Row) (*entity.Webhook, err
 		&webhook.ContentType,
 		&secretEncrypted,
 		&eventsRaw,
-		&webhook.Active,
+		&activeInt,
 		&webhook.CreatedAt,
 		&updatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+	webhook.Active = activeInt != 0
 
 	if repositoryID.Valid {
 		parsed, err := uuid.Parse(repositoryID.String)
@@ -359,6 +339,7 @@ func (r *sqlxWebhookRepository) scanWebhookRows(rows *sqlx.Rows) ([]*entity.Webh
 			repositoryID    sql.NullString
 			secretEncrypted []byte
 			eventsRaw       any
+			activeInt       int
 			updatedAt       nullTime
 		)
 
@@ -370,12 +351,13 @@ func (r *sqlxWebhookRepository) scanWebhookRows(rows *sqlx.Rows) ([]*entity.Webh
 			&webhook.ContentType,
 			&secretEncrypted,
 			&eventsRaw,
-			&webhook.Active,
+			&activeInt,
 			&webhook.CreatedAt,
 			&updatedAt,
 		); err != nil {
 			return nil, dbErrors.MapDBError(err)
 		}
+		webhook.Active = activeInt != 0
 
 		if repositoryID.Valid {
 			parsed, err := uuid.Parse(repositoryID.String)
