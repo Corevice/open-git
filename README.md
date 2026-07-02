@@ -9,10 +9,10 @@ The backend is a Go (Echo) API; the frontend is a Next.js 15 (App Router,
 TypeScript, Tailwind) web app.
 
 > **Status:** functional and self-hostable. Core Git hosting, issues/PRs, orgs,
-> webhooks, secrets, OAuth apps and CI have been exercised end-to-end. Before
-> exposing an instance to untrusted users, read [Security](#security) — in
-> particular, CI jobs currently run directly on the server host without
-> sandboxing.
+> webhooks, secrets, OAuth apps and CI have been exercised end-to-end on both
+> SQLite and PostgreSQL. Before exposing an instance to untrusted users, read
+> [Security](#security) — in particular, set `CI_SANDBOX_MODE=docker` so CI jobs
+> run in isolated containers rather than directly on the host.
 
 ## Features
 
@@ -107,20 +107,22 @@ git push -u origin main
 
 Configuration is via environment variables. The most important ones:
 
-| Variable                        | Default          | Notes                                                        |
-| ------------------------------- | ---------------- | ------------------------------------------------------------ |
-| `DB_TYPE`                       | `sqlite`         | `sqlite` or `postgres`                                       |
-| `DB_DSN`                        | —                | required for `postgres`; file path for `sqlite`              |
-| `DB_AUTO_MIGRATE`               | `false`          | run migrations on startup                                    |
-| `JWT_SECRET`                    | —                | **required**; signs session tokens                           |
-| `WEBHOOK_SECRET_KEY`            | —                | hex key used to encrypt secrets at rest                      |
-| `GIT_DATA_ROOT`                 | `./data/git`     | where bare repositories live                                 |
-| `PORT`                          | `8080`           | HTTP/API port                                                |
-| `SSH_ENABLED` / `SSH_PORT`      | `false` / `2222` | Git over SSH                                                 |
-| `TLS_MODE`                      | `acme`           | `acme`, `custom`, or `selfsigned` (use `selfsigned` locally) |
-| `REDIS_ADDR`                    | —                | optional; enables Redis-backed queue/cache                   |
-| `MINIO_ENDPOINT`                | —                | optional; S3/MinIO for CI artifacts                          |
-| `WEB_BASE_URL` / `API_BASE_URL` | localhost        | public URLs                                                  |
+| Variable                        | Default          | Notes                                                                      |
+| ------------------------------- | ---------------- | -------------------------------------------------------------------------- |
+| `DB_TYPE`                       | `sqlite`         | `sqlite` or `postgres`                                                     |
+| `DB_DSN`                        | —                | required for `postgres`; file path for `sqlite`                            |
+| `DB_AUTO_MIGRATE`               | `false`          | run migrations on startup                                                  |
+| `JWT_SECRET`                    | —                | **required**; signs session tokens                                         |
+| `WEBHOOK_SECRET_KEY`            | —                | hex key used to encrypt secrets at rest                                    |
+| `GIT_DATA_ROOT`                 | `./data/git`     | where bare repositories live                                               |
+| `PORT`                          | `8080`           | HTTP/API port                                                              |
+| `SSH_ENABLED` / `SSH_PORT`      | `false` / `2222` | Git over SSH                                                               |
+| `TLS_MODE`                      | `acme`           | `acme`, `custom`, or `selfsigned` (use `selfsigned` locally)               |
+| `CI_SANDBOX_MODE`               | `none`           | `none` (CI on host, trusted only) or `docker` (isolated container per job) |
+| `CI_SANDBOX_IMAGE`              | `alpine:3`       | container image used in `docker` sandbox mode                              |
+| `REDIS_ADDR`                    | —                | optional; enables Redis-backed queue/cache                                 |
+| `MINIO_ENDPOINT`                | —                | optional; S3/MinIO for CI artifacts                                        |
+| `WEB_BASE_URL` / `API_BASE_URL` | localhost        | public URLs                                                                |
 
 On the frontend, `NEXT_PUBLIC_API_BASE_URL` must point at the API (it is a
 build-time value for the standalone image).
@@ -153,13 +155,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
 This project is suitable for **self-hosting for yourself or a trusted team**.
 Before exposing an instance to untrusted users, be aware of the following:
 
-- **CI jobs are not sandboxed.** Workflow steps under `.github/workflows` run as
-  `sh -c` in the API server's own process/host. Anyone who can push a workflow to
-  a repository the instance builds can therefore run arbitrary commands on the
-  server. For single-user or trusted-team instances this is equivalent to running
-  your own scripts; for multi-tenant or public instances you must isolate
-  execution (containers, a dedicated unprivileged user/VM, or dedicated runners)
-  before enabling CI. See `backend/internal/worker/ci_worker.go`.
+- **Isolate CI on untrusted instances.** With `CI_SANDBOX_MODE=none` (default),
+  workflow steps run on the host (with a clean environment and a temporary
+  working directory, but no container isolation) — fine for single-user or
+  trusted-team instances. For multi-tenant or public instances set
+  `CI_SANDBOX_MODE=docker`, which runs each job in a disposable, network-isolated
+  container. See [SECURITY.md](SECURITY.md).
 - **Set a strong `JWT_SECRET` and `WEBHOOK_SECRET_KEY`.** Secrets and webhook
   signing secrets are encrypted at rest with the latter.
 - **Use TLS in production** (`TLS_MODE=acme` or `custom`); `selfsigned` is for

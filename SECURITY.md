@@ -14,24 +14,35 @@ open-git is designed to be self-hosted. Its default posture assumes a
 **single user or a trusted team**. Read the following before exposing an
 instance to untrusted or public users.
 
-### CI / Actions execution is not sandboxed
+### CI / Actions execution isolation
 
-Workflow steps defined under `.github/workflows` are executed with `sh -c` in the
-API server's own process and host (`backend/internal/worker/ci_worker.go`). There
-is no container, VM, or user isolation between a workflow and the server.
+How workflow steps under `.github/workflows` are executed is controlled by
+`CI_SANDBOX_MODE`:
 
-Implications:
-
-- Anyone able to push a workflow to a repository that the instance builds can run
-  arbitrary commands on the server, with the server process's privileges and
-  access (including the filesystem and any credentials it can read).
-- This is acceptable for instances where all users who can push are trusted (for
-  example a personal instance, or an internal team instance behind
+- `none` (default) — steps run with `sh -c` directly on the API server's host.
+  They run with a **clean environment** (the server's own environment, including
+  `JWT_SECRET` and database credentials, is never inherited — only the workflow's
+  declared secrets are injected) and with their working directory confined to a
+  fresh temporary directory that is deleted after the run. There is, however, no
+  container/VM/user isolation: a workflow can still run arbitrary commands as the
+  server's OS user. **This mode is only appropriate when everyone who can push a
+  workflow is trusted** (a personal instance, or an internal team behind
   authentication).
-- **Do not enable CI on a multi-tenant or public instance** without first
-  isolating execution — for example by running jobs in ephemeral containers, as a
-  dedicated unprivileged user, in a disposable VM, or exclusively on separate
-  self-hosted runners that you control and isolate.
+- `docker` — each job runs inside a fresh, disposable container
+  (`CI_SANDBOX_IMAGE`, default `alpine:3`) with the working directory
+  bind-mounted, **no network** (`--network none`), CPU/memory/pid limits, and
+  only the declared secrets injected. The host filesystem and the server process
+  are not reachable from the job. **Use this mode for multi-tenant or public
+  instances.** It requires the server to have access to a Docker daemon.
+
+Verified isolation in `docker` mode: workflow steps see the sandbox image's OS
+(not the host), cannot read the server's data directory, cannot reach the
+network, and do not receive the server's environment.
+
+Regardless of mode, do not run untrusted workflows on an instance whose Docker
+daemon or host you cannot afford to have abused; when in doubt, use `docker`
+mode (or dedicated, isolated self-hosted runners) and keep the daemon locked
+down.
 
 ### Secrets
 
