@@ -855,6 +855,7 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	)
 	sshKeyHandler := handler.NewSSHKeyHandler(sshKeyRepo)
 	collaboratorHandler := handler.NewCollaboratorHandler(repoGitResolver, repoRepo, collaboratorRepo, entityUserRepo)
+	collaboratorHandler.SetAccess(repoAccess)
 
 	api := e.Group("")
 	e.POST("/register", authHandler.Register, middleware.AuthRateLimitMiddleware(10, 15*time.Minute))
