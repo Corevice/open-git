@@ -153,6 +153,13 @@ func (h *SSHServer) handleSession(s gossh.Session) {
 		s.Exit(1)
 		return
 	}
+	// Defense in depth: never let a name traverse out of the git root, even if a
+	// future resolver returned an empty disk path for a crafted name.
+	if !isSafeRepoSegment(parsed.ownerLogin) || !isSafeRepoSegment(parsed.repoName) {
+		_, _ = fmt.Fprintf(s.Stderr(), "ERR invalid repository path\n")
+		s.Exit(1)
+		return
+	}
 	if diskPath == "" {
 		diskPath = filepath.Join(h.gitRoot, parsed.ownerLogin, parsed.repoName+".git")
 	}
@@ -223,4 +230,13 @@ func (h *SSHServer) handleSession(s gossh.Session) {
 		}
 	}
 	s.Exit(0)
+}
+
+// isSafeRepoSegment rejects owner/repo path segments that could traverse out of
+// the git root ("..", empty, or containing a path separator).
+func isSafeRepoSegment(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	return !strings.Contains(s, "/") && !strings.Contains(s, `\`) && !strings.Contains(s, "..")
 }

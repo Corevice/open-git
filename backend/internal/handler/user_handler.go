@@ -81,7 +81,9 @@ func (h *UserHandler) GetUserByLogin(c echo.Context) error {
 		return RespondGitHubError(c, http.StatusInternalServerError, "Internal Server Error", nil)
 	}
 
-	includeEmail := middleware.UserIDFromContext(c) != 0
+	// Only expose the email to the user themselves, not to every authenticated
+	// caller.
+	includeEmail := middleware.UserIDFromContext(c) == user.ID
 	return RespondGitHubOK(c, toUserResponse(user, includeEmail, c.Request().Host))
 }
 

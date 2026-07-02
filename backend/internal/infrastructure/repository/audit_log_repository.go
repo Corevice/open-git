@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -258,10 +259,12 @@ func (r *sqlxAuditLogRepository) Search(ctx context.Context, input domainrepo.Au
 	}
 
 	if input.Phrase != "" {
-		phraseClause := ` AND (action LIKE :phrase OR actor_login LIKE :phrase OR target_type LIKE :phrase OR target_id LIKE :phrase OR metadata LIKE :phrase)`
+		phraseClause := ` AND (action LIKE :phrase ESCAPE '\' OR actor_login LIKE :phrase ESCAPE '\' OR target_type LIKE :phrase ESCAPE '\' OR target_id LIKE :phrase ESCAPE '\' OR metadata LIKE :phrase ESCAPE '\')`
 		baseQuery += phraseClause
 		countQuery += phraseClause
-		phrase := "%" + input.Phrase + "%"
+		// Escape LIKE wildcards in user input so a phrase such as "%" or "_"
+		// matches literally instead of everything.
+		phrase := "%" + escapeLikePattern(input.Phrase) + "%"
 		args["phrase"] = phrase
 		countArgs["phrase"] = phrase
 	}
@@ -410,4 +413,11 @@ func (r *sqlxAuditLogRepository) ListByOrg(ctx context.Context, opts domainrepo.
 	}
 
 	return logs, total, nil
+}
+
+// escapeLikePattern escapes the SQL LIKE metacharacters (\, %, _) so a
+// user-supplied phrase is matched literally. Paired with `ESCAPE '\'`.
+func escapeLikePattern(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(s)
 }
