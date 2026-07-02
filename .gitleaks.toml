@@ -6,11 +6,14 @@ useDefault = true
 [allowlist]
 description = "Allow fake/sample secrets used only in test fixtures"
 # base64("test-publicKey") — a placeholder MCP verification key in unit tests,
-# not a real credential.
+# and the fixed fake JWT signing key used by the router integration test.
+# Neither is a real credential.
 regexes = [
   '''dGVzdC1wdWJsaWNLZXk=''',
+  '''integration-test-secret-key-1234567890''',
 ]
-# Scope: the MCP secret handler test that defines the placeholder above.
+# Scope: test files that define the placeholders above.
 paths = [
   '''backend/internal/handler/secret_handler_test\.go''',
+  '''backend/cmd/server/integration_test\.go''',
 ]

@@ -1,9 +1,12 @@
 name: Release
 
+# Image publishing runs on version tags (and can be triggered manually), not on
+# every push to main — building/pushing/scanning container images per commit is
+# unnecessary and made ordinary commits show a red pipeline.
 on:
   push:
-    branches: [main]
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,6 +33,9 @@ jobs:
       - name: Extract metadata
         id: meta
         run: |
+          # ghcr requires the repository path to be lowercase; the owner may
+          # be mixed-case (e.g. "Corevice").
+          echo "image_base=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             echo "image_tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
             echo "is_tag=true" >> "$GITHUB_OUTPUT"
@@ -45,15 +51,15 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}/web:sha-${{ github.sha }}
-            ${{ steps.meta.outputs.is_tag == 'true' && format('ghcr.io/{0}/web:{1}', github.repository, github.ref_name) || '' }}
+            ${{ steps.meta.outputs.image_base }}/web:sha-${{ github.sha }}
+            ${{ steps.meta.outputs.is_tag == 'true' && format('{0}/web:{1}', steps.meta.outputs.image_base, github.ref_name) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Scan frontend image for vulnerabilities
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ghcr.io/open-git/web:sha-${{ github.sha }}
+          image-ref: ${{ steps.meta.outputs.image_base }}/web:sha-${{ github.sha }}
           format: sarif
           output: trivy-frontend.sarif
           severity: HIGH,CRITICAL
@@ -78,15 +84,15 @@ jobs:
           file: ./backend/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}/api:sha-${{ github.sha }}
-            ${{ steps.meta.outputs.is_tag == 'true' && format('ghcr.io/{0}/api:{1}', github.repository, github.ref_name) || '' }}
+            ${{ steps.meta.outputs.image_base }}/api:sha-${{ github.sha }}
+            ${{ steps.meta.outputs.is_tag == 'true' && format('{0}/api:{1}', steps.meta.outputs.image_base, github.ref_name) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Scan backend image for vulnerabilities
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ghcr.io/open-git/api:sha-${{ github.sha }}
+          image-ref: ${{ steps.meta.outputs.image_base }}/api:sha-${{ github.sha }}
           format: sarif
           output: trivy-backend.sarif
           severity: HIGH,CRITICAL
