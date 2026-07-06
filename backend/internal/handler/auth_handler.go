@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -33,6 +34,16 @@ type loginResponse struct {
 	Token string `json:"token"`
 }
 
+// registerResponse is the safe, public view of a newly created user. It
+// deliberately omits PasswordHash (and any other internal fields) so the
+// bcrypt hash is never serialized to clients.
+type registerResponse struct {
+	ID        int64     `json:"id"`
+	Login     string    `json:"login"`
+	Email     string    `json:"email"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 func (h *AuthHandler) Register(c echo.Context) error {
 	var req registerRequest
 	if err := c.Bind(&req); err != nil {
@@ -51,7 +62,12 @@ func (h *AuthHandler) Register(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, map[string]string{"message": err.Error()})
 	}
 
-	return c.JSON(http.StatusCreated, user)
+	return c.JSON(http.StatusCreated, registerResponse{
+		ID:        user.ID,
+		Login:     user.Login,
+		Email:     user.Email,
+		CreatedAt: user.CreatedAt,
+	})
 }
 
 func (h *AuthHandler) Login(c echo.Context) error {
