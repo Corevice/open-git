@@ -1,19 +1,21 @@
 package git
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-billy/v5/osfs"
+	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/format/diff"
@@ -47,8 +49,8 @@ const (
 )
 
 var (
-	ErrPathNotFound      = errors.New("path not found")
-	ErrRefAlreadyExists  = errors.New("reference already exists")
+	ErrPathNotFound     = errors.New("path not found")
+	ErrRefAlreadyExists = errors.New("reference already exists")
 )
 
 // BranchSummary describes a branch or tag reference.
@@ -133,6 +135,62 @@ func ServeUploadPack(w http.ResponseWriter, r *http.Request, repoPath string) er
 	return resp.Encode(w)
 }
 
+// gitPackSubcommand maps a smart-HTTP service name to the git subcommand that
+// implements it.
+func gitPackSubcommand(service string) (string, bool) {
+	switch service {
+	case transport.UploadPackServiceName:
+		return "upload-pack", true
+	case transport.ReceivePackServiceName:
+		return "receive-pack", true
+	}
+	return "", false
+}
+
+// AdvertiseRefsCLI writes the ref-advertisement body of a smart-HTTP info/refs
+// response using the git binary. The caller writes the "# service=..." pkt-line
+// header and flush that precede this output.
+//
+// We use the git binary (not go-git's pure-Go server) so the advertisement and
+// the subsequent pack exchange agree on capabilities; go-git's server side
+// cannot ingest the thin packs real git clients send on push.
+func AdvertiseRefsCLI(ctx context.Context, w io.Writer, repoPath, service string) error {
+	sub, ok := gitPackSubcommand(service)
+	if !ok {
+		return fmt.Errorf("unsupported service: %s", service)
+	}
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "git", sub, "--stateless-rpc", "--advertise-refs", repoPath)
+	cmd.Stdout = w
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git %s --advertise-refs: %w: %s", sub, err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+// ServePackCLI runs `git <upload-pack|receive-pack> --stateless-rpc` for the
+// POST half of the smart-HTTP protocol, streaming the request body to git and
+// git's response back to w. Unlike go-git's pure-Go server, the git binary
+// correctly resolves thin packs (ref-deltas whose base objects already live in
+// the repository), which fixes HTTP push of incremental commits that otherwise
+// failed with "reference delta not found".
+func ServePackCLI(ctx context.Context, w io.Writer, body io.Reader, repoPath, service string) error {
+	sub, ok := gitPackSubcommand(service)
+	if !ok {
+		return fmt.Errorf("unsupported service: %s", service)
+	}
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "git", sub, "--stateless-rpc", repoPath)
+	cmd.Stdin = body
+	cmd.Stdout = w
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git %s --stateless-rpc: %w: %s", sub, err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
 // ServeReceivePack proxies git-receive-pack for a bare repository.
 func ServeReceivePack(w http.ResponseWriter, r *http.Request, repoPath string) error {
 	svr, ep, err := repoServer(repoPath)
@@ -159,7 +217,6 @@ func ServeReceivePack(w http.ResponseWriter, r *http.Request, repoPath string) e
 	w.Header().Set("Content-Type", "application/x-git-receive-pack-result")
 	return report.Encode(w)
 }
-
 
 func openRepository(repoPath string) (*gogit.Repository, error) {
 	return gogit.PlainOpen(repoPath)
