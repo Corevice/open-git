@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -12,20 +13,18 @@ import (
 	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/format/pktline"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/plumbing/transport"
-	"github.com/go-git/go-git/v5/plumbing/transport/server"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/domain/entity"
+	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/middleware"
-	obs "github.com/open-git/backend/observability"
 	repo "github.com/open-git/backend/internal/repository"
+	obs "github.com/open-git/backend/observability"
 )
 
 // ResolvedGitRepository is metadata required to serve Git Smart HTTP for a repo.
@@ -168,38 +167,6 @@ func (h *GitHTTPHandler) InfoRefs(c echo.Context) error {
 }
 
 func advertiseRefs(w http.ResponseWriter, ctx context.Context, repoPath, service string) error {
-	abs, err := filepath.Abs(repoPath)
-	if err != nil {
-		return err
-	}
-	// Use the repository's absolute path against a root filesystem so the
-	// loader resolves it regardless of the process working directory.
-	loader := server.NewFilesystemLoader(osfs.New("/"))
-	svr := server.NewServer(loader)
-	ep, err := transport.NewEndpoint(abs)
-	if err != nil {
-		return fmt.Errorf("transport endpoint: %w", err)
-	}
-
-	var sess transport.Session
-	switch service {
-	case transport.UploadPackServiceName:
-		sess, err = svr.NewUploadPackSession(ep, nil)
-	case transport.ReceivePackServiceName:
-		sess, err = svr.NewReceivePackSession(ep, nil)
-	default:
-		return fmt.Errorf("unsupported service: %s", service)
-	}
-	if err != nil {
-		return err
-	}
-	defer func() { _ = sess.Close() }()
-
-	refs, err := sess.AdvertisedReferencesContext(ctx)
-	if err != nil {
-		return err
-	}
-
 	// Smart HTTP requires a service announcement header preceding the refs.
 	enc := pktline.NewEncoder(w)
 	if err := enc.EncodeString("# service=" + service + "\n"); err != nil {
@@ -208,7 +175,10 @@ func advertiseRefs(w http.ResponseWriter, ctx context.Context, repoPath, service
 	if err := enc.Flush(); err != nil {
 		return err
 	}
-	return refs.Encode(w)
+	// The advertisement body itself comes from the git binary; go-git's pure-Go
+	// server cannot ingest the thin packs real clients push, so all pack IO goes
+	// through git to keep advertisement and pack exchange consistent.
+	return infragit.AdvertiseRefsCLI(ctx, w, repoPath, service)
 }
 
 // UploadPack handles POST /:owner/:repo.git/git-upload-pack
@@ -225,7 +195,16 @@ func (h *GitHTTPHandler) UploadPack(c echo.Context) error {
 		result = "error"
 		return err
 	}
-	if err := infragit.ServeUploadPack(c.Response().Writer, c.Request(), repo.DiskPath); err != nil {
+
+	body, err := gitRequestBody(c.Request())
+	if err != nil {
+		result = "error"
+		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid request body"})
+	}
+	defer func() { _ = body.Close() }()
+
+	c.Response().Header().Set("Content-Type", "application/x-git-upload-pack-result")
+	if err := infragit.ServePackCLI(c.Request().Context(), c.Response().Writer, body, repo.DiskPath, transport.UploadPackServiceName); err != nil {
 		result = "error"
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": err.Error()})
 	}
@@ -254,7 +233,13 @@ func (h *GitHTTPHandler) ReceivePack(c echo.Context) error {
 		return err
 	}
 
-	body, err := io.ReadAll(c.Request().Body)
+	reader, err := gitRequestBody(c.Request())
+	if err != nil {
+		result = "error"
+		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid request body"})
+	}
+	body, err := io.ReadAll(reader)
+	_ = reader.Close()
 	if err != nil {
 		result = "error"
 		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{"message": "invalid request body"})
@@ -269,14 +254,28 @@ func (h *GitHTTPHandler) ReceivePack(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": err.Error()})
 	}
 
-	c.Request().Body = io.NopCloser(bytes.NewReader(body))
-	if err := infragit.ServeReceivePack(c.Response().Writer, c.Request(), repo.DiskPath); err != nil {
+	c.Response().Header().Set("Content-Type", "application/x-git-receive-pack-result")
+	if err := infragit.ServePackCLI(c.Request().Context(), c.Response().Writer, bytes.NewReader(body), repo.DiskPath, transport.ReceivePackServiceName); err != nil {
 		result = "error"
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{"message": err.Error()})
 	}
 
 	h.notifyPush(repo, body, userID)
 	return nil
+}
+
+// gitRequestBody returns the smart-HTTP request body, transparently
+// decompressing it when the client sent Content-Encoding: gzip (git may gzip
+// upload-pack negotiation requests).
+func gitRequestBody(r *http.Request) (io.ReadCloser, error) {
+	if strings.EqualFold(r.Header.Get("Content-Encoding"), "gzip") {
+		gz, err := gzip.NewReader(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		return gz, nil
+	}
+	return r.Body, nil
 }
 
 // notifyPush reports each branch updated by the receive-pack request to the
