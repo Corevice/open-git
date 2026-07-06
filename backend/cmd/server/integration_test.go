@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -68,10 +69,19 @@ func TestIntegration_CoreFlows(t *testing.T) {
 
 	srv := &intServer{t: t, e: e}
 
-	// Register + login.
-	srv.do("POST", "/register", "", map[string]any{
+	// Register + login. The registration response must never leak the stored
+	// password hash (regression guard: the handler previously serialized the
+	// raw domain.User, exposing PasswordHash).
+	regRec := srv.request("POST", "/register", "", map[string]any{
 		"login": "alice", "email": "alice@example.com", "password": "password12345",
-	}, http.StatusCreated)
+	})
+	if regRec.Code != http.StatusCreated {
+		t.Fatalf("register: status = %d, want %d: %s", regRec.Code, http.StatusCreated, regRec.Body.String())
+	}
+	if body := regRec.Body.String(); strings.Contains(body, "PasswordHash") ||
+		strings.Contains(body, "password_hash") || strings.Contains(strings.ToLower(body), "$2a$") {
+		t.Fatalf("register response leaked password hash: %s", body)
+	}
 
 	var login struct {
 		Token string `json:"token"`

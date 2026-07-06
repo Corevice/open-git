@@ -203,6 +203,7 @@ func newActionsLogHandlerEcho(
 	e := echo.New()
 	g := e.Group("/api")
 	h.RegisterRoutes(g, wfTestAuth)
+	h.RegisterJobRoutes(g, wfTestAuth)
 	return e
 }
 
@@ -325,6 +326,50 @@ func TestActionsLogTenantIsolation(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d for tenant mismatch, body = %s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+}
+
+// TestActionsLogStreamJobLogsForUI pins the SSE contract the web UI's
+// useJobLogStream hook depends on: the job-only path streams each log line as a
+// default ("message") event whose data is the raw text, then a terminal
+// "concluded" event. Regression guard for the endpoint that was previously
+// unwired (500 "log streaming not configured").
+func TestActionsLogStreamJobLogsForUI(t *testing.T) {
+	job := actionsLogTestJob()
+	jobRepo := &fakeWorkflowJobRepo{jobs: map[uuid.UUID]*entity.WorkflowJob{job.ID: job}}
+	logRepo := &fakeJobLogRepo{
+		lines: []*entity.JobLogLine{
+			{JobID: job.ID.String(), LineNumber: 1, StepIndex: 0, Stream: entity.LogStreamStdout, Text: "hello from CI", CreatedAt: time.Now().UTC()},
+			{JobID: job.ID.String(), LineNumber: 2, StepIndex: 0, Stream: entity.LogStreamStdout, Text: "second step", CreatedAt: time.Now().UTC()},
+		},
+	}
+	e := newActionsLogHandlerEcho(t, logRepo, jobRepo, &fakeRepoLookup{repo: actionsLogTestRepo()})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/repos/alice/demo/actions/jobs/"+actionsLogTestJobID.String()+"/logs", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("content-type = %q, want text/event-stream", ct)
+	}
+	body := rec.Body.String()
+	// Default message events carry the raw line text (no "event:" line before them).
+	if !strings.Contains(body, "data: hello from CI\n") {
+		t.Fatalf("missing first log line as message event, body = %q", body)
+	}
+	if !strings.Contains(body, "data: second step\n") {
+		t.Fatalf("missing second log line as message event, body = %q", body)
+	}
+	// Must not use a named "log" event for the default stream — the hook's
+	// onmessage would never fire for that.
+	if strings.Contains(body, "event: log") {
+		t.Fatalf("job-only stream must use default message events, body = %q", body)
+	}
+	if !strings.Contains(body, "event: concluded") {
+		t.Fatalf("expected terminal concluded event, body = %q", body)
 	}
 }
 

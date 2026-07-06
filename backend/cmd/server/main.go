@@ -22,7 +22,6 @@ import (
 
 	gossh "github.com/gliderlabs/ssh"
 	"github.com/google/uuid"
-	cryptossh "golang.org/x/crypto/ssh"
 	"github.com/hibiken/asynq"
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo/v4"
@@ -30,19 +29,19 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/redis/go-redis/v9"
+	cryptossh "golang.org/x/crypto/ssh"
 
+	"github.com/open-git/backend/graph"
 	"github.com/open-git/backend/internal/apperror"
 	"github.com/open-git/backend/internal/compat"
 	"github.com/open-git/backend/internal/config"
-	"github.com/open-git/backend/graph"
-	obs "github.com/open-git/backend/observability"
 	"github.com/open-git/backend/internal/domain"
 	"github.com/open-git/backend/internal/domain/entity"
 	domainrepo "github.com/open-git/backend/internal/domain/repository"
 	"github.com/open-git/backend/internal/handler"
+	"github.com/open-git/backend/internal/infrastructure/ci"
 	"github.com/open-git/backend/internal/infrastructure/crypto"
 	infraDB "github.com/open-git/backend/internal/infrastructure/database"
-	"github.com/open-git/backend/internal/infrastructure/ci"
 	infragit "github.com/open-git/backend/internal/infrastructure/git"
 	"github.com/open-git/backend/internal/infrastructure/kvstore"
 	"github.com/open-git/backend/internal/infrastructure/queue"
@@ -52,6 +51,7 @@ import (
 	"github.com/open-git/backend/internal/middleware"
 	repo "github.com/open-git/backend/internal/repository"
 	actionsusecase "github.com/open-git/backend/internal/usecase/actions"
+	artifactusecase "github.com/open-git/backend/internal/usecase/artifact"
 	authUC "github.com/open-git/backend/internal/usecase/auth"
 	compatusecase "github.com/open-git/backend/internal/usecase/compat"
 	docsuc "github.com/open-git/backend/internal/usecase/docs"
@@ -63,14 +63,14 @@ import (
 	orgUC "github.com/open-git/backend/internal/usecase/org"
 	prusecase "github.com/open-git/backend/internal/usecase/pr"
 	repoUC "github.com/open-git/backend/internal/usecase/repository"
+	secretusecase "github.com/open-git/backend/internal/usecase/secret"
 	securityUC "github.com/open-git/backend/internal/usecase/security"
 	userUC "github.com/open-git/backend/internal/usecase/user"
 	userpreferencesUC "github.com/open-git/backend/internal/usecase/user_preferences"
 	webhookusecase "github.com/open-git/backend/internal/usecase/webhook"
 	workflowusecase "github.com/open-git/backend/internal/usecase/workflow"
 	"github.com/open-git/backend/internal/worker"
-	artifactusecase "github.com/open-git/backend/internal/usecase/artifact"
-	secretusecase "github.com/open-git/backend/internal/usecase/secret"
+	obs "github.com/open-git/backend/observability"
 )
 
 var (
@@ -86,6 +86,18 @@ func validateRequiredEnv(vars []string) error {
 		}
 	}
 	return nil
+}
+
+// isStreamingPath reports whether a request path is a Server-Sent Events
+// endpoint that must not be wrapped by the timeout middleware (whose
+// ResponseWriter is not an http.Flusher). It covers the job log streams:
+// the GitHub-compatible job-only path (.../actions/jobs/{id}/logs) and the
+// run-scoped stream (.../logs/stream).
+func isStreamingPath(path string) bool {
+	if strings.HasSuffix(path, "/logs/stream") {
+		return true
+	}
+	return strings.Contains(path, "/actions/jobs/") && strings.HasSuffix(path, "/logs")
 }
 
 func main() {
@@ -140,7 +152,17 @@ func main() {
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderXRequestID},
 	}))
 	e.Use(echoMiddleware.RateLimiter(echoMiddleware.NewRateLimiterMemoryStore(20)))
-	e.Use(echoMiddleware.TimeoutWithConfig(echoMiddleware.TimeoutConfig{Timeout: 30 * time.Second}))
+	// The timeout middleware wraps the ResponseWriter in a type that does not
+	// implement http.Flusher, which breaks Server-Sent Events (job log
+	// streaming). Skip it for streaming endpoints so those responses can flush
+	// incrementally; a 30s hard timeout on a long-lived log stream is also
+	// simply wrong.
+	e.Use(echoMiddleware.TimeoutWithConfig(echoMiddleware.TimeoutConfig{
+		Timeout: 30 * time.Second,
+		Skipper: func(c echo.Context) bool {
+			return isStreamingPath(c.Request().URL.Path)
+		},
+	}))
 	e.Use(requestContextMiddleware())
 	if cfg.MetricsEnabled {
 		e.Use(obs.EchoPrometheusMiddleware)
@@ -1030,6 +1052,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 	actionsLogHandler := handler.NewActionsLogHandler(jobLogRepo, workflowJobRepo, jobLogSub, repoRepo)
 	actionsLogHandler.SetAccess(repoAccess)
 	actionsLogHandler.RegisterRoutes(v1, authMiddleware)
+	// GitHub-compatible, job-only log stream consumed by the web UI
+	// (GET /api/v3/repos/:owner/:repo/actions/jobs/:job_id/logs as SSE).
+	actionsLogHandler.RegisterJobRoutes(v3, authMiddleware)
 
 	apiActions := e.Group("/api")
 	actionsLogHandler.RegisterRoutes(apiActions, authMiddleware)
@@ -1085,8 +1110,6 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		workflowusecase.NewRerunRunUsecase(wfRepo),
 		workflowusecase.NewListJobsUsecase(infrarepo.NewWorkflowJobListingAdapter(workflowJobRepo)),
 		resolveRepo,
-		nil,
-		nil,
 	)
 	workflowRunHandler.SetAccess(repoAccess)
 	workflowRunHandler.RegisterRoutes(v3, authMiddleware)
@@ -1108,7 +1131,9 @@ func registerHandlers(e *echo.Echo, cfg config.Config, db *sql.DB) (*sshinfra.SS
 		func(ctx context.Context, diskPath, ref string) (string, error) {
 			return gitSvc.ResolveRef(ctx, diskPath, ref)
 		},
-		func(c echo.Context) string { return loginForUserID(c.Request().Context(), userRepo, middleware.UserIDFromContext(c)) },
+		func(c echo.Context) string {
+			return loginForUserID(c.Request().Context(), userRepo, middleware.UserIDFromContext(c))
+		},
 		func(ctx context.Context, repo *entity.Repository, workflowFile, branch, sha, actor string) (*entity.WorkflowRun, error) {
 			return ciTrigger.DispatchWorkflow(ctx, repo.OrganizationID, repo.ID, repo.GitPath, workflowFile, branch, sha, actor)
 		},
