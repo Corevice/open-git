@@ -80,6 +80,7 @@ type IRJob struct {
 
 type IRStep struct {
 	ID         string
+	Name       string
 	Uses       string
 	UsesRef    *UsesRef
 	Run        string
@@ -311,6 +312,7 @@ func ParseWorkflowFull(data []byte) (*WorkflowIR, []Diagnostic, error) {
 
 			irStep := IRStep{
 				ID:   step.ID,
+				Name: step.Name,
 				Uses: step.Uses,
 				Run:  step.Run,
 				Env:  step.Env,

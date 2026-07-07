@@ -15,6 +15,7 @@ const (
 
 	WorkflowJobConclusionSuccess       = "success"
 	WorkflowJobConclusionFailure       = "failure"
+	WorkflowJobConclusionSkipped       = "skipped"
 	WorkflowJobConclusionCancelled     = "cancelled"
 	WorkflowJobConclusionQuotaExceeded = "quota_exceeded"
 )
