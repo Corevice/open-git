@@ -8,7 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/hibiken/asynq"
 	_ "github.com/mattn/go-sqlite3"
@@ -395,6 +397,58 @@ jobs:
 	}
 	if alphaIdx < 0 || zetaIdx < 0 || alphaIdx > zetaIdx {
 		t.Errorf("expected alpha (%d) to run before zeta (%d); scripts=%v", alphaIdx, zetaIdx, scripts)
+	}
+}
+
+// TestCIIndependentJobsRunConcurrently proves independent jobs execute in
+// parallel: each job's step blocks until it observes that the other job has
+// also started. If execution were sequential the first job would wait forever
+// (until its 2s barrier times out) and fail the run.
+func TestCIIndependentJobsRunConcurrently(t *testing.T) {
+	db := newCITestDB(t)
+	ctx := context.Background()
+	orgID, repoID, runID := "org-par", "repo-par", "run-par"
+	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`, orgID, "acme", "Acme", planTierPro)
+	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`, repoID, orgID, "widgets")
+	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`, runID, orgID, repoID, "ci.yml", ciStatusQueued)
+
+	var started int32
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, _ []string, _ string) ([]byte, error) {
+		if atomic.AddInt32(&started, 1) == 2 {
+			releaseOnce.Do(func() { close(release) })
+		}
+		select {
+		case <-release:
+			return []byte("ok\n"), nil
+		case <-time.After(2 * time.Second):
+			return nil, errors.New("timeout: job did not run concurrently with its sibling")
+		}
+	})
+
+	payload, _ := json.Marshal(CIRunPayload{
+		WorkflowRunID: runID, RepositoryID: repoID, OrganizationID: orgID,
+		WorkflowYAML: []byte(`name: CI
+on: push
+jobs:
+  a:
+    steps:
+      - run: echo A
+  b:
+    steps:
+      - run: echo B
+`),
+	})
+	if err := worker.HandleCIRun(ctx, asynq.NewTask(TypeCIRun, payload)); err != nil {
+		t.Fatalf("HandleCIRun: %v", err)
+	}
+	var conclusion sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT conclusion FROM workflow_runs WHERE id = ?`, runID).Scan(&conclusion); err != nil {
+		t.Fatalf("query conclusion: %v", err)
+	}
+	if got := strings.SplitN(conclusion.String, "\n", 2)[0]; got != ciConclusionSuccess {
+		t.Errorf("run conclusion = %q, want success — jobs did not run concurrently", got)
 	}
 }
 

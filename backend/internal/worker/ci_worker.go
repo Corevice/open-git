@@ -48,6 +48,10 @@ const (
 
 	ciStepTimeout = 10 * time.Minute
 
+	// maxParallelJobsPerRun bounds how many jobs within a single run execute
+	// steps concurrently. Independent jobs run in parallel up to this cap.
+	maxParallelJobsPerRun = 8
+
 	planTierFree = "free"
 	planTierPro  = "pro"
 
@@ -347,114 +351,186 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 		return nil
 	}
 
+	// Independent jobs run concurrently; a job starts only once every job in its
+	// `needs` has finished. Shared run state (the maps, the aggregate log
+	// buffer, the overall conclusion) is guarded by mu; the actual step
+	// execution happens outside the lock so jobs run in parallel. A bounded
+	// semaphore caps how many jobs execute at once.
+	var mu sync.Mutex
+	var fatalErr error
+	var fatalOnce sync.Once
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	setFatal := func(err error) {
+		fatalOnce.Do(func() {
+			fatalErr = err
+			cancelRun()
+		})
+	}
+
+	done := make(map[string]chan struct{}, len(order))
+	for _, name := range order {
+		done[name] = make(chan struct{})
+	}
+	sem := make(chan struct{}, maxParallelJobsPerRun)
+	var wg sync.WaitGroup
+
 	for _, jobName := range order {
-		job := ir.Jobs[jobName]
+		wg.Add(1)
+		go func(jobName string) {
+			defer wg.Done()
+			defer close(done[jobName])
+			job := ir.Jobs[jobName]
 
-		// A job whose dependencies did not all succeed is skipped, like GitHub
-		// Actions. The dependency's own failure already set the run conclusion,
-		// so a skip adds no new failure — but independent jobs still run.
-		if dep, unmet := firstUnsatisfiedNeed(job.Needs, jobResults); unmet {
-			if err := skipJob(jobName, fmt.Sprintf("dependency %q did not succeed", dep)); err != nil {
-				return err
-			}
-			continue
-		}
-
-		// A false job-level `if:` skips the whole job. Evaluate it against the
-		// github context and the workflow+job env.
-		if job.If != "" {
-			jobEnv := mergeStringMaps(ir.Env, job.Env)
-			ec := &workflow.EvalContext{Contexts: map[string]map[string]string{
-				"github": githubCtx, "runner": runnerCtx, "secrets": secretsCtx, "env": jobEnv, "matrix": {},
-			}}
-			run, ifErr := workflow.EvaluateCondition(job.If, ec)
-			if ifErr != nil {
-				if err := skipJob(jobName, "invalid job if: "+ifErr.Error()); err != nil {
-					return err
+			// Wait for every dependency to finish before starting.
+			for _, need := range job.Needs {
+				if ch, ok := done[need]; ok {
+					select {
+					case <-ch:
+					case <-runCtx.Done():
+						return
+					}
 				}
-				continue
 			}
-			if !run {
-				if err := skipJob(jobName, fmt.Sprintf("job if condition %q evaluated false", job.If)); err != nil {
-					return err
+			if runCtx.Err() != nil {
+				return
+			}
+
+			// Skip if a dependency did not succeed (GitHub semantics).
+			mu.Lock()
+			dep, unmet := firstUnsatisfiedNeed(job.Needs, jobResults)
+			mu.Unlock()
+			if unmet {
+				mu.Lock()
+				err := skipJob(jobName, fmt.Sprintf("dependency %q did not succeed", dep))
+				mu.Unlock()
+				if err != nil {
+					setFatal(err)
 				}
-				continue
-			}
-		}
-
-		// Expand the matrix into one instance per combination; a job without a
-		// matrix runs as a single instance. The logical job succeeds only if
-		// every instance succeeds (so dependents see one aggregated result).
-		combos := job.MatrixExpansion
-		if len(combos) == 0 {
-			combos = []map[string]any{nil}
-		}
-		logicalFailed := false
-
-		for _, combo := range combos {
-			instanceName := jobName
-			matrixCtx := map[string]string{}
-			if combo != nil {
-				matrixCtx = stringifyMatrixCombo(combo)
-				instanceName = fmt.Sprintf("%s (%s)", jobName, matrixLabel(combo))
+				return
 			}
 
-			var jobUUID uuid.UUID
-			if w.jobRepo != nil {
-				jobUUID = int64CompatibleUUID()
-				jobIDs[instanceName] = jobUUID.String()
-				now := time.Now().UTC()
-				if createErr := w.jobRepo.Create(ctx, &entity.WorkflowJob{
-					ID: jobUUID, WorkflowRunID: &runUUID, OrganizationID: orgUUID, RepositoryID: repoUUID,
-					Name: instanceName, Status: entity.WorkflowJobStatusInProgress, StartedAt: &now, CreatedAt: now,
-				}); createErr != nil {
-					return fmt.Errorf("create workflow job: %w", createErr)
+			// Skip on a false job-level `if:` (evaluated against github + env).
+			if job.If != "" {
+				jobEnv := mergeStringMaps(ir.Env, job.Env)
+				ec := &workflow.EvalContext{Contexts: map[string]map[string]string{
+					"github": githubCtx, "runner": runnerCtx, "secrets": secretsCtx, "env": jobEnv, "matrix": {},
+				}}
+				run, ifErr := workflow.EvaluateCondition(job.If, ec)
+				reason := ""
+				if ifErr != nil {
+					reason = "invalid job if: " + ifErr.Error()
+				} else if !run {
+					reason = fmt.Sprintf("job if condition %q evaluated false", job.If)
+				}
+				if reason != "" {
+					mu.Lock()
+					err := skipJob(jobName, reason)
+					mu.Unlock()
+					if err != nil {
+						setFatal(err)
+					}
+					return
 				}
 			}
 
-			jobIDStr := instanceName
-			if w.jobRepo != nil {
-				jobIDStr = jobUUID.String()
+			// Bound the number of jobs executing steps at once.
+			select {
+			case sem <- struct{}{}:
+			case <-runCtx.Done():
+				return
 			}
-			jobLogStatus[instanceName] = jobLogStatusSuccess
-			instanceFailed := w.runJobSteps(ctx, runJobSpec{
-				payload:       payload,
-				wfEnv:         ir.Env,
-				job:           job,
-				instanceName:  instanceName,
-				jobIDStr:      jobIDStr,
-				matrixCtx:     matrixCtx,
-				githubCtx:     githubCtx,
-				runnerCtx:     runnerCtx,
-				secretsCtx:    secretsCtx,
-				secretEnv:     secretEnv,
-				secretValues:  secretValues,
-				workdir:       workdir,
-				logBuf:        logBuf,
-				useStreaming:  useStreaming,
-				streamRunner:  streamRunner,
-				jobLineCounts: jobLineCounts,
-			})
+			defer func() { <-sem }()
 
-			if instanceFailed {
-				logicalFailed = true
-				jobLogStatus[instanceName] = jobLogStatusFailure
+			// Expand the matrix into one instance per combination (run
+			// sequentially within the job); a job without a matrix runs once.
+			// The logical job succeeds only if every instance succeeds.
+			combos := job.MatrixExpansion
+			if len(combos) == 0 {
+				combos = []map[string]any{nil}
 			}
-			if w.jobRepo != nil && jobUUID != uuid.Nil {
-				jobConclusion := entity.WorkflowJobConclusionSuccess
+			logicalFailed := false
+
+			for _, combo := range combos {
+				if runCtx.Err() != nil {
+					return
+				}
+				instanceName := jobName
+				matrixCtx := map[string]string{}
+				if combo != nil {
+					matrixCtx = stringifyMatrixCombo(combo)
+					instanceName = fmt.Sprintf("%s (%s)", jobName, matrixLabel(combo))
+				}
+
+				var jobUUID uuid.UUID
+				jobIDStr := instanceName
+				if w.jobRepo != nil {
+					jobUUID = int64CompatibleUUID()
+					jobIDStr = jobUUID.String()
+					now := time.Now().UTC()
+					if createErr := w.jobRepo.Create(runCtx, &entity.WorkflowJob{
+						ID: jobUUID, WorkflowRunID: &runUUID, OrganizationID: orgUUID, RepositoryID: repoUUID,
+						Name: instanceName, Status: entity.WorkflowJobStatusInProgress, StartedAt: &now, CreatedAt: now,
+					}); createErr != nil {
+						setFatal(fmt.Errorf("create workflow job: %w", createErr))
+						return
+					}
+				}
+
+				acc := &jobAccumulator{}
+				instanceFailed := w.runJobSteps(runCtx, runJobSpec{
+					payload:      payload,
+					wfEnv:        ir.Env,
+					job:          job,
+					instanceName: instanceName,
+					jobIDStr:     jobIDStr,
+					matrixCtx:    matrixCtx,
+					githubCtx:    githubCtx,
+					runnerCtx:    runnerCtx,
+					secretsCtx:   secretsCtx,
+					secretEnv:    secretEnv,
+					secretValues: secretValues,
+					workdir:      workdir,
+					useStreaming: useStreaming,
+					streamRunner: streamRunner,
+					acc:          acc,
+				})
+
+				if w.jobRepo != nil && jobUUID != uuid.Nil {
+					jobConclusion := entity.WorkflowJobConclusionSuccess
+					if instanceFailed {
+						jobConclusion = entity.WorkflowJobConclusionFailure
+					}
+					_ = w.jobRepo.Complete(runCtx, jobUUID, jobConclusion, time.Now().UTC())
+				}
+
+				status := jobLogStatusSuccess
 				if instanceFailed {
-					jobConclusion = entity.WorkflowJobConclusionFailure
+					status = jobLogStatusFailure
+					logicalFailed = true
 				}
-				_ = w.jobRepo.Complete(ctx, jobUUID, jobConclusion, time.Now().UTC())
+				mu.Lock()
+				jobIDs[instanceName] = jobIDStr
+				jobLogStatus[instanceName] = status
+				jobLineCounts[instanceName] = acc.lineCount
+				logBuf.WriteString(acc.buf.String())
+				mu.Unlock()
 			}
-		}
 
-		if logicalFailed {
-			jobResults[jobName] = jobResultFailure
-			conclusion = ciConclusionFailure
-		} else {
-			jobResults[jobName] = jobResultSuccess
-		}
+			mu.Lock()
+			if logicalFailed {
+				jobResults[jobName] = jobResultFailure
+				conclusion = ciConclusionFailure
+			} else {
+				jobResults[jobName] = jobResultSuccess
+			}
+			mu.Unlock()
+		}(jobName)
+	}
+
+	wg.Wait()
+	if fatalErr != nil {
+		return fatalErr
 	}
 
 	finalStatus := ciStatusCompleted
@@ -482,24 +558,31 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 	return nil
 }
 
+// jobAccumulator holds a single job instance's private log buffer and line
+// counter. Each instance owns its own accumulator so instances can run
+// concurrently without sharing mutable state.
+type jobAccumulator struct {
+	buf       strings.Builder
+	lineCount int64
+}
+
 // runJobSpec bundles the per-run state a single job instance needs to execute.
 type runJobSpec struct {
-	payload       CIRunPayload
-	wfEnv         map[string]string
-	job           workflow.IRJob
-	instanceName  string
-	jobIDStr      string
-	matrixCtx     map[string]string
-	githubCtx     map[string]string
-	runnerCtx     map[string]string
-	secretsCtx    map[string]string
-	secretEnv     []string
-	secretValues  []string
-	workdir       string
-	logBuf        *strings.Builder
-	useStreaming  bool
-	streamRunner  StreamingCommandRunner
-	jobLineCounts map[string]int64
+	payload      CIRunPayload
+	wfEnv        map[string]string
+	job          workflow.IRJob
+	instanceName string
+	jobIDStr     string
+	matrixCtx    map[string]string
+	githubCtx    map[string]string
+	runnerCtx    map[string]string
+	secretsCtx   map[string]string
+	secretEnv    []string
+	secretValues []string
+	workdir      string
+	useStreaming bool
+	streamRunner StreamingCommandRunner
+	acc          *jobAccumulator
 }
 
 // runJobSteps executes one job instance's steps, evaluating expressions against
@@ -545,7 +628,7 @@ func (w *CIWorker) runJobSteps(ctx context.Context, s runJobSpec) bool {
 			run, ifErr := workflow.EvaluateCondition(step.If, evalCtx)
 			if ifErr != nil {
 				jobFailed = true
-				fmt.Fprintf(s.logBuf, "[job=%s step=%d] if error: %s\n", s.instanceName, i, ifErr.Error())
+				fmt.Fprintf(&s.acc.buf, "[job=%s step=%d] if error: %s\n", s.instanceName, i, ifErr.Error())
 				continue
 			}
 			if !run {
@@ -571,10 +654,10 @@ func (w *CIWorker) runJobSteps(ctx context.Context, s runJobSpec) bool {
 
 		if s.useStreaming {
 			runErr := s.streamRunner(stepCtx, instWorkdir, stepEnv, script, i, func(stream, line string) {
-				s.jobLineCounts[s.instanceName]++
-				lineNum := s.jobLineCounts[s.instanceName]
+				s.acc.lineCount++
+				lineNum := s.acc.lineCount
 				masked := maskSecrets(line, s.secretValues)
-				fmt.Fprintf(s.logBuf, "[job=%s step=%d name=%s]\n%s\n", s.instanceName, i, step.Name, masked)
+				fmt.Fprintf(&s.acc.buf, "[job=%s step=%d name=%s]\n%s\n", s.instanceName, i, step.Name, masked)
 
 				logLine := &entity.JobLogLine{
 					OrganizationID: s.payload.OrganizationID,
@@ -598,18 +681,18 @@ func (w *CIWorker) runJobSteps(ctx context.Context, s runJobSpec) bool {
 
 			if runErr != nil {
 				jobFailed = true
-				fmt.Fprintf(s.logBuf, "[job=%s step=%d] error: %s\n", s.instanceName, i, maskSecrets(runErr.Error(), s.secretValues))
+				fmt.Fprintf(&s.acc.buf, "[job=%s step=%d] error: %s\n", s.instanceName, i, maskSecrets(runErr.Error(), s.secretValues))
 			}
 		} else {
 			out, runErr := w.runStep(stepCtx, instWorkdir, stepEnv, script)
 			cancel()
 
 			masked := maskSecrets(string(out), s.secretValues)
-			fmt.Fprintf(s.logBuf, "[job=%s step=%d name=%s]\n%s\n", s.instanceName, i, step.Name, masked)
+			fmt.Fprintf(&s.acc.buf, "[job=%s step=%d name=%s]\n%s\n", s.instanceName, i, step.Name, masked)
 
 			if runErr != nil {
 				jobFailed = true
-				fmt.Fprintf(s.logBuf, "[job=%s step=%d] error: %s\n", s.instanceName, i, maskSecrets(runErr.Error(), s.secretValues))
+				fmt.Fprintf(&s.acc.buf, "[job=%s step=%d] error: %s\n", s.instanceName, i, maskSecrets(runErr.Error(), s.secretValues))
 			}
 		}
 	}
@@ -642,18 +725,18 @@ func (w *CIWorker) runUsesStep(ctx context.Context, s runJobSpec, step workflow.
 // shows checkout/unsupported-action notes, mirroring how run-step output is
 // streamed. Falls back to the buffered log when no log repository is wired.
 func (w *CIWorker) emitUsesLine(ctx context.Context, s runJobSpec, stepIdx int, text string) {
-	fmt.Fprintf(s.logBuf, "[job=%s step=%d name=%s]\n%s\n", s.instanceName, stepIdx, "", text)
+	fmt.Fprintf(&s.acc.buf, "[job=%s step=%d name=%s]\n%s\n", s.instanceName, stepIdx, "", text)
 	if w.logRepo == nil {
 		return
 	}
-	s.jobLineCounts[s.instanceName]++
+	s.acc.lineCount++
 	line := &entity.JobLogLine{
 		OrganizationID: s.payload.OrganizationID,
 		RepositoryID:   s.payload.RepositoryID,
 		RunID:          s.payload.WorkflowRunID,
 		JobID:          s.jobIDStr,
 		StepIndex:      stepIdx,
-		LineNumber:     s.jobLineCounts[s.instanceName],
+		LineNumber:     s.acc.lineCount,
 		Stream:         entity.LogStreamStdout,
 		Text:           text,
 		CreatedAt:      time.Now().UTC(),
