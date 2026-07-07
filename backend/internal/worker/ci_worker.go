@@ -323,6 +323,30 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 		order = sortedJobNames(ir.Jobs)
 	}
 
+	// skipJob records a job as skipped (status completed / conclusion skipped)
+	// and notes the reason. Used for both unmet `needs` and a false job-level
+	// `if:`.
+	skipJob := func(jobName, reason string) error {
+		jobResults[jobName] = jobResultSkipped
+		jobLogStatus[jobName] = jobResultSkipped
+		fmt.Fprintf(logBuf, "[job=%s] skipped: %s\n", jobName, reason)
+		if w.jobRepo != nil {
+			skipUUID := int64CompatibleUUID()
+			jobIDs[jobName] = skipUUID.String()
+			now := time.Now().UTC()
+			if createErr := w.jobRepo.Create(ctx, &entity.WorkflowJob{
+				ID: skipUUID, WorkflowRunID: &runUUID, OrganizationID: orgUUID, RepositoryID: repoUUID,
+				Name: jobName, Status: entity.WorkflowJobStatusInProgress, StartedAt: &now, CreatedAt: now,
+			}); createErr != nil {
+				return fmt.Errorf("create workflow job: %w", createErr)
+			}
+			if completeErr := w.jobRepo.Complete(ctx, skipUUID, entity.WorkflowJobConclusionSkipped, time.Now().UTC()); completeErr != nil {
+				return fmt.Errorf("complete workflow job: %w", completeErr)
+			}
+		}
+		return nil
+	}
+
 	for _, jobName := range order {
 		job := ir.Jobs[jobName]
 
@@ -330,24 +354,32 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 		// Actions. The dependency's own failure already set the run conclusion,
 		// so a skip adds no new failure — but independent jobs still run.
 		if dep, unmet := firstUnsatisfiedNeed(job.Needs, jobResults); unmet {
-			jobResults[jobName] = jobResultSkipped
-			jobLogStatus[jobName] = jobResultSkipped
-			fmt.Fprintf(logBuf, "[job=%s] skipped: dependency %q did not succeed\n", jobName, dep)
-			if w.jobRepo != nil {
-				skipUUID := int64CompatibleUUID()
-				jobIDs[jobName] = skipUUID.String()
-				now := time.Now().UTC()
-				if createErr := w.jobRepo.Create(ctx, &entity.WorkflowJob{
-					ID: skipUUID, WorkflowRunID: &runUUID, OrganizationID: orgUUID, RepositoryID: repoUUID,
-					Name: jobName, Status: entity.WorkflowJobStatusInProgress, StartedAt: &now, CreatedAt: now,
-				}); createErr != nil {
-					return fmt.Errorf("create workflow job: %w", createErr)
-				}
-				if completeErr := w.jobRepo.Complete(ctx, skipUUID, entity.WorkflowJobConclusionSkipped, time.Now().UTC()); completeErr != nil {
-					return fmt.Errorf("complete workflow job: %w", completeErr)
-				}
+			if err := skipJob(jobName, fmt.Sprintf("dependency %q did not succeed", dep)); err != nil {
+				return err
 			}
 			continue
+		}
+
+		// A false job-level `if:` skips the whole job. Evaluate it against the
+		// github context and the workflow+job env.
+		if job.If != "" {
+			jobEnv := mergeStringMaps(ir.Env, job.Env)
+			ec := &workflow.EvalContext{Contexts: map[string]map[string]string{
+				"github": githubCtx, "runner": runnerCtx, "secrets": secretsCtx, "env": jobEnv, "matrix": {},
+			}}
+			run, ifErr := workflow.EvaluateCondition(job.If, ec)
+			if ifErr != nil {
+				if err := skipJob(jobName, "invalid job if: "+ifErr.Error()); err != nil {
+					return err
+				}
+				continue
+			}
+			if !run {
+				if err := skipJob(jobName, fmt.Sprintf("job if condition %q evaluated false", job.If)); err != nil {
+					return err
+				}
+				continue
+			}
 		}
 
 		// Expand the matrix into one instance per combination; a job without a
