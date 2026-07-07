@@ -121,17 +121,23 @@ type StreamingCommandRunner func(ctx context.Context, workdir string, env []stri
 // Implements the built-in actions/checkout; injectable for tests.
 type CheckoutFunc func(ctx context.Context, gitPath, ref, dest string) error
 
+// ContainerActionFunc runs a `uses: docker://<image>` container action with the
+// workspace mounted and the given env (INPUT_* action inputs plus step env),
+// returning its combined output. Injectable for tests.
+type ContainerActionFunc func(ctx context.Context, image, workdir string, env []string) ([]byte, error)
+
 type CIWorker struct {
-	db            *sql.DB
-	decrypt       SecretDecrypter
-	runStep       CommandRunner
-	runStepStream StreamingCommandRunner
-	checkout      CheckoutFunc
-	stepWait      time.Duration
-	logRepo       domainrepo.IJobLogRepository
-	jobRepo       domainrepo.IWorkflowJobRepository
-	logPublisher  *queue.JobLogPublisher
-	sandbox       sandbox
+	db              *sql.DB
+	decrypt         SecretDecrypter
+	runStep         CommandRunner
+	runStepStream   StreamingCommandRunner
+	checkout        CheckoutFunc
+	containerAction ContainerActionFunc
+	stepWait        time.Duration
+	logRepo         domainrepo.IJobLogRepository
+	jobRepo         domainrepo.IWorkflowJobRepository
+	logPublisher    *queue.JobLogPublisher
+	sandbox         sandbox
 }
 
 func NewCIWorker(db *sql.DB) *CIWorker {
@@ -144,6 +150,7 @@ func NewCIWorker(db *sql.DB) *CIWorker {
 	w.runStep = w.defaultCommandRunner
 	w.runStepStream = w.defaultStreamingCommandRunner
 	w.checkout = defaultCheckout
+	w.containerAction = defaultContainerAction
 	return w
 }
 
@@ -151,6 +158,52 @@ func NewCIWorker(db *sql.DB) *CIWorker {
 func (w *CIWorker) WithCheckout(fn CheckoutFunc) *CIWorker {
 	w.checkout = fn
 	return w
+}
+
+// WithContainerAction overrides the docker:// action runner (used in tests).
+func (w *CIWorker) WithContainerAction(fn ContainerActionFunc) *CIWorker {
+	w.containerAction = fn
+	return w
+}
+
+// defaultContainerAction runs a container action image with the workspace bind
+// mounted, isolated from the network, passing INPUT_*/step env via -e.
+func defaultContainerAction(ctx context.Context, image, workdir string, env []string) ([]byte, error) {
+	args := []string{"run", "--rm", "--network", "none", "-v", workdir + ":/github/workspace", "-w", "/github/workspace"}
+	for _, e := range env {
+		args = append(args, "-e", e)
+	}
+	args = append(args, image)
+	return exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+}
+
+// actionInputEnv converts a step's `with:` inputs into GitHub-style INPUT_*
+// environment variables (uppercased, non-alphanumerics to underscores),
+// interpolating any ${{ }} expressions with the step context.
+func actionInputEnv(with map[string]string, evalCtx *workflow.EvalContext) []string {
+	env := make([]string, 0, len(with))
+	for k, v := range with {
+		if strings.Contains(v, "${{") {
+			if iv, err := workflow.InterpolateString(v, evalCtx); err == nil {
+				v = iv
+			}
+		}
+		env = append(env, "INPUT_"+inputKeyToEnv(k)+"="+v)
+	}
+	sort.Strings(env)
+	return env
+}
+
+func inputKeyToEnv(k string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(k) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }
 
 // defaultCheckout clones the bare repository into dest and checks out ref using
@@ -638,8 +691,10 @@ func (w *CIWorker) runJobSteps(ctx context.Context, s runJobSpec) bool {
 			continue
 		}
 
+		stepEnv := buildStepEnv([]map[string]string{mergedEnv}, s.secretEnv)
+
 		if step.Uses != "" {
-			if w.runUsesStep(ctx, s, step, i, instWorkdir) {
+			if w.runUsesStep(ctx, s, step, i, instWorkdir, evalCtx, stepEnv) {
 				jobFailed = true
 			}
 			continue
@@ -649,7 +704,6 @@ func (w *CIWorker) runJobSteps(ctx context.Context, s runJobSpec) bool {
 		}
 
 		script, _ := workflow.InterpolateString(step.Run, evalCtx)
-		stepEnv := buildStepEnv([]map[string]string{mergedEnv}, s.secretEnv)
 		stepCtx, cancel := context.WithTimeout(ctx, w.stepWait)
 
 		if s.useStreaming {
@@ -704,7 +758,7 @@ func (w *CIWorker) runJobSteps(ctx context.Context, s runJobSpec) bool {
 // the workspace from the run's commit; any other action is logged as
 // unsupported and skipped (not failed), so workflows that reference marketplace
 // actions still make progress. Returns true only if a supported action failed.
-func (w *CIWorker) runUsesStep(ctx context.Context, s runJobSpec, step workflow.IRStep, i int, workdir string) bool {
+func (w *CIWorker) runUsesStep(ctx context.Context, s runJobSpec, step workflow.IRStep, i int, workdir string, evalCtx *workflow.EvalContext, stepEnv []string) bool {
 	if isCheckoutAction(step.Uses) {
 		ref := s.payload.HeadSHA
 		if ref == "" {
@@ -717,7 +771,26 @@ func (w *CIWorker) runUsesStep(ctx context.Context, s runJobSpec, step workflow.
 		}
 		return false
 	}
-	w.emitUsesLine(ctx, s, i, fmt.Sprintf("Skipping unsupported action %q (only actions/checkout is built in)", step.Uses))
+
+	// Container actions (uses: docker://<image>) are self-contained: run the
+	// image with the workspace mounted and `with:` inputs passed as INPUT_*.
+	if step.UsesRef != nil && step.UsesRef.Kind == "docker" && step.UsesRef.Image != "" {
+		w.emitUsesLine(ctx, s, i, "Run "+step.Uses)
+		env := append(append([]string{}, stepEnv...), actionInputEnv(step.With, evalCtx)...)
+		out, err := w.containerAction(ctx, step.UsesRef.Image, workdir, env)
+		for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+			if line != "" {
+				w.emitUsesLine(ctx, s, i, maskSecrets(line, s.secretValues))
+			}
+		}
+		if err != nil {
+			w.emitUsesLine(ctx, s, i, "action failed: "+maskSecrets(err.Error(), s.secretValues))
+			return true
+		}
+		return false
+	}
+
+	w.emitUsesLine(ctx, s, i, fmt.Sprintf("Skipping unsupported action %q (built-in: actions/checkout and docker:// container actions)", step.Uses))
 	return false
 }
 
