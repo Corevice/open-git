@@ -398,6 +398,103 @@ jobs:
 	}
 }
 
+// runWorkflowCapture runs a workflow and returns the scripts the runner
+// actually received (post-interpolation), letting a caller adjust the payload.
+func runWorkflowCapture(t *testing.T, yamlSrc string, mutate func(*CIRunPayload)) []string {
+	t.Helper()
+	db := newCITestDB(t)
+	ctx := context.Background()
+	orgID, repoID, runID := "org-c", "repo-c", "run-c"
+	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`, orgID, "acme", "Acme", planTierPro)
+	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`, repoID, orgID, "widgets")
+	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`, runID, orgID, repoID, "ci.yml", ciStatusQueued)
+
+	var mu sync.Mutex
+	var scripts []string
+	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, _ []string, script string) ([]byte, error) {
+		mu.Lock()
+		scripts = append(scripts, script)
+		mu.Unlock()
+		if strings.Contains(script, "FAIL") {
+			return nil, errors.New("exit status 1")
+		}
+		return []byte("ok\n"), nil
+	})
+
+	p := CIRunPayload{WorkflowRunID: runID, RepositoryID: repoID, OrganizationID: orgID, WorkflowYAML: []byte(yamlSrc)}
+	if mutate != nil {
+		mutate(&p)
+	}
+	payload, _ := json.Marshal(p)
+	if err := worker.HandleCIRun(ctx, asynq.NewTask(TypeCIRun, payload)); err != nil {
+		t.Fatalf("HandleCIRun: %v", err)
+	}
+	return scripts
+}
+
+func TestCIInterpolatesGithubAndEnv(t *testing.T) {
+	scripts := runWorkflowCapture(t, `name: CI
+on: push
+env:
+  GREETING: hi
+jobs:
+  build:
+    steps:
+      - run: echo "ref=${{ github.ref_name }} sha=${{ github.sha }} n=${{ github.run_number }} g=${{ env.GREETING }}"
+`, func(p *CIRunPayload) {
+		p.HeadBranch = "main"
+		p.HeadSHA = "deadbeef"
+		p.RunNumber = 42
+	})
+	if len(scripts) != 1 {
+		t.Fatalf("expected 1 script, got %d: %v", len(scripts), scripts)
+	}
+	want := `echo "ref=main sha=deadbeef n=42 g=hi"`
+	if strings.TrimSpace(scripts[0]) != want {
+		t.Errorf("interpolated script = %q, want %q", scripts[0], want)
+	}
+}
+
+func TestCIStepIfSkipsWhenFalse(t *testing.T) {
+	scripts := runWorkflowCapture(t, `name: CI
+on: push
+jobs:
+  build:
+    steps:
+      - run: echo ALWAYS_ONE
+      - if: github.ref_name == 'nonexistent'
+        run: echo SHOULD_SKIP
+      - run: echo ALWAYS_TWO
+`, func(p *CIRunPayload) { p.HeadBranch = "main" })
+	joined := strings.Join(scripts, "\n")
+	if strings.Contains(joined, "SHOULD_SKIP") {
+		t.Errorf("step with false if: ran; scripts=%v", scripts)
+	}
+	if !strings.Contains(joined, "ALWAYS_ONE") || !strings.Contains(joined, "ALWAYS_TWO") {
+		t.Errorf("unconditional steps did not both run; scripts=%v", scripts)
+	}
+}
+
+func TestCIStepIfAlwaysRunsAfterFailure(t *testing.T) {
+	scripts := runWorkflowCapture(t, `name: CI
+on: push
+jobs:
+  build:
+    steps:
+      - run: echo FAIL
+      - run: echo SKIPPED_DEFAULT
+      - if: always()
+        run: echo CLEANUP
+`, nil)
+	joined := strings.Join(scripts, "\n")
+	if strings.Contains(joined, "SKIPPED_DEFAULT") {
+		t.Errorf("default step ran after a failure; scripts=%v", scripts)
+	}
+	if !strings.Contains(joined, "CLEANUP") {
+		t.Errorf("if: always() step did not run after failure; scripts=%v", scripts)
+	}
+}
+
 func mustExec(t *testing.T, db *sql.DB, q string, args ...any) {
 	t.Helper()
 	if _, err := db.Exec(q, args...); err != nil {
@@ -488,4 +585,3 @@ jobs:
 		}
 	}
 }
-

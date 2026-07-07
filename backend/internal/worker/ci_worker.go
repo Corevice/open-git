@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -81,6 +82,16 @@ type CIRunPayload struct {
 	RepositoryID   string `json:"repository_id"`
 	OrganizationID string `json:"organization_id"`
 	WorkflowYAML   []byte `json:"workflow_yaml"`
+
+	// Run metadata used to build the `github` expression context. Older queued
+	// payloads may omit these; the worker treats missing fields as empty.
+	HeadSHA    string `json:"head_sha,omitempty"`
+	HeadBranch string `json:"head_branch,omitempty"`
+	Event      string `json:"event,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+	Workflow   string `json:"workflow,omitempty"`
+	RunNumber  int    `json:"run_number,omitempty"`
+	Repository string `json:"repository,omitempty"`
 }
 
 // SecretDecrypter decrypts a stored secret value. Replace with a real KMS-backed
@@ -245,6 +256,20 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 	jobIDs := make(map[string]string)
 	jobResults := make(map[string]string) // jobName -> success | failure | skipped
 
+	// Static expression contexts, shared across all steps of this run.
+	githubCtx := map[string]string{
+		"sha":        payload.HeadSHA,
+		"ref":        refFromBranch(payload.HeadBranch),
+		"ref_name":   payload.HeadBranch,
+		"event_name": payload.Event,
+		"actor":      payload.Actor,
+		"workflow":   payload.Workflow,
+		"run_number": strconv.Itoa(payload.RunNumber),
+		"repository": payload.Repository,
+	}
+	runnerCtx := map[string]string{"os": "Linux", "arch": "X64"}
+	secretsCtx := parseEnvToMap(secretEnv)
+
 	// Run jobs in dependency (topological) order so `needs` is honored. On a
 	// broken DAG (already reported as a diagnostic error above) Order may be
 	// short; fall back to a stable order defensively.
@@ -293,13 +318,51 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 		jobFailed := false
 
 		for i, step := range job.Steps {
+			// Merge env (workflow < job < step) and expose it, along with the
+			// github/runner/secrets contexts, for expression evaluation.
+			mergedEnv := mergeStringMaps(ir.Env, job.Env, step.Env)
+			evalCtx := &workflow.EvalContext{
+				Contexts: map[string]map[string]string{
+					"github":  githubCtx,
+					"runner":  runnerCtx,
+					"secrets": secretsCtx,
+					"env":     mergedEnv,
+					"matrix":  {},
+				},
+				Failed: jobFailed,
+			}
+			for k, v := range mergedEnv {
+				if strings.Contains(v, "${{") {
+					if iv, ierr := workflow.InterpolateString(v, evalCtx); ierr == nil {
+						mergedEnv[k] = iv
+					}
+				}
+			}
+
+			// Decide whether the step runs. An explicit `if:` is evaluated
+			// (with the current failure state, so always()/failure() work);
+			// otherwise the step is skipped once the job has failed.
+			if step.If != "" {
+				run, ifErr := workflow.EvaluateCondition(step.If, evalCtx)
+				if ifErr != nil {
+					jobFailed = true
+					fmt.Fprintf(logBuf, "[job=%s step=%d] if error: %s\n", jobName, i, ifErr.Error())
+					continue
+				}
+				if !run {
+					continue
+				}
+			} else if jobFailed {
+				continue
+			}
+
 			if step.Run == "" {
 				// `uses` steps are not executed yet; skip without failing.
 				continue
 			}
-			// Env precedence (low to high): workflow env, job env, step env,
-			// then decrypted secrets injected by name.
-			stepEnv := buildStepEnv([]map[string]string{ir.Env, job.Env, step.Env}, secretEnv)
+
+			script, _ := workflow.InterpolateString(step.Run, evalCtx)
+			stepEnv := buildStepEnv([]map[string]string{mergedEnv}, secretEnv)
 			stepCtx, cancel := context.WithTimeout(ctx, w.stepWait)
 
 			if useStreaming {
@@ -307,7 +370,7 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 				if jobIDStr == "" {
 					jobIDStr = jobName
 				}
-				runErr := streamRunner(stepCtx, workdir, stepEnv, step.Run, i, func(stream, line string) {
+				runErr := streamRunner(stepCtx, workdir, stepEnv, script, i, func(stream, line string) {
 					jobLineCounts[jobName]++
 					lineNum := jobLineCounts[jobName]
 					masked := maskSecrets(line, secretValues)
@@ -336,10 +399,9 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 				if runErr != nil {
 					jobFailed = true
 					fmt.Fprintf(logBuf, "[job=%s step=%d] error: %s\n", jobName, i, maskSecrets(runErr.Error(), secretValues))
-					break
 				}
 			} else {
-				out, runErr := w.runStep(stepCtx, workdir, stepEnv, step.Run)
+				out, runErr := w.runStep(stepCtx, workdir, stepEnv, script)
 				cancel()
 
 				masked := maskSecrets(string(out), secretValues)
@@ -348,7 +410,6 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 				if runErr != nil {
 					jobFailed = true
 					fmt.Fprintf(logBuf, "[job=%s step=%d] error: %s\n", jobName, i, maskSecrets(runErr.Error(), secretValues))
-					break
 				}
 			}
 		}
@@ -417,6 +478,38 @@ func firstUnsatisfiedNeed(needs []string, results map[string]string) (string, bo
 		}
 	}
 	return "", false
+}
+
+// refFromBranch returns the full git ref for a branch name (empty for empty).
+func refFromBranch(branch string) string {
+	if branch == "" {
+		return ""
+	}
+	return "refs/heads/" + branch
+}
+
+// mergeStringMaps merges maps left-to-right (later overrides earlier) into a
+// new map, so callers can freely mutate the result.
+func mergeStringMaps(maps ...map[string]string) map[string]string {
+	out := make(map[string]string)
+	for _, m := range maps {
+		for k, v := range m {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// parseEnvToMap turns a KEY=VALUE slice into a map (used to expose secrets as
+// an expression context).
+func parseEnvToMap(env []string) map[string]string {
+	m := make(map[string]string, len(env))
+	for _, kv := range env {
+		if eq := strings.IndexByte(kv, '='); eq >= 0 {
+			m[kv[:eq]] = kv[eq+1:]
+		}
+	}
+	return m
 }
 
 // buildStepEnv flattens the env layers (lowest precedence first) and the

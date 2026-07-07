@@ -135,6 +135,12 @@ func (t *Trigger) Redispatch(ctx context.Context, organizationID uuid.UUID, disk
 		RepositoryID:   run.RepositoryID.String(),
 		OrganizationID: organizationID.String(),
 		WorkflowYAML:   data,
+		HeadSHA:        run.HeadSHA,
+		HeadBranch:     run.HeadBranch,
+		Event:          run.Event,
+		Actor:          run.ActorLogin,
+		Workflow:       run.Workflow,
+		RunNumber:      run.RunNumber,
 	})
 }
 
@@ -158,6 +164,12 @@ func (t *Trigger) createAndDispatch(ctx context.Context, organizationID, reposit
 		RepositoryID:   repositoryID.String(),
 		OrganizationID: organizationID.String(),
 		WorkflowYAML:   yamlData,
+		HeadSHA:        run.HeadSHA,
+		HeadBranch:     run.HeadBranch,
+		Event:          run.Event,
+		Actor:          run.ActorLogin,
+		Workflow:       run.Workflow,
+		RunNumber:      run.RunNumber,
 	}); err != nil {
 		return nil, fmt.Errorf("dispatch workflow run: %w", err)
 	}
