@@ -101,7 +101,7 @@ func (t *Trigger) OnPush(ctx context.Context, organizationID, repositoryID uuid.
 		if !workflowListensTo(wf.On, "push") {
 			continue
 		}
-		if _, err := t.createAndDispatch(ctx, organizationID, repositoryID, file, branch, sha, "push", actorLogin, data); err != nil {
+		if _, err := t.createAndDispatch(ctx, organizationID, repositoryID, diskPath, file, branch, sha, "push", actorLogin, data); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -120,7 +120,7 @@ func (t *Trigger) DispatchWorkflow(ctx context.Context, organizationID, reposito
 	if _, err := workflow.ParseWorkflow(data); err != nil {
 		return nil, fmt.Errorf("parse workflow %s: %w", workflowFile, err)
 	}
-	return t.createAndDispatch(ctx, organizationID, repositoryID, workflowFile, branch, sha, "workflow_dispatch", actorLogin, data)
+	return t.createAndDispatch(ctx, organizationID, repositoryID, diskPath, workflowFile, branch, sha, "workflow_dispatch", actorLogin, data)
 }
 
 // Redispatch re-reads the workflow YAML at the run's recorded commit and
@@ -141,10 +141,11 @@ func (t *Trigger) Redispatch(ctx context.Context, organizationID uuid.UUID, disk
 		Actor:          run.ActorLogin,
 		Workflow:       run.Workflow,
 		RunNumber:      run.RunNumber,
+		RepoGitPath:    diskPath,
 	})
 }
 
-func (t *Trigger) createAndDispatch(ctx context.Context, organizationID, repositoryID uuid.UUID, workflowFile, branch, sha, event, actorLogin string, yamlData []byte) (*entity.WorkflowRun, error) {
+func (t *Trigger) createAndDispatch(ctx context.Context, organizationID, repositoryID uuid.UUID, diskPath, workflowFile, branch, sha, event, actorLogin string, yamlData []byte) (*entity.WorkflowRun, error) {
 	run := &entity.WorkflowRun{
 		// ID is assigned by the repository as an int64-compatible UUID so the
 		// Actions API can expose it as a stable numeric id.
@@ -170,6 +171,7 @@ func (t *Trigger) createAndDispatch(ctx context.Context, organizationID, reposit
 		Actor:          run.ActorLogin,
 		Workflow:       run.Workflow,
 		RunNumber:      run.RunNumber,
+		RepoGitPath:    diskPath,
 	}); err != nil {
 		return nil, fmt.Errorf("dispatch workflow run: %w", err)
 	}

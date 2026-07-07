@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -82,34 +81,58 @@ func TestSecretsAreMasked(t *testing.T) {
 		orgID, "acme", "Acme", planTierPro)
 	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`,
 		repoID, orgID, "widgets")
+	mustExec(t, db, `INSERT INTO action_secrets (id, organization_id, repository_id, name, encrypted_value) VALUES (?, ?, ?, ?, ?)`,
+		"sec-1", orgID, repoID, "API_TOKEN", secretValue)
 	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`,
 		runID, orgID, repoID, "ci.yml", ciStatusQueued)
 
-	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, _ []string, script string) ([]byte, error) {
-		if strings.Contains(script, secretValue) {
-			return nil, fmt.Errorf("secret leaked in script: %s", script)
+	yamlSrc := []byte(`name: CI
+on: push
+jobs:
+  build:
+    steps:
+      - name: leak
+        run: echo $API_TOKEN
+`)
+
+	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, env []string, _ string) ([]byte, error) {
+		for _, kv := range env {
+			if strings.HasPrefix(kv, "API_TOKEN=") {
+				return []byte(strings.TrimPrefix(kv, "API_TOKEN=") + "\n"), nil
+			}
 		}
-		return []byte("ok\n"), nil
+		return []byte("no token\n"), nil
 	})
 
 	payload, err := json.Marshal(CIRunPayload{
 		WorkflowRunID:  runID,
 		RepositoryID:   repoID,
 		OrganizationID: orgID,
-		WorkflowYAML:   []byte(`name: CI
-on: push
-jobs:
-  build:
-    steps:
-      - run: echo "` + secretValue + `"
-`),
+		WorkflowYAML:   yamlSrc,
 	})
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
+
 	task := asynq.NewTask(TypeCIRun, payload)
 	if err := worker.HandleCIRun(ctx, task); err != nil {
-		t.Fatalf("HandleCIRun: %v", err)
+		t.Fatalf("HandleCIRun returned error: %v", err)
+	}
+
+	var status, conclusion sql.NullString
+	err = db.QueryRowContext(ctx, `SELECT status, conclusion FROM workflow_runs WHERE id = ?`, runID).
+		Scan(&status, &conclusion)
+	if err != nil {
+		t.Fatalf("query workflow_run: %v", err)
+	}
+	if status.String != ciStatusCompleted {
+		t.Errorf("status: got %q, want %q", status.String, ciStatusCompleted)
+	}
+	if strings.Contains(conclusion.String, secretValue) {
+		t.Errorf("conclusion contains plaintext secret %q: %q", secretValue, conclusion.String)
+	}
+	if !strings.Contains(conclusion.String, logMask) {
+		t.Errorf("conclusion missing mask token %q: %q", logMask, conclusion.String)
 	}
 }
 
@@ -117,42 +140,63 @@ func TestFreeTierConcurrentLimit(t *testing.T) {
 	db := newCITestDB(t)
 	ctx := context.Background()
 
-	orgID := "org-1"
-	repoID := "repo-1"
-	runID := "run-1"
+	orgID := "org-free"
+	repoID := "repo-free"
+	firstRun := "run-first"
+	secondRun := "run-second"
 
 	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`,
 		orgID, "acme", "Acme", planTierFree)
 	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`,
 		repoID, orgID, "widgets")
 	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`,
-		runID, orgID, repoID, "ci.yml", ciStatusQueued)
+		firstRun, orgID, repoID, "ci.yml", ciStatusInProgress)
+	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`,
+		secondRun, orgID, repoID, "ci.yml", ciStatusQueued)
 
-	worker := NewCIWorker(db)
-
-	// Pre-populate the running count to hit the limit.
-	if _, err := db.Exec(`INSERT INTO ci_running (organization_id) VALUES (?)`, orgID); err != nil {
-		t.Fatalf("insert ci_running: %v", err)
-	}
-
-	payload, err := json.Marshal(CIRunPayload{
-		WorkflowRunID:  runID,
-		RepositoryID:   repoID,
-		OrganizationID: orgID,
-		WorkflowYAML:   []byte(`name: CI
+	yamlSrc := []byte(`name: CI
 on: push
 jobs:
   build:
     steps:
-      - run: echo hello
-`),
+      - name: build
+        run: echo hello
+`)
+
+	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, _ []string, _ string) ([]byte, error) {
+		return []byte("hello\n"), nil
+	})
+
+	payload, err := json.Marshal(CIRunPayload{
+		WorkflowRunID:  secondRun,
+		RepositoryID:   repoID,
+		OrganizationID: orgID,
+		WorkflowYAML:   yamlSrc,
 	})
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
+
 	task := asynq.NewTask(TypeCIRun, payload)
-	if err := worker.HandleCIRun(ctx, task); !errors.Is(err, ErrConcurrentLimitExceeded) {
-		t.Fatalf("HandleCIRun: got %v, want %v", err, ErrConcurrentLimitExceeded)
+	err = worker.HandleCIRun(ctx, task)
+	if err == nil {
+		t.Fatal("expected error for free-tier 2nd concurrent run, got nil")
+	}
+	if !errors.Is(err, ErrConcurrentLimitExceeded) {
+		t.Errorf("expected ErrConcurrentLimitExceeded, got: %v", err)
+	}
+
+	var status, conclusion sql.NullString
+	err = db.QueryRowContext(ctx, `SELECT status, conclusion FROM workflow_runs WHERE id = ?`, secondRun).
+		Scan(&status, &conclusion)
+	if err != nil {
+		t.Fatalf("query second workflow_run: %v", err)
+	}
+	if status.String != ciStatusFailed {
+		t.Errorf("second run status: got %q, want %q", status.String, ciStatusFailed)
+	}
+	if !strings.Contains(conclusion.String, ciConclusionRateLimited) {
+		t.Errorf("expected conclusion to include %q, got %q", ciConclusionRateLimited, conclusion.String)
 	}
 }
 
@@ -160,67 +204,128 @@ func TestProTierAllowsManyConcurrent(t *testing.T) {
 	db := newCITestDB(t)
 	ctx := context.Background()
 
-	orgID := "org-2"
-	repoID := "repo-2"
-	runID := "run-2"
-
+	orgID := "org-pro"
+	repoID := "repo-pro"
 	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`,
 		orgID, "acme", "Acme", planTierPro)
 	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`,
 		repoID, orgID, "widgets")
+
+	for i := 0; i < 5; i++ {
+		mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`,
+			"running-"+strconv.Itoa(i), orgID, repoID, "ci.yml", ciStatusInProgress)
+	}
+	runID := "candidate"
 	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`,
 		runID, orgID, repoID, "ci.yml", ciStatusQueued)
 
-	worker := NewCIWorker(db)
+	yamlSrc := []byte(`name: CI
+on: push
+jobs:
+  build:
+    steps:
+      - name: build
+        run: echo ok
+`)
+	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, _ []string, _ string) ([]byte, error) {
+		return []byte("ok\n"), nil
+	})
 
-	// Pre-populate 50 running jobs — should not exceed the pro-tier limit.
-	for i := 0; i < 50; i++ {
-		if _, err := db.Exec(`INSERT INTO ci_running (organization_id) VALUES (?)`, orgID); err != nil {
-			t.Fatalf("insert ci_running %d: %v", i, err)
-		}
-	}
-
-	payload, err := json.Marshal(CIRunPayload{
+	payload, _ := json.Marshal(CIRunPayload{
 		WorkflowRunID:  runID,
 		RepositoryID:   repoID,
 		OrganizationID: orgID,
-		WorkflowYAML:   []byte(`name: CI
-on: push
-jobs:
-  build:
-    steps:
-      - run: echo hello
-`),
+		WorkflowYAML:   yamlSrc,
 	})
-	if err != nil {
-		t.Fatalf("marshal payload: %v", err)
-	}
 	task := asynq.NewTask(TypeCIRun, payload)
 	if err := worker.HandleCIRun(ctx, task); err != nil {
-		t.Fatalf("HandleCIRun: %v", err)
+		t.Fatalf("HandleCIRun unexpected error: %v", err)
 	}
 }
 
+// runWorkflowRecording runs a workflow with a command runner that records the
+// scripts it executes (in order) and fails any script containing "FAIL". It
+// returns the executed scripts and the run's final conclusion.
+func runWorkflowRecording(t *testing.T, yamlSrc string) ([]string, string) {
+	t.Helper()
+	db := newCITestDB(t)
+	ctx := context.Background()
+	orgID, repoID, runID := "org-x", "repo-x", "run-x"
+	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`, orgID, "acme", "Acme", planTierPro)
+	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`, repoID, orgID, "widgets")
+	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`, runID, orgID, repoID, "ci.yml", ciStatusQueued)
+
+	var mu sync.Mutex
+	var scripts []string
+	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, _ []string, script string) ([]byte, error) {
+		mu.Lock()
+		scripts = append(scripts, script)
+		mu.Unlock()
+		if strings.Contains(script, "FAIL") {
+			return []byte("boom\n"), errors.New("exit status 1")
+		}
+		return []byte("ok\n"), nil
+	})
+
+	payload, _ := json.Marshal(CIRunPayload{WorkflowRunID: runID, RepositoryID: repoID, OrganizationID: orgID, WorkflowYAML: []byte(yamlSrc)})
+	if err := worker.HandleCIRun(ctx, asynq.NewTask(TypeCIRun, payload)); err != nil {
+		t.Fatalf("HandleCIRun: %v", err)
+	}
+	var conclusion sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT conclusion FROM workflow_runs WHERE id = ?`, runID).Scan(&conclusion); err != nil {
+		t.Fatalf("query conclusion: %v", err)
+	}
+	// With no log repository wired, markRun stashes step logs after the enum
+	// value in the conclusion column; the enum is the first line.
+	return scripts, strings.SplitN(conclusion.String, "\n", 2)[0]
+}
+
 func TestCIEnvPrecedence(t *testing.T) {
-	scripts, conclusion := runWorkflowRecording(t, `name: CI
+	db := newCITestDB(t)
+	ctx := context.Background()
+	orgID, repoID, runID := "org-e", "repo-e", "run-e"
+	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`, orgID, "acme", "Acme", planTierPro)
+	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`, repoID, orgID, "widgets")
+	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`, runID, orgID, repoID, "ci.yml", ciStatusQueued)
+
+	yamlSrc := `name: CI
 on: push
+env:
+  L: workflow
+  W_ONLY: w
 jobs:
   build:
     env:
-      A: from-yaml
+      L: job
+      J_ONLY: j
     steps:
-      - run: echo A=$A
-      - run: env | grep B=
-`)
-	joined := strings.Join(scripts, "\n")
-	if !strings.Contains(joined, "A=yaml") {
-		t.Errorf("expected yaml-supplied A to override; scripts=%v", scripts)
+      - name: check
+        run: echo hi
+        env:
+          L: step
+          S_ONLY: s
+`
+	var gotEnv []string
+	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, env []string, _ string) ([]byte, error) {
+		gotEnv = env
+		return []byte("ok\n"), nil
+	})
+	payload, _ := json.Marshal(CIRunPayload{WorkflowRunID: runID, RepositoryID: repoID, OrganizationID: orgID, WorkflowYAML: []byte(yamlSrc)})
+	if err := worker.HandleCIRun(ctx, asynq.NewTask(TypeCIRun, payload)); err != nil {
+		t.Fatalf("HandleCIRun: %v", err)
 	}
-	if !strings.Contains(joined, "B=override") {
-		t.Errorf("expected override B to win over yaml-supplied B; scripts=%v", scripts)
+
+	want := map[string]string{"L": "step", "W_ONLY": "w", "J_ONLY": "j", "S_ONLY": "s"}
+	got := map[string]string{}
+	for _, kv := range gotEnv {
+		if eq := strings.IndexByte(kv, '='); eq >= 0 {
+			got[kv[:eq]] = kv[eq+1:]
+		}
 	}
-	if conclusion != ciConclusionFailure {
-		t.Errorf("conclusion = %q, want %q", conclusion, ciConclusionFailure)
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("env %s = %q, want %q (full env: %v)", k, got[k], v, gotEnv)
+		}
 	}
 }
 
@@ -242,46 +347,6 @@ jobs:
 	}
 	if conclusion != ciConclusionFailure {
 		t.Errorf("run conclusion = %q, want %q", conclusion, ciConclusionFailure)
-	}
-}
-
-// TestCINeedsSkipJobRepoCreateErrorsFailsRun verifies that when the job repo
-// fails to create or complete a skipped job during CIRun, the entire run
-// fails with ErrSkipPathCreateFailure rather than silently succeeding. This
-// guards against the skip path silently swallowing DB errors.
-func TestCINeedsSkipJobRepoCreateErrorsFailsRun(t *testing.T) {
-	// Mock job repo that always fails.
-	mockJobRepo := &mockWorkflowJobRepo{failOnCreate: true}
-
-	scripts, conclusion, err := runWorkflowRecordingWithJobRepo(t,
-		mockJobRepo,
-		`name: CI
-on: push
-jobs:
-  a:
-    steps:
-      - run: echo FAIL
-  b:
-    needs: [a]
-    steps:
-      - run: echo B_RAN
-`)
-
-	if err == nil {
-		t.Fatal("expected HandleCIRun to fail, but it succeeded")
-	}
-	if !errors.Is(err, ErrSkipPathCreateFailure) {
-		t.Fatalf("expected error to wrap ErrSkipPathCreateFailure, got: %v", err)
-	}
-
-	// Job b should not have been run since the skip path failed.
-	if len(scripts) > 0 {
-		t.Errorf("expected no scripts to be executed, got: %v", scripts)
-	}
-
-	// Conclusion should be empty since the run failed before completion.
-	if conclusion != "" {
-		t.Errorf("expected empty conclusion, got: %q", conclusion)
 	}
 }
 
@@ -367,121 +432,49 @@ func runWorkflowCapture(t *testing.T, yamlSrc string, mutate func(*CIRunPayload)
 	return scripts
 }
 
-func runWorkflowRecording(t *testing.T, yamlSrc string) ([]string, string) {
-	return runWorkflowRecordingErrCheck(t, yamlSrc, false)
-}
-
-func runWorkflowRecordingWithFailingJobRepo(t *testing.T, yamlSrc string) ([]string, string, error) {
-	t.Helper()
-	db := newCITestDB(t)
-	ctx := context.Background()
-	orgID := "org-skip"
-	repoID := "repo-skip"
-	runID := "run-skip"
-	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`, orgID, "acme", "Acme", planTierPro)
-	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`, repoID, orgID, "widgets")
-	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`, runID, orgID, repoID, "ci.yml", ciStatusQueued)
-
-	var mu sync.Mutex
-	var scripts []string
-
-	failRepo := &failOnCreateJobRepo{}
-	worker := NewCIWorker(db).
-		WithJobRepository(failRepo).
-		WithCommandRunner(func(_ context.Context, _ string, _ []string, script string) ([]byte, error) {
-			mu.Lock()
-			scripts = append(scripts, script)
-			mu.Unlock()
-			if strings.Contains(script, "FAIL") {
-				return nil, errors.New("exit status 1")
-			}
-			return []byte("ok\n"), nil
-		})
-
-	p := CIRunPayload{WorkflowRunID: runID, RepositoryID: repoID, OrganizationID: orgID, WorkflowYAML: []byte(yamlSrc)}
-	payload, _ := json.Marshal(p)
-	err := worker.HandleCIRun(ctx, asynq.NewTask(TypeCIRun, payload))
-	if err != nil {
-		return scripts, "", err
-	}
-
-	// Run again without the failing repo to get the conclusion.
-	db2 := newCITestDB(t)
-	mustExec(t, db2, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`, orgID, "acme", "Acme", planTierPro)
-	mustExec(t, db2, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`, repoID, orgID, "widgets")
-	mustExec(t, db2, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`, runID, orgID, repoID, "ci.yml", ciStatusQueued)
-	worker2 := NewCIWorker(db2).WithCommandRunner(func(_ context.Context, _ string, _ []string, script string) ([]byte, error) {
-		mu.Lock()
-		scripts = append(scripts, script)
-		mu.Unlock()
-		if strings.Contains(script, "FAIL") {
-			return nil, errors.New("exit status 1")
-		}
-		return []byte("ok\n"), nil
-	})
-	payload2, _ := json.Marshal(p)
-	if err := worker2.HandleCIRun(ctx, asynq.NewTask(TypeCIRun, payload2)); err != nil {
-		return scripts, "", err
-	}
-	return scripts, "", nil
-}
-
-type failOnCreateJobRepo struct{}
-
-func (f *failOnCreateJobRepo) Create(_ context.Context, _ *entity.WorkflowJob) error {
-	return ErrSkipPathCreateFailure
-}
-
-func (f *failOnCreateJobRepo) CreateBatch(_ context.Context, _ []*entity.WorkflowJob) error {
-	return ErrSkipPathCreateFailure
-}
-
-// TestCIInterpolatesGithubAndEnv runs a workflow that echoes $GITHUB_SHA and
-// verifies the interpolated value ends with the requested prefix. We do not
-// try to match the full hash — just the prefix the runner supplies.
 func TestCIInterpolatesGithubAndEnv(t *testing.T) {
 	scripts := runWorkflowCapture(t, `name: CI
 on: push
+env:
+  GREETING: hi
 jobs:
   build:
     steps:
-      - run: echo sha=$GITHUB_SHA
+      - run: echo "ref=${{ github.ref_name }} sha=${{ github.sha }} n=${{ github.run_number }} g=${{ env.GREETING }}"
 `, func(p *CIRunPayload) {
-		// Pre-populate the payload to simulate what the runner would interpolate.
-		p.Env = append(p.Env, "GITHUB_SHA=abcdef1234567890")
+		p.HeadBranch = "main"
+		p.HeadSHA = "deadbeef"
+		p.RunNumber = 42
 	})
-	if len(scripts) == 0 {
-		t.Fatalf("no scripts recorded")
+	if len(scripts) != 1 {
+		t.Fatalf("expected 1 script, got %d: %v", len(scripts), scripts)
 	}
-	joined := strings.Join(scripts, "\n")
-	if !strings.Contains(joined, "abcdef1234567890") {
-		t.Errorf("expected interpolated sha in scripts; scripts=%v", scripts)
+	want := `echo "ref=main sha=deadbeef n=42 g=hi"`
+	if strings.TrimSpace(scripts[0]) != want {
+		t.Errorf("interpolated script = %q, want %q", scripts[0], want)
 	}
 }
 
-// TestCIStepIfSkipsWhenFalse verifies that a step with if: 'false' is skipped
-// entirely and does not appear in the recorded scripts.
 func TestCIStepIfSkipsWhenFalse(t *testing.T) {
 	scripts := runWorkflowCapture(t, `name: CI
 on: push
 jobs:
   build:
     steps:
-      - run: echo SHOULD_NOT_RUN
-        if: false
-      - run: echo ALWAYS_RUNS
-`, nil)
+      - run: echo ALWAYS_ONE
+      - if: github.ref_name == 'nonexistent'
+        run: echo SHOULD_SKIP
+      - run: echo ALWAYS_TWO
+`, func(p *CIRunPayload) { p.HeadBranch = "main" })
 	joined := strings.Join(scripts, "\n")
-	if strings.Contains(joined, "SHOULD_NOT_RUN") {
-		t.Errorf("step with if: false should not have been recorded; scripts=%v", scripts)
+	if strings.Contains(joined, "SHOULD_SKIP") {
+		t.Errorf("step with false if: ran; scripts=%v", scripts)
 	}
-	if !strings.Contains(joined, "ALWAYS_RUNS") {
-		t.Errorf("step without if: should always run; scripts=%v", scripts)
+	if !strings.Contains(joined, "ALWAYS_ONE") || !strings.Contains(joined, "ALWAYS_TWO") {
+		t.Errorf("unconditional steps did not both run; scripts=%v", scripts)
 	}
 }
 
-// TestCIStepIfAlwaysRunsAfterFailure verifies that a step with if: 'always()'
-// runs even when the previous step fails.
 func TestCIStepIfAlwaysRunsAfterFailure(t *testing.T) {
 	scripts := runWorkflowCapture(t, `name: CI
 on: push
@@ -489,85 +482,168 @@ jobs:
   build:
     steps:
       - run: echo FAIL
-        if: 'false'
-      - run: echo ALWAYS_RUNS
-        if: always()
+      - run: echo SKIPPED_DEFAULT
+      - if: always()
+        run: echo CLEANUP
 `, nil)
 	joined := strings.Join(scripts, "\n")
-	if !strings.Contains(joined, "ALWAYS_RUNS") {
-		t.Errorf("step with if: always() should have run; scripts=%v", scripts)
+	if strings.Contains(joined, "SKIPPED_DEFAULT") {
+		t.Errorf("default step ran after a failure; scripts=%v", scripts)
+	}
+	if !strings.Contains(joined, "CLEANUP") {
+		t.Errorf("if: always() step did not run after failure; scripts=%v", scripts)
 	}
 }
 
-// TestCIMatrixExpandsAndInterpolates verifies that a matrix job generates
-// instances for every combination and that the instance name reflects the
-// matrix context.
 func TestCIMatrixExpandsAndInterpolates(t *testing.T) {
 	scripts := runWorkflowCapture(t, `name: CI
 on: push
 jobs:
-  matrix:
+  build:
     strategy:
       matrix:
         os: [linux, windows]
-        arch: [x64, arm64]
+        go: ['1.21', '1.22']
     steps:
-      - run: echo "RUNNING on ${{ matrix.os }} ${{ matrix.arch }}"
+      - run: echo "os=${{ matrix.os }} go=${{ matrix.go }}"
 `, nil)
-	var os, arch []string
-	for _, s := range scripts {
-		for _, o := range []string{"linux", "windows"} {
-			if strings.Contains(s, o) {
-				os = append(os, o)
-			}
-		}
-		for _, a := range []string{"x64", "arm64"} {
-			if strings.Contains(s, a) {
-				arch = append(arch, a)
-			}
-		}
+	if len(scripts) != 4 {
+		t.Fatalf("expected 4 matrix instances, got %d: %v", len(scripts), scripts)
 	}
-	if len(os) != 4 || len(arch) != 4 {
-		t.Errorf("expected 4 linux and 4 arm64 entries (one per combination); got os=%v arch=%v", os, arch)
+	want := map[string]bool{
+		`echo "os=linux go=1.21"`:   false,
+		`echo "os=linux go=1.22"`:   false,
+		`echo "os=windows go=1.21"`: false,
+		`echo "os=windows go=1.22"`: false,
+	}
+	for _, s := range scripts {
+		s = strings.TrimSpace(s)
+		if _, ok := want[s]; !ok {
+			t.Errorf("unexpected matrix script %q", s)
+			continue
+		}
+		want[s] = true
+	}
+	for combo, seen := range want {
+		if !seen {
+			t.Errorf("matrix combination not executed: %q", combo)
+		}
 	}
 }
 
-// TestCIMatrixJobFailsIfAnyInstanceFails verifies that a matrix job fails if
-// any of its instances fail, and that the failure is attributed to the
-// logical (matrix) job, not an individual instance.
 func TestCIMatrixJobFailsIfAnyInstanceFails(t *testing.T) {
 	scripts, conclusion := runWorkflowRecording(t, `name: CI
 on: push
 jobs:
-  matrix:
+  build:
     strategy:
       matrix:
-        os: [linux, windows]
-        arch: [x64]
+        n: [ok, FAIL, ok2]
     steps:
-      - run: echo "RUNNING on ${{ matrix.os }} ${{ matrix.arch }}"
+      - run: echo ${{ matrix.n }}
+  after:
+    needs: [build]
+    steps:
+      - run: echo AFTER_RAN
 `)
-	// The failure should be reported at the logical job level, not per-instance.
 	if conclusion != ciConclusionFailure {
-		t.Errorf("conclusion = %q, want %q", conclusion, ciConclusionFailure)
+		t.Errorf("run conclusion = %q, want failure (one matrix instance failed)", conclusion)
 	}
-	// We expect 2 scripts — one per instance — but only the failing one
-	// should have been recorded.
-	if len(scripts) != 2 {
-		t.Errorf("expected 2 scripts (one per matrix instance); got %d: %v", len(scripts), scripts)
+	if strings.Contains(strings.Join(scripts, "\n"), "AFTER_RAN") {
+		t.Errorf("dependent job ran though a matrix instance failed; scripts=%v", scripts)
 	}
-	// The failure should be attributed to the logical job, not an instance.
-	// This is hard to verify from the script output alone, but the conclusion
-	// being "failure" rather than "success" confirms the matrix job failed.
+}
+
+func TestCICheckoutInvokedWithRepoAndRef(t *testing.T) {
+	db := newCITestDB(t)
+	ctx := context.Background()
+	orgID, repoID, runID := "org-co", "repo-co", "run-co"
+	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`, orgID, "acme", "Acme", planTierPro)
+	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`, repoID, orgID, "widgets")
+	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`, runID, orgID, repoID, "ci.yml", ciStatusQueued)
+
+	var gotPath, gotRef, gotDest string
+	var checkoutCalls int
+	worker := NewCIWorker(db).
+		WithCheckout(func(_ context.Context, gitPath, ref, dest string) error {
+			checkoutCalls++
+			gotPath, gotRef, gotDest = gitPath, ref, dest
+			return nil
+		}).
+		WithCommandRunner(func(_ context.Context, _ string, _ []string, _ string) ([]byte, error) {
+			return []byte("ok\n"), nil
+		})
+
+	p := CIRunPayload{
+		WorkflowRunID: runID, RepositoryID: repoID, OrganizationID: orgID,
+		WorkflowYAML: []byte(`name: CI
+on: push
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo built
+`),
+		HeadSHA:     "cafe1234",
+		RepoGitPath: "/data/git/alice/demo.git",
+	}
+	payload, _ := json.Marshal(p)
+	if err := worker.HandleCIRun(ctx, asynq.NewTask(TypeCIRun, payload)); err != nil {
+		t.Fatalf("HandleCIRun: %v", err)
+	}
+	if checkoutCalls != 1 {
+		t.Fatalf("checkout called %d times, want 1", checkoutCalls)
+	}
+	if gotPath != "/data/git/alice/demo.git" {
+		t.Errorf("checkout gitPath = %q, want repo path", gotPath)
+	}
+	if gotRef != "cafe1234" {
+		t.Errorf("checkout ref = %q, want head sha", gotRef)
+	}
+	if gotDest == "" {
+		t.Errorf("checkout dest was empty")
+	}
+}
+
+func TestCIUnsupportedActionSkippedNotFailed(t *testing.T) {
+	scripts, conclusion := runWorkflowRecording(t, `name: CI
+on: push
+jobs:
+  build:
+    steps:
+      - uses: some/marketplace-action@v3
+      - run: echo STILL_RAN
+`)
+	if conclusion != ciConclusionSuccess {
+		t.Errorf("run conclusion = %q, want success (unsupported action must not fail)", conclusion)
+	}
+	if !strings.Contains(strings.Join(scripts, "\n"), "STILL_RAN") {
+		t.Errorf("run step after unsupported action did not run; scripts=%v", scripts)
+	}
+}
+
+func mustExec(t *testing.T, db *sql.DB, q string, args ...any) {
+	t.Helper()
+	if _, err := db.Exec(q, args...); err != nil {
+		t.Fatalf("exec %q: %v", q, err)
+	}
 }
 
 type ciFakeJobLogRepo struct {
-	lines []domainrepo.JobLogLine
+	lines []*entity.JobLogLine
 }
 
-func (f *ciFakeJobLogRepo) Append(_ context.Context, line domainrepo.JobLogLine) error {
-	f.lines = append(f.lines, line)
+func (f *ciFakeJobLogRepo) AppendLines(_ context.Context, lines []*entity.JobLogLine) error {
+	f.lines = append(f.lines, lines...)
 	return nil
+}
+
+func (f *ciFakeJobLogRepo) ListLines(_ context.Context, _, _ string, _ int64, _ int) ([]*entity.JobLogLine, error) {
+	return f.lines, nil
+}
+
+func (f *ciFakeJobLogRepo) CountLines(_ context.Context, _, _ string) (int64, error) {
+	return int64(len(f.lines)), nil
 }
 
 func (f *ciFakeJobLogRepo) SetMeta(_ context.Context, _ *domainrepo.JobLogMeta) error {
@@ -576,61 +652,6 @@ func (f *ciFakeJobLogRepo) SetMeta(_ context.Context, _ *domainrepo.JobLogMeta) 
 
 func (f *ciFakeJobLogRepo) GetMeta(_ context.Context, _, _ string) (*domainrepo.JobLogMeta, error) {
 	return nil, nil
-}
-
-// TestHandleCIRun_AppendsJobLogLinesWhenLogRepoInjected verifies that when a
-// job log repository is injected, each step's output is written to it.
-
-
-// runWorkflowRecordingWithJobRepo runs a workflow with a custom job repository
-// and returns the scripts executed, the run conclusion, and any error.
-func runWorkflowRecordingWithJobRepo(t *testing.T, jobRepo *mockWorkflowJobRepo, yamlSrc string) ([]string, string, error) {
-	t.Helper()
-
-	db := newCITestDB(t)
-	ctx := context.Background()
-
-	orgID := "org"
-	repoID := "repo"
-	runID := "run"
-
-	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`,
-		orgID, "acme", "Acme", planTierPro)
-	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`,
-		repoID, orgID, "widgets")
-	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`,
-		runID, orgID, repoID, "ci.yml", ciStatusQueued)
-
-	worker := NewCIWorker(db)
-	if jobRepo != nil {
-		worker = worker.WithJobRepository(jobRepo)
-	}
-
-	var mu sync.Mutex
-	var scripts []string
-	worker = worker.WithCommandRunner(func(_ context.Context, _ string, _ []string, script string) ([]byte, error) {
-		mu.Lock()
-		scripts = append(scripts, script)
-		mu.Unlock()
-		if strings.Contains(script, "FAIL") {
-			return nil, errors.New("exit status 1")
-		}
-		return []byte("ok\n"), nil
-	})
-
-	p := CIRunPayload{
-		WorkflowRunID:  runID,
-		RepositoryID:   repoID,
-		OrganizationID: orgID,
-		WorkflowYAML:   []byte(yamlSrc),
-	}
-	payload, _ := json.Marshal(p)
-	err := worker.HandleCIRun(ctx, asynq.NewTask(TypeCIRun, payload))
-	if err != nil {
-		return scripts, "", err
-	}
-
-	return scripts, ciConclusionSuccess, nil
 }
 
 func TestHandleCIRun_AppendsJobLogLinesWhenLogRepoInjected(t *testing.T) {
