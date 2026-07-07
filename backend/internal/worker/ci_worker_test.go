@@ -697,6 +697,85 @@ jobs:
 	}
 }
 
+func TestCIDockerContainerActionRuns(t *testing.T) {
+	db := newCITestDB(t)
+	ctx := context.Background()
+	orgID, repoID, runID := "org-dk", "repo-dk", "run-dk"
+	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`, orgID, "acme", "Acme", planTierPro)
+	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`, repoID, orgID, "widgets")
+	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`, runID, orgID, repoID, "ci.yml", ciStatusQueued)
+
+	var gotImage string
+	var gotEnv []string
+	worker := NewCIWorker(db).
+		WithContainerAction(func(_ context.Context, image, _ string, env []string) ([]byte, error) {
+			gotImage = image
+			gotEnv = env
+			return []byte("container ran\n"), nil
+		})
+
+	payload, _ := json.Marshal(CIRunPayload{
+		WorkflowRunID: runID, RepositoryID: repoID, OrganizationID: orgID,
+		WorkflowYAML: []byte(`name: CI
+on: push
+jobs:
+  build:
+    steps:
+      - uses: docker://alpine:3
+        with:
+          greeting: hello
+          my-name: world
+`),
+	})
+	if err := worker.HandleCIRun(ctx, asynq.NewTask(TypeCIRun, payload)); err != nil {
+		t.Fatalf("HandleCIRun: %v", err)
+	}
+	if gotImage != "alpine:3" {
+		t.Errorf("container image = %q, want alpine:3", gotImage)
+	}
+	joined := strings.Join(gotEnv, "\n")
+	if !strings.Contains(joined, "INPUT_GREETING=hello") {
+		t.Errorf("expected INPUT_GREETING=hello in env; got %v", gotEnv)
+	}
+	if !strings.Contains(joined, "INPUT_MY_NAME=world") {
+		t.Errorf("expected INPUT_MY_NAME=world (dash normalized) in env; got %v", gotEnv)
+	}
+}
+
+func TestCIDockerContainerActionFailureFailsJob(t *testing.T) {
+	db := newCITestDB(t)
+	ctx := context.Background()
+	orgID, repoID, runID := "org-dkf", "repo-dkf", "run-dkf"
+	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`, orgID, "acme", "Acme", planTierPro)
+	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`, repoID, orgID, "widgets")
+	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`, runID, orgID, repoID, "ci.yml", ciStatusQueued)
+
+	worker := NewCIWorker(db).
+		WithContainerAction(func(_ context.Context, _, _ string, _ []string) ([]byte, error) {
+			return []byte("boom\n"), errors.New("exit status 1")
+		})
+	payload, _ := json.Marshal(CIRunPayload{
+		WorkflowRunID: runID, RepositoryID: repoID, OrganizationID: orgID,
+		WorkflowYAML: []byte(`name: CI
+on: push
+jobs:
+  build:
+    steps:
+      - uses: docker://alpine:3
+`),
+	})
+	if err := worker.HandleCIRun(ctx, asynq.NewTask(TypeCIRun, payload)); err != nil {
+		t.Fatalf("HandleCIRun: %v", err)
+	}
+	var conclusion sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT conclusion FROM workflow_runs WHERE id = ?`, runID).Scan(&conclusion); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if got := strings.SplitN(conclusion.String, "\n", 2)[0]; got != ciConclusionFailure {
+		t.Errorf("conclusion = %q, want failure (container action errored)", got)
+	}
+}
+
 func mustExec(t *testing.T, db *sql.DB, q string, args ...any) {
 	t.Helper()
 	if _, err := db.Exec(q, args...); err != nil {
