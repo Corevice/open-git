@@ -495,6 +495,27 @@ jobs:
 	}
 }
 
+func TestCIJobLevelIfSkipsWholeJob(t *testing.T) {
+	scripts := runWorkflowCapture(t, `name: CI
+on: push
+jobs:
+  always:
+    steps:
+      - run: echo ALWAYS_JOB
+  gated:
+    if: github.ref_name == 'nope'
+    steps:
+      - run: echo GATED_SHOULD_NOT_RUN
+`, func(p *CIRunPayload) { p.HeadBranch = "main" })
+	joined := strings.Join(scripts, "\n")
+	if strings.Contains(joined, "GATED_SHOULD_NOT_RUN") {
+		t.Errorf("job with false job-level if: ran; scripts=%v", scripts)
+	}
+	if !strings.Contains(joined, "ALWAYS_JOB") {
+		t.Errorf("ungated job did not run; scripts=%v", scripts)
+	}
+}
+
 func TestCIMatrixExpandsAndInterpolates(t *testing.T) {
 	scripts := runWorkflowCapture(t, `name: CI
 on: push

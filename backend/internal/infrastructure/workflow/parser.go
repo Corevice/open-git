@@ -73,6 +73,7 @@ type WorkflowIR struct {
 type IRJob struct {
 	RunsOn          string
 	Needs           []string
+	If              string
 	MatrixExpansion []map[string]any
 	Steps           []IRStep
 	Env             map[string]string
@@ -287,6 +288,7 @@ func ParseWorkflowFull(data []byte) (*WorkflowIR, []Diagnostic, error) {
 		irJob := IRJob{
 			RunsOn: nodeToString(job.RunsOn),
 			Needs:  decodeNeeds(job.Needs),
+			If:     job.If,
 			Env:    job.Env,
 		}
 
