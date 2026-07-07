@@ -75,6 +75,7 @@ const (
 
 var (
 	ErrConcurrentLimitExceeded = errors.New("ci concurrent run limit exceeded")
+	ErrSkipPathCreateFailure   = errors.New("skip path: failed to register skipped job")
 )
 
 type CIRunPayload struct {
@@ -292,11 +293,15 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 				skipUUID := int64CompatibleUUID()
 				jobIDs[jobName] = skipUUID.String()
 				now := time.Now().UTC()
-				_ = w.jobRepo.Create(ctx, &entity.WorkflowJob{
+				if createErr := w.jobRepo.Create(ctx, &entity.WorkflowJob{
 					ID: skipUUID, WorkflowRunID: &runUUID, OrganizationID: orgUUID, RepositoryID: repoUUID,
 					Name: jobName, Status: entity.WorkflowJobStatusInProgress, StartedAt: &now, CreatedAt: now,
-				})
-				_ = w.jobRepo.Complete(ctx, skipUUID, entity.WorkflowJobConclusionSkipped, time.Now().UTC())
+				}); createErr != nil {
+					return fmt.Errorf("create workflow job: %w", createErr)
+				}
+				if completeErr := w.jobRepo.Complete(ctx, skipUUID, entity.WorkflowJobConclusionSkipped, time.Now().UTC()); completeErr != nil {
+					return fmt.Errorf("complete workflow job: %w", completeErr)
+				}
 			}
 			continue
 		}
