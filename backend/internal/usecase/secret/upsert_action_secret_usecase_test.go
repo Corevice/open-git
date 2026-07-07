@@ -125,22 +125,13 @@ func TestUpsertActionSecretUsecaseSuccess(t *testing.T) {
 	if repo.upserted == nil {
 		t.Fatalf("expected secret to be upserted")
 	}
-	if repo.upserted.EncryptedValue == plaintext {
-		t.Fatalf("expected encrypted value to be stored")
-	}
-	if repo.upserted.EncryptedValue == "" {
-		t.Fatalf("expected encrypted value to be stored")
+	// The repository is the single at-rest encryption boundary, so the usecase
+	// hands it the plaintext value (encrypting here too would double-encrypt).
+	if repo.upserted.EncryptedValue != plaintext {
+		t.Fatalf("value passed to repo = %q, want plaintext %q", repo.upserted.EncryptedValue, plaintext)
 	}
 	if repo.upserted.KeyID != "test-key-id" {
 		t.Fatalf("key id = %q, want test-key-id", repo.upserted.KeyID)
-	}
-
-	decrypted, err := enc.Decrypt([]byte(repo.upserted.EncryptedValue))
-	if err != nil {
-		t.Fatalf("decrypt stored value: %v", err)
-	}
-	if string(decrypted) != plaintext {
-		t.Fatalf("decrypted value = %q, want %q", string(decrypted), plaintext)
 	}
 
 	if auditRepo.action != "secret.create" {
