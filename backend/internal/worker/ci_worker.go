@@ -281,26 +281,6 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 	for _, jobName := range order {
 		job := ir.Jobs[jobName]
 
-		var jobUUID uuid.UUID
-		if w.jobRepo != nil {
-			jobUUID = int64CompatibleUUID()
-			jobIDs[jobName] = jobUUID.String()
-			now := time.Now().UTC()
-			wfJob := &entity.WorkflowJob{
-				ID:             jobUUID,
-				WorkflowRunID:  &runUUID,
-				OrganizationID: orgUUID,
-				RepositoryID:   repoUUID,
-				Name:           jobName,
-				Status:         entity.WorkflowJobStatusInProgress,
-				StartedAt:      &now,
-				CreatedAt:      now,
-			}
-			if createErr := w.jobRepo.Create(ctx, wfJob); createErr != nil {
-				return fmt.Errorf("create workflow job: %w", createErr)
-			}
-		}
-
 		// A job whose dependencies did not all succeed is skipped, like GitHub
 		// Actions. The dependency's own failure already set the run conclusion,
 		// so a skip adds no new failure — but independent jobs still run.
@@ -308,128 +288,91 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 			jobResults[jobName] = jobResultSkipped
 			jobLogStatus[jobName] = jobResultSkipped
 			fmt.Fprintf(logBuf, "[job=%s] skipped: dependency %q did not succeed\n", jobName, dep)
-			if w.jobRepo != nil && jobUUID != uuid.Nil {
-				_ = w.jobRepo.Complete(ctx, jobUUID, entity.WorkflowJobConclusionSkipped, time.Now().UTC())
+			if w.jobRepo != nil {
+				skipUUID := int64CompatibleUUID()
+				jobIDs[jobName] = skipUUID.String()
+				now := time.Now().UTC()
+				_ = w.jobRepo.Create(ctx, &entity.WorkflowJob{
+					ID: skipUUID, WorkflowRunID: &runUUID, OrganizationID: orgUUID, RepositoryID: repoUUID,
+					Name: jobName, Status: entity.WorkflowJobStatusInProgress, StartedAt: &now, CreatedAt: now,
+				})
+				_ = w.jobRepo.Complete(ctx, skipUUID, entity.WorkflowJobConclusionSkipped, time.Now().UTC())
 			}
 			continue
 		}
 
-		jobLogStatus[jobName] = jobLogStatusSuccess
-		jobFailed := false
+		// Expand the matrix into one instance per combination; a job without a
+		// matrix runs as a single instance. The logical job succeeds only if
+		// every instance succeeds (so dependents see one aggregated result).
+		combos := job.MatrixExpansion
+		if len(combos) == 0 {
+			combos = []map[string]any{nil}
+		}
+		logicalFailed := false
 
-		for i, step := range job.Steps {
-			// Merge env (workflow < job < step) and expose it, along with the
-			// github/runner/secrets contexts, for expression evaluation.
-			mergedEnv := mergeStringMaps(ir.Env, job.Env, step.Env)
-			evalCtx := &workflow.EvalContext{
-				Contexts: map[string]map[string]string{
-					"github":  githubCtx,
-					"runner":  runnerCtx,
-					"secrets": secretsCtx,
-					"env":     mergedEnv,
-					"matrix":  {},
-				},
-				Failed: jobFailed,
-			}
-			for k, v := range mergedEnv {
-				if strings.Contains(v, "${{") {
-					if iv, ierr := workflow.InterpolateString(v, evalCtx); ierr == nil {
-						mergedEnv[k] = iv
-					}
-				}
+		for _, combo := range combos {
+			instanceName := jobName
+			matrixCtx := map[string]string{}
+			if combo != nil {
+				matrixCtx = stringifyMatrixCombo(combo)
+				instanceName = fmt.Sprintf("%s (%s)", jobName, matrixLabel(combo))
 			}
 
-			// Decide whether the step runs. An explicit `if:` is evaluated
-			// (with the current failure state, so always()/failure() work);
-			// otherwise the step is skipped once the job has failed.
-			if step.If != "" {
-				run, ifErr := workflow.EvaluateCondition(step.If, evalCtx)
-				if ifErr != nil {
-					jobFailed = true
-					fmt.Fprintf(logBuf, "[job=%s step=%d] if error: %s\n", jobName, i, ifErr.Error())
-					continue
+			var jobUUID uuid.UUID
+			if w.jobRepo != nil {
+				jobUUID = int64CompatibleUUID()
+				jobIDs[instanceName] = jobUUID.String()
+				now := time.Now().UTC()
+				if createErr := w.jobRepo.Create(ctx, &entity.WorkflowJob{
+					ID: jobUUID, WorkflowRunID: &runUUID, OrganizationID: orgUUID, RepositoryID: repoUUID,
+					Name: instanceName, Status: entity.WorkflowJobStatusInProgress, StartedAt: &now, CreatedAt: now,
+				}); createErr != nil {
+					return fmt.Errorf("create workflow job: %w", createErr)
 				}
-				if !run {
-					continue
-				}
-			} else if jobFailed {
-				continue
 			}
 
-			if step.Run == "" {
-				// `uses` steps are not executed yet; skip without failing.
-				continue
+			jobIDStr := instanceName
+			if w.jobRepo != nil {
+				jobIDStr = jobUUID.String()
 			}
+			jobLogStatus[instanceName] = jobLogStatusSuccess
+			instanceFailed := w.runJobSteps(ctx, runJobSpec{
+				payload:       payload,
+				wfEnv:         ir.Env,
+				job:           job,
+				instanceName:  instanceName,
+				jobIDStr:      jobIDStr,
+				matrixCtx:     matrixCtx,
+				githubCtx:     githubCtx,
+				runnerCtx:     runnerCtx,
+				secretsCtx:    secretsCtx,
+				secretEnv:     secretEnv,
+				secretValues:  secretValues,
+				workdir:       workdir,
+				logBuf:        logBuf,
+				useStreaming:  useStreaming,
+				streamRunner:  streamRunner,
+				jobLineCounts: jobLineCounts,
+			})
 
-			script, _ := workflow.InterpolateString(step.Run, evalCtx)
-			stepEnv := buildStepEnv([]map[string]string{mergedEnv}, secretEnv)
-			stepCtx, cancel := context.WithTimeout(ctx, w.stepWait)
-
-			if useStreaming {
-				jobIDStr := jobIDs[jobName]
-				if jobIDStr == "" {
-					jobIDStr = jobName
+			if instanceFailed {
+				logicalFailed = true
+				jobLogStatus[instanceName] = jobLogStatusFailure
+			}
+			if w.jobRepo != nil && jobUUID != uuid.Nil {
+				jobConclusion := entity.WorkflowJobConclusionSuccess
+				if instanceFailed {
+					jobConclusion = entity.WorkflowJobConclusionFailure
 				}
-				runErr := streamRunner(stepCtx, workdir, stepEnv, script, i, func(stream, line string) {
-					jobLineCounts[jobName]++
-					lineNum := jobLineCounts[jobName]
-					masked := maskSecrets(line, secretValues)
-					fmt.Fprintf(logBuf, "[job=%s step=%d name=%s]\n%s\n", jobName, i, step.Name, masked)
-
-					logLine := &entity.JobLogLine{
-						OrganizationID: payload.OrganizationID,
-						RepositoryID:   payload.RepositoryID,
-						RunID:          payload.WorkflowRunID,
-						JobID:          jobIDStr,
-						StepIndex:      i,
-						LineNumber:     lineNum,
-						Stream:         stream,
-						Text:           masked,
-						CreatedAt:      time.Now().UTC(),
-					}
-					if appendErr := w.logRepo.AppendLines(ctx, []*entity.JobLogLine{logLine}); appendErr != nil {
-						return
-					}
-					if w.logPublisher != nil {
-						_ = w.logPublisher.Publish(ctx, logLine)
-					}
-				})
-				cancel()
-
-				if runErr != nil {
-					jobFailed = true
-					fmt.Fprintf(logBuf, "[job=%s step=%d] error: %s\n", jobName, i, maskSecrets(runErr.Error(), secretValues))
-				}
-			} else {
-				out, runErr := w.runStep(stepCtx, workdir, stepEnv, script)
-				cancel()
-
-				masked := maskSecrets(string(out), secretValues)
-				fmt.Fprintf(logBuf, "[job=%s step=%d name=%s]\n%s\n", jobName, i, step.Name, masked)
-
-				if runErr != nil {
-					jobFailed = true
-					fmt.Fprintf(logBuf, "[job=%s step=%d] error: %s\n", jobName, i, maskSecrets(runErr.Error(), secretValues))
-				}
+				_ = w.jobRepo.Complete(ctx, jobUUID, jobConclusion, time.Now().UTC())
 			}
 		}
 
-		if jobFailed {
+		if logicalFailed {
 			jobResults[jobName] = jobResultFailure
-			jobLogStatus[jobName] = jobLogStatusFailure
 			conclusion = ciConclusionFailure
 		} else {
 			jobResults[jobName] = jobResultSuccess
-		}
-
-		// Record the job's terminal state so run detail pages show per-job
-		// results rather than jobs stuck in_progress forever.
-		if w.jobRepo != nil && jobUUID != uuid.Nil {
-			jobConclusion := entity.WorkflowJobConclusionSuccess
-			if jobFailed {
-				jobConclusion = entity.WorkflowJobConclusionFailure
-			}
-			_ = w.jobRepo.Complete(ctx, jobUUID, jobConclusion, time.Now().UTC())
 		}
 	}
 
@@ -458,6 +401,128 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 	return nil
 }
 
+// runJobSpec bundles the per-run state a single job instance needs to execute.
+type runJobSpec struct {
+	payload       CIRunPayload
+	wfEnv         map[string]string
+	job           workflow.IRJob
+	instanceName  string
+	jobIDStr      string
+	matrixCtx     map[string]string
+	githubCtx     map[string]string
+	runnerCtx     map[string]string
+	secretsCtx    map[string]string
+	secretEnv     []string
+	secretValues  []string
+	workdir       string
+	logBuf        *strings.Builder
+	useStreaming  bool
+	streamRunner  StreamingCommandRunner
+	jobLineCounts map[string]int64
+}
+
+// runJobSteps executes one job instance's steps, evaluating expressions against
+// the supplied contexts (including the matrix combination), and returns whether
+// the instance failed.
+func (w *CIWorker) runJobSteps(ctx context.Context, s runJobSpec) bool {
+	jobFailed := false
+
+	for i, step := range s.job.Steps {
+		// Merge env (workflow < job < step) and expose it, with the
+		// github/runner/secrets/matrix contexts, for expression evaluation.
+		mergedEnv := mergeStringMaps(s.wfEnv, s.job.Env, step.Env)
+		evalCtx := &workflow.EvalContext{
+			Contexts: map[string]map[string]string{
+				"github":  s.githubCtx,
+				"runner":  s.runnerCtx,
+				"secrets": s.secretsCtx,
+				"env":     mergedEnv,
+				"matrix":  s.matrixCtx,
+			},
+			Failed: jobFailed,
+		}
+		for k, v := range mergedEnv {
+			if strings.Contains(v, "${{") {
+				if iv, ierr := workflow.InterpolateString(v, evalCtx); ierr == nil {
+					mergedEnv[k] = iv
+				}
+			}
+		}
+
+		// Decide whether the step runs. An explicit `if:` is evaluated (with
+		// the current failure state, so always()/failure() work); otherwise a
+		// step is skipped once the job has failed.
+		if step.If != "" {
+			run, ifErr := workflow.EvaluateCondition(step.If, evalCtx)
+			if ifErr != nil {
+				jobFailed = true
+				fmt.Fprintf(s.logBuf, "[job=%s step=%d] if error: %s\n", s.instanceName, i, ifErr.Error())
+				continue
+			}
+			if !run {
+				continue
+			}
+		} else if jobFailed {
+			continue
+		}
+
+		if step.Run == "" {
+			// `uses` steps are not executed yet; skip without failing.
+			continue
+		}
+
+		script, _ := workflow.InterpolateString(step.Run, evalCtx)
+		stepEnv := buildStepEnv([]map[string]string{mergedEnv}, s.secretEnv)
+		stepCtx, cancel := context.WithTimeout(ctx, w.stepWait)
+
+		if s.useStreaming {
+			runErr := s.streamRunner(stepCtx, s.workdir, stepEnv, script, i, func(stream, line string) {
+				s.jobLineCounts[s.instanceName]++
+				lineNum := s.jobLineCounts[s.instanceName]
+				masked := maskSecrets(line, s.secretValues)
+				fmt.Fprintf(s.logBuf, "[job=%s step=%d name=%s]\n%s\n", s.instanceName, i, step.Name, masked)
+
+				logLine := &entity.JobLogLine{
+					OrganizationID: s.payload.OrganizationID,
+					RepositoryID:   s.payload.RepositoryID,
+					RunID:          s.payload.WorkflowRunID,
+					JobID:          s.jobIDStr,
+					StepIndex:      i,
+					LineNumber:     lineNum,
+					Stream:         stream,
+					Text:           masked,
+					CreatedAt:      time.Now().UTC(),
+				}
+				if appendErr := w.logRepo.AppendLines(ctx, []*entity.JobLogLine{logLine}); appendErr != nil {
+					return
+				}
+				if w.logPublisher != nil {
+					_ = w.logPublisher.Publish(ctx, logLine)
+				}
+			})
+			cancel()
+
+			if runErr != nil {
+				jobFailed = true
+				fmt.Fprintf(s.logBuf, "[job=%s step=%d] error: %s\n", s.instanceName, i, maskSecrets(runErr.Error(), s.secretValues))
+			}
+		} else {
+			out, runErr := w.runStep(stepCtx, s.workdir, stepEnv, script)
+			cancel()
+
+			masked := maskSecrets(string(out), s.secretValues)
+			fmt.Fprintf(s.logBuf, "[job=%s step=%d name=%s]\n%s\n", s.instanceName, i, step.Name, masked)
+
+			if runErr != nil {
+				jobFailed = true
+				fmt.Fprintf(s.logBuf, "[job=%s step=%d] error: %s\n", s.instanceName, i, maskSecrets(runErr.Error(), s.secretValues))
+			}
+		}
+	}
+
+	return jobFailed
+}
+
 // sortedJobNames returns job names in a stable order (used only as a fallback
 // when the topological order is unavailable).
 func sortedJobNames(jobs map[string]workflow.IRJob) []string {
@@ -478,6 +543,32 @@ func firstUnsatisfiedNeed(needs []string, results map[string]string) (string, bo
 		}
 	}
 	return "", false
+}
+
+// stringifyMatrixCombo renders a matrix combination's values as strings for the
+// `matrix` expression context.
+func stringifyMatrixCombo(combo map[string]any) map[string]string {
+	out := make(map[string]string, len(combo))
+	for k, v := range combo {
+		out[k] = fmt.Sprintf("%v", v)
+	}
+	return out
+}
+
+// matrixLabel builds the GitHub-style suffix for a matrix job instance, e.g.
+// "ubuntu, 1.22". Keys are sorted for deterministic naming since the combination
+// map is unordered.
+func matrixLabel(combo map[string]any) string {
+	keys := make([]string, 0, len(combo))
+	for k := range combo {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%v", combo[k]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // refFromBranch returns the full git ref for a branch name (empty for empty).

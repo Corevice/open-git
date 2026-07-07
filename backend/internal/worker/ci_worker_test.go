@@ -495,6 +495,65 @@ jobs:
 	}
 }
 
+func TestCIMatrixExpandsAndInterpolates(t *testing.T) {
+	scripts := runWorkflowCapture(t, `name: CI
+on: push
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [linux, windows]
+        go: ['1.21', '1.22']
+    steps:
+      - run: echo "os=${{ matrix.os }} go=${{ matrix.go }}"
+`, nil)
+	if len(scripts) != 4 {
+		t.Fatalf("expected 4 matrix instances, got %d: %v", len(scripts), scripts)
+	}
+	want := map[string]bool{
+		`echo "os=linux go=1.21"`:   false,
+		`echo "os=linux go=1.22"`:   false,
+		`echo "os=windows go=1.21"`: false,
+		`echo "os=windows go=1.22"`: false,
+	}
+	for _, s := range scripts {
+		s = strings.TrimSpace(s)
+		if _, ok := want[s]; !ok {
+			t.Errorf("unexpected matrix script %q", s)
+			continue
+		}
+		want[s] = true
+	}
+	for combo, seen := range want {
+		if !seen {
+			t.Errorf("matrix combination not executed: %q", combo)
+		}
+	}
+}
+
+func TestCIMatrixJobFailsIfAnyInstanceFails(t *testing.T) {
+	scripts, conclusion := runWorkflowRecording(t, `name: CI
+on: push
+jobs:
+  build:
+    strategy:
+      matrix:
+        n: [ok, FAIL, ok2]
+    steps:
+      - run: echo ${{ matrix.n }}
+  after:
+    needs: [build]
+    steps:
+      - run: echo AFTER_RAN
+`)
+	if conclusion != ciConclusionFailure {
+		t.Errorf("run conclusion = %q, want failure (one matrix instance failed)", conclusion)
+	}
+	if strings.Contains(strings.Join(scripts, "\n"), "AFTER_RAN") {
+		t.Errorf("dependent job ran though a matrix instance failed; scripts=%v", scripts)
+	}
+}
+
 func mustExec(t *testing.T, db *sql.DB, q string, args ...any) {
 	t.Helper()
 	if _, err := db.Exec(q, args...); err != nil {
