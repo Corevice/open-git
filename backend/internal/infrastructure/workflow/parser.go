@@ -37,8 +37,12 @@ type Job struct {
 	Env            map[string]string `yaml:"env"`
 	Outputs        map[string]string `yaml:"outputs"`
 	TimeoutMinutes int               `yaml:"timeout-minutes"`
-	Container      string            `yaml:"container"`
-	Services       map[string]string `yaml:"services"`
+	// Container and Services accept any shape GitHub allows (a scalar image or a
+	// full mapping with image/env/ports/options). They are captured but not yet
+	// executed; keeping them as raw nodes stops otherwise-valid real workflows
+	// from failing to parse (and therefore never triggering).
+	Container yaml.Node `yaml:"container"`
+	Services  yaml.Node `yaml:"services"`
 }
 
 type StrategyConfig struct {

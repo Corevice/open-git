@@ -50,6 +50,53 @@ jobs:
 	}
 }
 
+// TestParseWorkflowWithServicesAndContainer guards that real-world workflows
+// using `services:` (a map of objects) and a map-form `container:` parse
+// successfully. These fields aren't executed, but rejecting them made valid
+// workflows fail to parse and therefore never trigger.
+func TestParseWorkflowWithServicesAndContainer(t *testing.T) {
+	yamlSrc := []byte(`name: CI
+on: [push]
+jobs:
+  test:
+    container:
+      image: node:20
+      env:
+        NODE_ENV: test
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready"
+    steps:
+      - run: echo hi
+`)
+	wf, err := ParseWorkflow(yamlSrc)
+	if err != nil {
+		t.Fatalf("ParseWorkflow rejected services/container workflow: %v", err)
+	}
+	if _, ok := wf.Jobs["test"]; !ok {
+		t.Fatal("expected job 'test'")
+	}
+
+	ir, diags, ferr := ParseWorkflowFull(yamlSrc)
+	if ferr != nil {
+		t.Fatalf("ParseWorkflowFull error: %v", ferr)
+	}
+	for _, d := range diags {
+		if d.Severity == "error" {
+			t.Fatalf("unexpected parse error diagnostic: %s", d.Message)
+		}
+	}
+	if ir == nil || len(ir.Jobs) != 1 {
+		t.Fatalf("expected 1 job in IR, got %v", ir)
+	}
+}
+
 func TestParseInvalidYAML(t *testing.T) {
 	yamlSrc := []byte("name: CI\njobs:\n  build:\n    steps: [\n      - run: echo ok\n")
 
