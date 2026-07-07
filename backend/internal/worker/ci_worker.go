@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +66,10 @@ const (
 
 	jobLogStatusSuccess = "success"
 	jobLogStatusFailure = "failure"
+
+	jobResultSuccess = "success"
+	jobResultFailure = "failure"
+	jobResultSkipped = "skipped"
 )
 
 var (
@@ -179,10 +184,20 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 		return fmt.Errorf("set status in_progress: %w", err)
 	}
 
-	wf, err := workflow.ParseWorkflow(payload.WorkflowYAML)
-	if err != nil {
-		w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, err.Error())
-		return fmt.Errorf("parse workflow: %w: %w", err, asynq.SkipRetry)
+	ir, diags, parseErr := workflow.ParseWorkflowFull(payload.WorkflowYAML)
+	if parseErr != nil {
+		w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, parseErr.Error())
+		return fmt.Errorf("parse workflow: %w: %w", parseErr, asynq.SkipRetry)
+	}
+	for _, d := range diags {
+		if d.Severity == "error" {
+			w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, d.Message)
+			return fmt.Errorf("invalid workflow: %s: %w", d.Message, asynq.SkipRetry)
+		}
+	}
+	if ir == nil || len(ir.Jobs) == 0 {
+		w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, "workflow has no jobs")
+		return fmt.Errorf("workflow has no jobs: %w", asynq.SkipRetry)
 	}
 
 	secretEnv, secretValues, err := w.loadSecrets(ctx, payload.RepositoryID)
@@ -205,39 +220,52 @@ func (w *CIWorker) HandleCIRun(ctx context.Context, task *asynq.Task) error {
 		streamRunner = w.defaultStreamingCommandRunner
 	}
 
+	// Identifiers are parsed once; a malformed id fails the whole run.
+	var runUUID, repoUUID, orgUUID uuid.UUID
+	if w.jobRepo != nil {
+		var perr error
+		if runUUID, perr = uuid.Parse(payload.WorkflowRunID); perr != nil {
+			w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, perr.Error())
+			return fmt.Errorf("parse workflow run id: %w: %w", perr, asynq.SkipRetry)
+		}
+		if repoUUID, perr = uuid.Parse(payload.RepositoryID); perr != nil {
+			w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, perr.Error())
+			return fmt.Errorf("parse repository id: %w: %w", perr, asynq.SkipRetry)
+		}
+		if orgUUID, perr = uuid.Parse(payload.OrganizationID); perr != nil {
+			w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, perr.Error())
+			return fmt.Errorf("parse organization id: %w: %w", perr, asynq.SkipRetry)
+		}
+	}
+
 	logBuf := &strings.Builder{}
 	conclusion := ciConclusionSuccess
 	jobLogStatus := make(map[string]string)
 	jobLineCounts := make(map[string]int64)
 	jobIDs := make(map[string]string)
+	jobResults := make(map[string]string) // jobName -> success | failure | skipped
 
-runLoop:
-	for jobName, job := range wf.Jobs {
+	// Run jobs in dependency (topological) order so `needs` is honored. On a
+	// broken DAG (already reported as a diagnostic error above) Order may be
+	// short; fall back to a stable order defensively.
+	order := ir.DAG.Order
+	if len(order) < len(ir.Jobs) {
+		order = sortedJobNames(ir.Jobs)
+	}
+
+	for _, jobName := range order {
+		job := ir.Jobs[jobName]
+
 		var jobUUID uuid.UUID
 		if w.jobRepo != nil {
 			jobUUID = int64CompatibleUUID()
 			jobIDs[jobName] = jobUUID.String()
 			now := time.Now().UTC()
-			runID, parseErr := uuid.Parse(payload.WorkflowRunID)
-			if parseErr != nil {
-				w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, parseErr.Error())
-				return fmt.Errorf("parse workflow run id: %w: %w", parseErr, asynq.SkipRetry)
-			}
-			repoID, parseErr := uuid.Parse(payload.RepositoryID)
-			if parseErr != nil {
-				w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, parseErr.Error())
-				return fmt.Errorf("parse repository id: %w: %w", parseErr, asynq.SkipRetry)
-			}
-			orgID, parseErr := uuid.Parse(payload.OrganizationID)
-			if parseErr != nil {
-				w.markRun(ctx, payload.WorkflowRunID, ciStatusFailed, ciConclusionFailure, parseErr.Error())
-				return fmt.Errorf("parse organization id: %w: %w", parseErr, asynq.SkipRetry)
-			}
 			wfJob := &entity.WorkflowJob{
 				ID:             jobUUID,
-				WorkflowRunID:  &runID,
-				OrganizationID: orgID,
-				RepositoryID:   repoID,
+				WorkflowRunID:  &runUUID,
+				OrganizationID: orgUUID,
+				RepositoryID:   repoUUID,
 				Name:           jobName,
 				Status:         entity.WorkflowJobStatusInProgress,
 				StartedAt:      &now,
@@ -247,12 +275,31 @@ runLoop:
 				return fmt.Errorf("create workflow job: %w", createErr)
 			}
 		}
+
+		// A job whose dependencies did not all succeed is skipped, like GitHub
+		// Actions. The dependency's own failure already set the run conclusion,
+		// so a skip adds no new failure — but independent jobs still run.
+		if dep, unmet := firstUnsatisfiedNeed(job.Needs, jobResults); unmet {
+			jobResults[jobName] = jobResultSkipped
+			jobLogStatus[jobName] = jobResultSkipped
+			fmt.Fprintf(logBuf, "[job=%s] skipped: dependency %q did not succeed\n", jobName, dep)
+			if w.jobRepo != nil && jobUUID != uuid.Nil {
+				_ = w.jobRepo.Complete(ctx, jobUUID, entity.WorkflowJobConclusionSkipped, time.Now().UTC())
+			}
+			continue
+		}
+
 		jobLogStatus[jobName] = jobLogStatusSuccess
+		jobFailed := false
 
 		for i, step := range job.Steps {
 			if step.Run == "" {
+				// `uses` steps are not executed yet; skip without failing.
 				continue
 			}
+			// Env precedence (low to high): workflow env, job env, step env,
+			// then decrypted secrets injected by name.
+			stepEnv := buildStepEnv([]map[string]string{ir.Env, job.Env, step.Env}, secretEnv)
 			stepCtx, cancel := context.WithTimeout(ctx, w.stepWait)
 
 			if useStreaming {
@@ -260,7 +307,7 @@ runLoop:
 				if jobIDStr == "" {
 					jobIDStr = jobName
 				}
-				runErr := streamRunner(stepCtx, workdir, secretEnv, step.Run, i, func(stream, line string) {
+				runErr := streamRunner(stepCtx, workdir, stepEnv, step.Run, i, func(stream, line string) {
 					jobLineCounts[jobName]++
 					lineNum := jobLineCounts[jobName]
 					masked := maskSecrets(line, secretValues)
@@ -287,41 +334,41 @@ runLoop:
 				cancel()
 
 				if runErr != nil {
-					conclusion = ciConclusionFailure
-					jobLogStatus[jobName] = jobLogStatusFailure
+					jobFailed = true
 					fmt.Fprintf(logBuf, "[job=%s step=%d] error: %s\n", jobName, i, maskSecrets(runErr.Error(), secretValues))
 					break
 				}
 			} else {
-				out, runErr := w.runStep(stepCtx, workdir, secretEnv, step.Run)
+				out, runErr := w.runStep(stepCtx, workdir, stepEnv, step.Run)
 				cancel()
 
 				masked := maskSecrets(string(out), secretValues)
 				fmt.Fprintf(logBuf, "[job=%s step=%d name=%s]\n%s\n", jobName, i, step.Name, masked)
 
 				if runErr != nil {
-					conclusion = ciConclusionFailure
-					jobLogStatus[jobName] = jobLogStatusFailure
+					jobFailed = true
 					fmt.Fprintf(logBuf, "[job=%s step=%d] error: %s\n", jobName, i, maskSecrets(runErr.Error(), secretValues))
 					break
 				}
 			}
 		}
 
+		if jobFailed {
+			jobResults[jobName] = jobResultFailure
+			jobLogStatus[jobName] = jobLogStatusFailure
+			conclusion = ciConclusionFailure
+		} else {
+			jobResults[jobName] = jobResultSuccess
+		}
+
 		// Record the job's terminal state so run detail pages show per-job
 		// results rather than jobs stuck in_progress forever.
 		if w.jobRepo != nil && jobUUID != uuid.Nil {
 			jobConclusion := entity.WorkflowJobConclusionSuccess
-			if jobLogStatus[jobName] == jobLogStatusFailure {
+			if jobFailed {
 				jobConclusion = entity.WorkflowJobConclusionFailure
 			}
 			_ = w.jobRepo.Complete(ctx, jobUUID, jobConclusion, time.Now().UTC())
-		}
-
-		// Fail fast: a failed job stops the remaining jobs, like the old
-		// labelled break did.
-		if jobLogStatus[jobName] == jobLogStatusFailure {
-			break runLoop
 		}
 	}
 
@@ -348,6 +395,51 @@ runLoop:
 
 	w.markRun(ctx, payload.WorkflowRunID, finalStatus, conclusion, logBuf.String())
 	return nil
+}
+
+// sortedJobNames returns job names in a stable order (used only as a fallback
+// when the topological order is unavailable).
+func sortedJobNames(jobs map[string]workflow.IRJob) []string {
+	names := make([]string, 0, len(jobs))
+	for name := range jobs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// firstUnsatisfiedNeed returns the first dependency that has not completed
+// successfully, indicating the dependent job must be skipped.
+func firstUnsatisfiedNeed(needs []string, results map[string]string) (string, bool) {
+	for _, need := range needs {
+		if results[need] != jobResultSuccess {
+			return need, true
+		}
+	}
+	return "", false
+}
+
+// buildStepEnv flattens the env layers (lowest precedence first) and the
+// decrypted secrets (highest precedence) into a deduplicated, sorted KEY=VALUE
+// slice so the executed step sees a single unambiguous value per key.
+func buildStepEnv(layers []map[string]string, secretEnv []string) []string {
+	m := make(map[string]string)
+	for _, layer := range layers {
+		for k, v := range layer {
+			m[k] = v
+		}
+	}
+	for _, kv := range secretEnv {
+		if eq := strings.IndexByte(kv, '='); eq >= 0 {
+			m[kv[:eq]] = kv[eq+1:]
+		}
+	}
+	out := make([]string, 0, len(m))
+	for k, v := range m {
+		out = append(out, k+"="+v)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (w *CIWorker) loadPlanTier(ctx context.Context, orgID string) (string, error) {

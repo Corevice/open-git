@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hibiken/asynq"
@@ -239,6 +240,161 @@ jobs:
 	task := asynq.NewTask(TypeCIRun, payload)
 	if err := worker.HandleCIRun(ctx, task); err != nil {
 		t.Fatalf("HandleCIRun unexpected error: %v", err)
+	}
+}
+
+// runWorkflowRecording runs a workflow with a command runner that records the
+// scripts it executes (in order) and fails any script containing "FAIL". It
+// returns the executed scripts and the run's final conclusion.
+func runWorkflowRecording(t *testing.T, yamlSrc string) ([]string, string) {
+	t.Helper()
+	db := newCITestDB(t)
+	ctx := context.Background()
+	orgID, repoID, runID := "org-x", "repo-x", "run-x"
+	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`, orgID, "acme", "Acme", planTierPro)
+	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`, repoID, orgID, "widgets")
+	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`, runID, orgID, repoID, "ci.yml", ciStatusQueued)
+
+	var mu sync.Mutex
+	var scripts []string
+	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, _ []string, script string) ([]byte, error) {
+		mu.Lock()
+		scripts = append(scripts, script)
+		mu.Unlock()
+		if strings.Contains(script, "FAIL") {
+			return []byte("boom\n"), errors.New("exit status 1")
+		}
+		return []byte("ok\n"), nil
+	})
+
+	payload, _ := json.Marshal(CIRunPayload{WorkflowRunID: runID, RepositoryID: repoID, OrganizationID: orgID, WorkflowYAML: []byte(yamlSrc)})
+	if err := worker.HandleCIRun(ctx, asynq.NewTask(TypeCIRun, payload)); err != nil {
+		t.Fatalf("HandleCIRun: %v", err)
+	}
+	var conclusion sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT conclusion FROM workflow_runs WHERE id = ?`, runID).Scan(&conclusion); err != nil {
+		t.Fatalf("query conclusion: %v", err)
+	}
+	// With no log repository wired, markRun stashes step logs after the enum
+	// value in the conclusion column; the enum is the first line.
+	return scripts, strings.SplitN(conclusion.String, "\n", 2)[0]
+}
+
+func TestCIEnvPrecedence(t *testing.T) {
+	db := newCITestDB(t)
+	ctx := context.Background()
+	orgID, repoID, runID := "org-e", "repo-e", "run-e"
+	mustExec(t, db, `INSERT INTO organizations (id, login, name, plan_tier) VALUES (?, ?, ?, ?)`, orgID, "acme", "Acme", planTierPro)
+	mustExec(t, db, `INSERT INTO repositories (id, organization_id, name) VALUES (?, ?, ?)`, repoID, orgID, "widgets")
+	mustExec(t, db, `INSERT INTO workflow_runs (id, organization_id, repository_id, workflow, status) VALUES (?, ?, ?, ?, ?)`, runID, orgID, repoID, "ci.yml", ciStatusQueued)
+
+	yamlSrc := `name: CI
+on: push
+env:
+  L: workflow
+  W_ONLY: w
+jobs:
+  build:
+    env:
+      L: job
+      J_ONLY: j
+    steps:
+      - name: check
+        run: echo hi
+        env:
+          L: step
+          S_ONLY: s
+`
+	var gotEnv []string
+	worker := NewCIWorker(db).WithCommandRunner(func(_ context.Context, _ string, env []string, _ string) ([]byte, error) {
+		gotEnv = env
+		return []byte("ok\n"), nil
+	})
+	payload, _ := json.Marshal(CIRunPayload{WorkflowRunID: runID, RepositoryID: repoID, OrganizationID: orgID, WorkflowYAML: []byte(yamlSrc)})
+	if err := worker.HandleCIRun(ctx, asynq.NewTask(TypeCIRun, payload)); err != nil {
+		t.Fatalf("HandleCIRun: %v", err)
+	}
+
+	want := map[string]string{"L": "step", "W_ONLY": "w", "J_ONLY": "j", "S_ONLY": "s"}
+	got := map[string]string{}
+	for _, kv := range gotEnv {
+		if eq := strings.IndexByte(kv, '='); eq >= 0 {
+			got[kv[:eq]] = kv[eq+1:]
+		}
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("env %s = %q, want %q (full env: %v)", k, got[k], v, gotEnv)
+		}
+	}
+}
+
+func TestCINeedsSkipsDependentOnFailure(t *testing.T) {
+	scripts, conclusion := runWorkflowRecording(t, `name: CI
+on: push
+jobs:
+  a:
+    steps:
+      - run: echo FAIL
+  b:
+    needs: [a]
+    steps:
+      - run: echo B_RAN
+`)
+	joined := strings.Join(scripts, "\n")
+	if strings.Contains(joined, "B_RAN") {
+		t.Errorf("dependent job b ran despite needs=[a] failing; scripts=%v", scripts)
+	}
+	if conclusion != ciConclusionFailure {
+		t.Errorf("run conclusion = %q, want %q", conclusion, ciConclusionFailure)
+	}
+}
+
+func TestCIIndependentJobRunsDespiteOtherFailure(t *testing.T) {
+	scripts, conclusion := runWorkflowRecording(t, `name: CI
+on: push
+jobs:
+  a:
+    steps:
+      - run: echo FAIL
+  b:
+    steps:
+      - run: echo B_RAN
+`)
+	if !strings.Contains(strings.Join(scripts, "\n"), "B_RAN") {
+		t.Errorf("independent job b was not run after job a failed; scripts=%v", scripts)
+	}
+	if conclusion != ciConclusionFailure {
+		t.Errorf("run conclusion = %q, want %q", conclusion, ciConclusionFailure)
+	}
+}
+
+func TestCINeedsRunsInDependencyOrder(t *testing.T) {
+	scripts, conclusion := runWorkflowRecording(t, `name: CI
+on: push
+jobs:
+  zeta:
+    needs: [alpha]
+    steps:
+      - run: echo ZETA
+  alpha:
+    steps:
+      - run: echo ALPHA
+`)
+	if conclusion != ciConclusionSuccess {
+		t.Fatalf("conclusion = %q, want success; scripts=%v", conclusion, scripts)
+	}
+	var alphaIdx, zetaIdx = -1, -1
+	for i, s := range scripts {
+		if strings.Contains(s, "ALPHA") {
+			alphaIdx = i
+		}
+		if strings.Contains(s, "ZETA") {
+			zetaIdx = i
+		}
+	}
+	if alphaIdx < 0 || zetaIdx < 0 || alphaIdx > zetaIdx {
+		t.Errorf("expected alpha (%d) to run before zeta (%d); scripts=%v", alphaIdx, zetaIdx, scripts)
 	}
 }
 
