@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -93,6 +94,10 @@ type CIRunPayload struct {
 	Workflow   string `json:"workflow,omitempty"`
 	RunNumber  int    `json:"run_number,omitempty"`
 	Repository string `json:"repository,omitempty"`
+
+	// RepoGitPath is the on-disk bare repository, used by the built-in
+	// actions/checkout to populate a job's workspace. Empty disables checkout.
+	RepoGitPath string `json:"repo_git_path,omitempty"`
 }
 
 // SecretDecrypter decrypts a stored secret value. Replace with a real KMS-backed
@@ -108,11 +113,16 @@ type CommandRunner func(ctx context.Context, workdir string, env []string, scrip
 // for each output line.
 type StreamingCommandRunner func(ctx context.Context, workdir string, env []string, script string, step int, sink func(stream, line string)) error
 
+// CheckoutFunc populates dest with the repository at gitPath checked out at ref.
+// Implements the built-in actions/checkout; injectable for tests.
+type CheckoutFunc func(ctx context.Context, gitPath, ref, dest string) error
+
 type CIWorker struct {
 	db            *sql.DB
 	decrypt       SecretDecrypter
 	runStep       CommandRunner
 	runStepStream StreamingCommandRunner
+	checkout      CheckoutFunc
 	stepWait      time.Duration
 	logRepo       domainrepo.IJobLogRepository
 	jobRepo       domainrepo.IWorkflowJobRepository
@@ -129,7 +139,41 @@ func NewCIWorker(db *sql.DB) *CIWorker {
 	}
 	w.runStep = w.defaultCommandRunner
 	w.runStepStream = w.defaultStreamingCommandRunner
+	w.checkout = defaultCheckout
 	return w
+}
+
+// WithCheckout overrides the actions/checkout implementation (used in tests).
+func (w *CIWorker) WithCheckout(fn CheckoutFunc) *CIWorker {
+	w.checkout = fn
+	return w
+}
+
+// defaultCheckout clones the bare repository into dest and checks out ref using
+// the git binary.
+func defaultCheckout(ctx context.Context, gitPath, ref, dest string) error {
+	if gitPath == "" {
+		return fmt.Errorf("no repository path configured for checkout")
+	}
+	if out, err := exec.CommandContext(ctx, "git", "clone", "--quiet", gitPath, dest).CombinedOutput(); err != nil {
+		return fmt.Errorf("git clone: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	if ref != "" {
+		if out, err := exec.CommandContext(ctx, "git", "-C", dest, "checkout", "--quiet", ref).CombinedOutput(); err != nil {
+			return fmt.Errorf("git checkout %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
+}
+
+// isCheckoutAction reports whether a `uses:` reference is actions/checkout
+// (any version).
+func isCheckoutAction(uses string) bool {
+	ref := uses
+	if at := strings.LastIndex(ref, "@"); at >= 0 {
+		ref = ref[:at]
+	}
+	return strings.EqualFold(strings.TrimSpace(ref), "actions/checkout")
 }
 
 // WithSandbox selects how steps are isolated: SandboxModeNone (direct on host,
@@ -432,6 +476,14 @@ type runJobSpec struct {
 func (w *CIWorker) runJobSteps(ctx context.Context, s runJobSpec) bool {
 	jobFailed := false
 
+	// Each job instance gets its own workspace under the run's temp dir, so
+	// actions/checkout populates a clean tree and parallel matrix instances
+	// don't clobber each other.
+	instWorkdir := s.workdir
+	if dir, err := os.MkdirTemp(s.workdir, "job-*"); err == nil {
+		instWorkdir = dir
+	}
+
 	for i, step := range s.job.Steps {
 		// Merge env (workflow < job < step) and expose it, with the
 		// github/runner/secrets/matrix contexts, for expression evaluation.
@@ -471,8 +523,13 @@ func (w *CIWorker) runJobSteps(ctx context.Context, s runJobSpec) bool {
 			continue
 		}
 
+		if step.Uses != "" {
+			if w.runUsesStep(ctx, s, step, i, instWorkdir) {
+				jobFailed = true
+			}
+			continue
+		}
 		if step.Run == "" {
-			// `uses` steps are not executed yet; skip without failing.
 			continue
 		}
 
@@ -481,7 +538,7 @@ func (w *CIWorker) runJobSteps(ctx context.Context, s runJobSpec) bool {
 		stepCtx, cancel := context.WithTimeout(ctx, w.stepWait)
 
 		if s.useStreaming {
-			runErr := s.streamRunner(stepCtx, s.workdir, stepEnv, script, i, func(stream, line string) {
+			runErr := s.streamRunner(stepCtx, instWorkdir, stepEnv, script, i, func(stream, line string) {
 				s.jobLineCounts[s.instanceName]++
 				lineNum := s.jobLineCounts[s.instanceName]
 				masked := maskSecrets(line, s.secretValues)
@@ -512,7 +569,7 @@ func (w *CIWorker) runJobSteps(ctx context.Context, s runJobSpec) bool {
 				fmt.Fprintf(s.logBuf, "[job=%s step=%d] error: %s\n", s.instanceName, i, maskSecrets(runErr.Error(), s.secretValues))
 			}
 		} else {
-			out, runErr := w.runStep(stepCtx, s.workdir, stepEnv, script)
+			out, runErr := w.runStep(stepCtx, instWorkdir, stepEnv, script)
 			cancel()
 
 			masked := maskSecrets(string(out), s.secretValues)
@@ -526,6 +583,55 @@ func (w *CIWorker) runJobSteps(ctx context.Context, s runJobSpec) bool {
 	}
 
 	return jobFailed
+}
+
+// runUsesStep handles a `uses:` step. The built-in actions/checkout populates
+// the workspace from the run's commit; any other action is logged as
+// unsupported and skipped (not failed), so workflows that reference marketplace
+// actions still make progress. Returns true only if a supported action failed.
+func (w *CIWorker) runUsesStep(ctx context.Context, s runJobSpec, step workflow.IRStep, i int, workdir string) bool {
+	if isCheckoutAction(step.Uses) {
+		ref := s.payload.HeadSHA
+		if ref == "" {
+			ref = s.payload.HeadBranch
+		}
+		w.emitUsesLine(ctx, s, i, fmt.Sprintf("Run actions/checkout (%s)", ref))
+		if err := w.checkout(ctx, s.payload.RepoGitPath, ref, workdir); err != nil {
+			w.emitUsesLine(ctx, s, i, "checkout failed: "+err.Error())
+			return true
+		}
+		return false
+	}
+	w.emitUsesLine(ctx, s, i, fmt.Sprintf("Skipping unsupported action %q (only actions/checkout is built in)", step.Uses))
+	return false
+}
+
+// emitUsesLine records a synthetic log line for a `uses:` step so the web UI
+// shows checkout/unsupported-action notes, mirroring how run-step output is
+// streamed. Falls back to the buffered log when no log repository is wired.
+func (w *CIWorker) emitUsesLine(ctx context.Context, s runJobSpec, stepIdx int, text string) {
+	fmt.Fprintf(s.logBuf, "[job=%s step=%d name=%s]\n%s\n", s.instanceName, stepIdx, "", text)
+	if w.logRepo == nil {
+		return
+	}
+	s.jobLineCounts[s.instanceName]++
+	line := &entity.JobLogLine{
+		OrganizationID: s.payload.OrganizationID,
+		RepositoryID:   s.payload.RepositoryID,
+		RunID:          s.payload.WorkflowRunID,
+		JobID:          s.jobIDStr,
+		StepIndex:      stepIdx,
+		LineNumber:     s.jobLineCounts[s.instanceName],
+		Stream:         entity.LogStreamStdout,
+		Text:           text,
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := w.logRepo.AppendLines(ctx, []*entity.JobLogLine{line}); err != nil {
+		return
+	}
+	if w.logPublisher != nil {
+		_ = w.logPublisher.Publish(ctx, line)
+	}
 }
 
 // sortedJobNames returns job names in a stable order (used only as a fallback
