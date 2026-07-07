@@ -1583,12 +1583,16 @@ func (e *actionSecretEncryptor) KeyID() string {
 }
 
 func (e *actionSecretEncryptor) PublicKeyBase64() string {
-	// Placeholder public key for GitHub API shape compatibility.
-	return "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	// Real curve25519 public key derived from the server secret; clients seal
+	// secret values to it (GitHub's libsodium sealed-box format).
+	return e.SecretEncryptor.PublicKeyBase64()
 }
 
 func (e *actionSecretEncryptor) DecryptSealedBox(ciphertext []byte) ([]byte, error) {
-	return e.Decrypt(ciphertext)
+	// The client sends a sealed box (anonymous box) encrypted to
+	// PublicKeyBase64; open it here. Storage at rest still uses symmetric
+	// Encrypt/Decrypt.
+	return e.SecretEncryptor.OpenSealedBox(ciphertext)
 }
 
 func httpStatusToCode(status int) string {

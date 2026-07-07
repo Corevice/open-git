@@ -39,11 +39,11 @@ type AuditLogWriter interface {
 }
 
 type UpsertActionSecretInput struct {
-	ActorID          uuid.UUID
-	Name             string
-	PlaintextValue   string
-	Visibility       SecretVisibility
-	SelectedRepoIDs  []uuid.UUID
+	ActorID         uuid.UUID
+	Name            string
+	PlaintextValue  string
+	Visibility      SecretVisibility
+	SelectedRepoIDs []uuid.UUID
 }
 
 type UpsertActionSecretUsecase struct {
@@ -80,16 +80,15 @@ func (uc *UpsertActionSecretUsecase) Execute(
 		return false, fmt.Errorf("%w: secret value exceeds maximum size", apperror.ErrValidation)
 	}
 
-	encrypted, err := uc.enc.Encrypt([]byte(input.PlaintextValue))
-	if err != nil {
-		return false, err
-	}
-
+	// The repository is the single at-rest encryption boundary: it encrypts on
+	// write and decrypts on read. Pass the plaintext through here (encrypting it
+	// again in this layer double-encrypts it, so the worker's single decrypt
+	// yields ciphertext, not the secret).
 	secret := &entity.ActionSecret{
 		ID:             uuid.New(),
 		OrganizationID: orgID,
 		Name:           input.Name,
-		EncryptedValue: string(encrypted),
+		EncryptedValue: input.PlaintextValue,
 		KeyID:          uc.enc.KeyID(),
 		Visibility:     string(input.Visibility),
 	}
